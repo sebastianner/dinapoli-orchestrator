@@ -1,0 +1,41 @@
+Dinapoli pizza
+
+- Dine-in, delivery, take away
+- number of dine-in tables 9, if a table is taken by customers that specified 
+  the table should be busy if customers are eating but they should be able to receive new
+  orders for the same customer. The table is freed until the order is manually completed.
+- Menu:
+	-starters (appetizer)
+	-pizzas (size - slices - max flavors)
+		slice - 1 - 1
+		personal - 6 - 2
+		small - 8 - 2
+		medium - 10 - 3
+		large - 12 - 4
+		xlarge - 14 - 4
+	-pasta
+	-lasagnas
+	-Pantalone
+	-Gratinados
+	-drinks
+	-desserts
+	-promotions
+
+- A SQLite DB should be created using the MMD schema.
+
+- The orders should arrive from the client using websockets in JSON format following the types in the types file.
+- There should be a websocket server for getting the orders.
+- The orders have a status that could be PENDING, PRINTING, ACTIVE, COMPLETED.
+- There must be a persistent queue that works with the order status.
+  The q should have a recovery strategy in case there is a blackout or errors. If an order is left in
+  print the printing should happen again. After printed, the order should be ACTIVE and once marked completed COMPLETED.
+
+- API specs:
+  there should be an endpoint exposed for getting all the menu from the and return it in json following the menu types.
+  There should be a complete order endpoint to mark orders completed.
+  
+- The payment process module should process the total price of the order which is in COP colombian currency.
+
+- The billing module should create a basic html file for the bill and then send it to print it. you can make the bill with a very basic design only text for now.
+
+  

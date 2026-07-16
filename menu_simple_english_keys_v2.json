@@ -1,0 +1,561 @@
+{
+  "menu": [
+    {
+      "id": "pizzas",
+      "name": "Pizzas",
+      "groups": [
+        {
+          "id": "classic",
+          "name": "Clásicas",
+          "sizes": [
+            {
+              "id": "slice",
+              "name": "Slice",
+              "slices": 1,
+              "maxFlavors": 1
+            },
+            {
+              "id": "personal",
+              "name": "Personal",
+              "slices": 6,
+              "maxFlavors": 2,
+              "price": 22000
+            },
+            {
+              "id": "small",
+              "name": "Pequeña",
+              "slices": 8,
+              "maxFlavors": 2,
+              "price": 34000
+            },
+            {
+              "id": "medium",
+              "name": "Mediana",
+              "slices": 10,
+              "maxFlavors": 3,
+              "price": 52000
+            },
+            {
+              "id": "large",
+              "name": "Grande",
+              "slices": 12,
+              "maxFlavors": 4,
+              "price": 66000
+            },
+            {
+              "id": "xlarge",
+              "name": "XL",
+              "slices": 14,
+              "maxFlavors": 4,
+              "price": 80000
+            }
+          ],
+          "flavors": [
+            {
+              "id": "napolitana",
+              "name": "Napolitana",
+              "description": "Tomate y orégano"
+            },
+            {
+              "id": "ham_cheese",
+              "name": "Jamón Queso",
+              "description": "Jamón y queso"
+            },
+            {
+              "id": "hawaiian",
+              "name": "Hawaiana",
+              "description": "Jamón y piña"
+            },
+            {
+              "id": "chicken_mushroom",
+              "name": "Pollo con Champiñón",
+              "description": "Pollo con champiñones"
+            },
+            {
+              "id": "ham_mushroom",
+              "name": "Jamón Champiñones",
+              "description": "Jamón con champiñones"
+            },
+            {
+              "id": "vegetarian",
+              "name": "Vegetariana",
+              "description": "Maíz, aceituna, cebolla y champiñón"
+            },
+            {
+              "id": "margherita",
+              "name": "Margarita",
+              "description": "Tomate picado, albahaca y aceite de oliva"
+            }
+          ]
+        },
+        {
+          "id": "special",
+          "name": "Especiales",
+          "sizes": [
+            {
+              "id": "slice",
+              "name": "Slice",
+              "slices": 1,
+              "maxFlavors": 1
+            },
+            {
+              "id": "personal",
+              "name": "Personal",
+              "slices": 6,
+              "maxFlavors": 2,
+              "price": 24000
+            },
+            {
+              "id": "small",
+              "name": "Pequeña",
+              "slices": 8,
+              "maxFlavors": 2,
+              "price": 36000
+            },
+            {
+              "id": "medium",
+              "name": "Mediana",
+              "slices": 10,
+              "maxFlavors": 3,
+              "price": 55000
+            },
+            {
+              "id": "large",
+              "name": "Grande",
+              "slices": 12,
+              "maxFlavors": 4,
+              "price": 70000
+            },
+            {
+              "id": "xlarge",
+              "name": "XL",
+              "slices": 14,
+              "maxFlavors": 4,
+              "price": 86000
+            }
+          ],
+          "flavors": [
+            {
+              "id": "tricaccio",
+              "name": "Tricaccio",
+              "description": "Queso azul, mozzarella y parmesano"
+            },
+            {
+              "id": "tropical",
+              "name": "Tropical",
+              "description": "Cereza, durazno y piña"
+            },
+            {
+              "id": "bbq",
+              "name": "BBQ",
+              "description": "Costilla ahumada, platanitos y salsa BBQ"
+            },
+            {
+              "id": "bella_napoli",
+              "name": "Bella Nápoli",
+              "description": "Cábano, salame, jamón, cebolla, maíz, champiñón y piña"
+            },
+            {
+              "id": "pollo_bbq",
+              "name": "Pollo BBQ",
+              "description": "Pollo, tocineta, tomate, cebolla y salsa BBQ"
+            },
+            {
+              "id": "crocante",
+              "name": "Crocante",
+              "description": "Tomate picado, chicharrón y guacamole"
+            },
+            {
+              "id": "napoli",
+              "name": "Nápoli",
+              "description": "Boloñesa, pollo, tocineta, cebolla, tomate y maíz"
+            },
+            {
+              "id": "pepperoni",
+              "name": "Pepperoni",
+              "description": "Pepperoni y queso"
+            },
+            {
+              "id": "granjas",
+              "name": "Granjas",
+              "description": "Pollo, tocineta y maíz"
+            },
+            {
+              "id": "texas",
+              "name": "Texas",
+              "description": "Boloñesa, fríjoles, tocineta, jalapeño, orégano, tomate y parmesano"
+            },
+            {
+              "id": "especial_di_napoli",
+              "name": "Especial Di Napoli",
+              "description": "Salame, cábano, pimentón, cebolla, champiñón, maíz y aceitunas"
+            },
+            {
+              "id": "curramba",
+              "name": "Curramba",
+              "description": "Maduro, tocineta y parmesano"
+            },
+            {
+              "id": "tospi",
+              "name": "Tospi",
+              "description": "Tocineta y piña"
+            },
+            {
+              "id": "romana",
+              "name": "Romana",
+              "description": "Pollo, tomate y tocineta"
+            },
+            {
+              "id": "paraiso",
+              "name": "Paraíso",
+              "description": "Tomate picado, tocineta, maíz, albahaca y aceite de oliva"
+            },
+            {
+              "id": "atarraya",
+              "name": "Atarraya",
+              "description": "Camarón, palmitos de cangrejo, salsa al curry y crema de leche"
+            },
+            {
+              "id": "jasaca",
+              "name": "Jasaca",
+              "description": "Jamón, salame y cábano"
+            },
+            {
+              "id": "venecia",
+              "name": "Venecia",
+              "description": "Atún, tomate, aceitunas y cebolla"
+            },
+            {
+              "id": "hawaii_bbq",
+              "name": "Hawaii BBQ",
+              "description": "Pollo, piña, tocineta y salsa BBQ"
+            },
+            {
+              "id": "chomaiz",
+              "name": "Chomaíz",
+              "description": "Chorizo, maíz y cebolla"
+            },
+            {
+              "id": "portobello",
+              "name": "Portobello",
+              "description": "Pepperoni, champiñón y aceitunas"
+            },
+            {
+              "id": "madrilena",
+              "name": "Madrileña",
+              "description": "Jamón serrano, rúgula y mostaza antigüa"
+            },
+            {
+              "id": "campesina",
+              "name": "Campesina",
+              "description": "Carne desmechada, fríjoles con chile, sour cream y maíz"
+            },
+            {
+              "id": "colombiana",
+              "name": "Colombiana",
+              "description": "Maduro, maíz, pollo y parmesano"
+            },
+            {
+              "id": "ardiente",
+              "name": "Ardiente",
+              "description": "Chile, carne desmechada, tocineta, pimentón y takis"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "appetizers",
+      "name": "Entradas",
+      "products": [
+        {
+          "id": "fancaccia",
+          "name": "Fancaccia",
+          "price": 11000
+        },
+        {
+          "id": "tomato_cream",
+          "name": "Crema de Tomate",
+          "price": 15000
+        },
+        {
+          "id": "gratin_tomatoes",
+          "name": "Tomates al Gratín",
+          "price": 15000
+        },
+        {
+          "id": "garlic_bread",
+          "name": "Panes al Gratín",
+          "price": 10000
+        },
+        {
+          "id": "stuffed_mushrooms",
+          "name": "Champiñones Rellenos",
+          "price": 17000
+        }
+      ]
+    },
+    {
+      "id": "gratinados",
+      "name": "Gratinados",
+      "products": [
+        {
+          "id": "gratin",
+          "name": "Gratinado",
+          "price": 24000,
+          "pizzaFlavor": true
+        }
+      ]
+    },
+    {
+      "id": "calzones",
+      "name": "Pantalón",
+      "products": [
+        {
+          "id": "calzone",
+          "name": "Pantalón",
+          "sizes": [
+            {
+              "id": "small",
+              "name": "Pequeña",
+              "price": 26000
+            },
+            {
+              "id": "large",
+              "name": "Grande",
+              "price": 37000
+            }
+          ],
+          "pizzaFlavor": true
+        }
+      ]
+    },
+    {
+      "id": "pastas",
+      "name": "Pastas",
+      "products": [
+        {
+          "id": "alfredo",
+          "name": "Alfredo",
+          "price": 27000
+        },
+        {
+          "id": "carbonara",
+          "name": "Carbonara",
+          "price": 27000
+        },
+        {
+          "id": "mixta",
+          "name": "Mixta",
+          "price": 27000
+        },
+        {
+          "id": "three_meats",
+          "name": "Tres Carnes",
+          "price": 27000
+        },
+        {
+          "id": "bolognese",
+          "name": "Boloñesa",
+          "price": 27000
+        },
+        {
+          "id": "chicken",
+          "name": "Pollo",
+          "price": 27000
+        },
+        {
+          "id": "margherita",
+          "name": "Margarita",
+          "price": 27000
+        },
+        {
+          "id": "seafood",
+          "name": "Marinera",
+          "price": 30000
+        }
+      ]
+    },
+    {
+      "id": "lasagnas",
+      "name": "Lasañas",
+      "products": [
+        {
+          "id": "mixta",
+          "name": "Mixta",
+          "price": 27000
+        },
+        {
+          "id": "three_meats",
+          "name": "Tres Carnes",
+          "price": 27000
+        },
+        {
+          "id": "especial_di_napoli",
+          "name": "Especial Di Nápoli",
+          "price": 27000
+        },
+        {
+          "id": "vegetarian",
+          "name": "Vegetariana",
+          "price": 27000
+        },
+        {
+          "id": "chicken",
+          "name": "Pollo",
+          "price": 27000
+        },
+        {
+          "id": "bolognese",
+          "name": "Boloñesa",
+          "price": 27000
+        },
+        {
+          "id": "mamma_mia",
+          "name": "Mamma Mia",
+          "price": 28000
+        }
+      ]
+    },
+    {
+      "id": "drinks",
+      "name": "Bebidas",
+      "products": [
+        {
+          "id": "coca_cola_3l",
+          "name": "Coca-Cola 3L",
+          "price": 14000
+        },
+        {
+          "id": "soft_drink_1_5l",
+          "name": "Gaseosa 1.5L",
+          "price": 9000,
+          "options": [
+            "Coca-Cola",
+            "Premio",
+            "Quatro",
+            "Uva",
+            "Manzana",
+            "Colombiana",
+            "Pepsi"
+          ]
+        },
+        {
+          "id": "soft_drink",
+          "name": "Gaseosa Personal",
+          "price": 5000,
+          "options": [
+            "Coca-Cola",
+            "Premio",
+            "Quatro",
+            "Uva",
+            "Manzana",
+            "Colombiana",
+            "Pepsi",
+            "Agua"
+          ]
+        },
+        {
+          "id": "beer",
+          "name": "Cerveza",
+          "price": 6000,
+          "options": [
+            "Poker",
+            "Aguila Light",
+            "Club Colombia"
+          ]
+        },
+        {
+          "id": "juice",
+          "name": "Jugos",
+          "price": 8500,
+          "options": [
+            "Mango",
+            "Maracuyá",
+            "Fresa",
+            "Lulo",
+            "Guanábana",
+            "Mora",
+            "Maracumango",
+            "Manguala",
+            "Limango",
+            "Mandarina",
+            "Limonada",
+            "Lincoco",
+            "Frutos Rojos",
+            "Limonada Cerezada",
+            "Limonada de Mango Viche"
+          ]
+        },
+        {
+          "id": "milk",
+          "name": "Leche",
+          "price": 9500
+        },
+        {
+          "id": "italian_soda",
+          "name": "Sodas Italianas",
+          "price": 12000,
+          "options": [
+            "Frutos Rojos",
+            "Hierbabuena",
+            "Maracuyá",
+            "Piña",
+            "Lulo",
+            "Sandía"
+          ]
+        },
+        {
+          "id": "milkshake",
+          "name": "Malteadas",
+          "price": 12000,
+          "options": [
+            "Oreo",
+            "Maracuyá",
+            "Frutos Rojos",
+            "Fresa",
+            "Lulo",
+            "Café",
+            "Milo"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "desserts",
+      "name": "Postres",
+      "products": [
+        {
+          "id": "sweet_pizza",
+          "name": "Pizza Dulce",
+          "price": 23000
+        },
+        {
+          "id": "canastica",
+          "name": "Canastica",
+          "price": 16000
+        },
+        {
+          "id": "peach_melba",
+          "name": "Peach Melba",
+          "price": 14000
+        },
+        {
+          "id": "fruit_salad",
+          "name": "Ensalada de Frutas",
+          "price": 16000
+        },
+        {
+          "id": "strawberries_cream",
+          "name": "Fresas con Crema",
+          "price": 16000
+        },
+        {
+          "id": "ice_cream",
+          "name": "Bola de Helado",
+          "price": 12000
+        }
+      ]
+    }
+  ]
+}

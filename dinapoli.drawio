@@ -1,0 +1,68 @@
+<mxfile host="app.diagrams.net">
+  <diagram name="Page-1" id="gEv60zDk0CCv_ziLpj32">
+    <mxGraphModel grid="1" page="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="cU5T3JtTBwkvSqUofrys-6" edge="1" parent="1" source="cU5T3JtTBwkvSqUofrys-1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="cU5T3JtTBwkvSqUofrys-5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="cU5T3JtTBwkvSqUofrys-8" edge="1" parent="1" source="cU5T3JtTBwkvSqUofrys-1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="cU5T3JtTBwkvSqUofrys-7">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="cU5T3JtTBwkvSqUofrys-1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d80073;fontColor=#ffffff;strokeColor=#A50040;" value="DInapoli Pizza" vertex="1">
+          <mxGeometry height="40" width="100" x="375" y="360" as="geometry" />
+        </mxCell>
+        <mxCell id="cU5T3JtTBwkvSqUofrys-4" edge="1" parent="1" source="cU5T3JtTBwkvSqUofrys-2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="cU5T3JtTBwkvSqUofrys-1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="cU5T3JtTBwkvSqUofrys-2" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Order" vertex="1">
+          <mxGeometry height="40" width="95" x="378" y="150" as="geometry" />
+        </mxCell>
+        <mxCell id="cU5T3JtTBwkvSqUofrys-5" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Thermal printer" vertex="1">
+          <mxGeometry height="40" width="110" x="370.5" y="510" as="geometry" />
+        </mxCell>
+        <mxCell id="cU5T3JtTBwkvSqUofrys-14" edge="1" parent="1" source="cU5T3JtTBwkvSqUofrys-7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="cU5T3JtTBwkvSqUofrys-13">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="AAWIT8N-ofKmdmK4Ygm2-2" edge="1" parent="1" source="cU5T3JtTBwkvSqUofrys-7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="AAWIT8N-ofKmdmK4Ygm2-1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="cU5T3JtTBwkvSqUofrys-7" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Billing module" vertex="1">
+          <mxGeometry height="40" width="100" x="130" y="600" as="geometry" />
+        </mxCell>
+        <mxCell id="cU5T3JtTBwkvSqUofrys-9" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Client" vertex="1">
+          <mxGeometry height="40" width="100" x="380.5" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="cU5T3JtTBwkvSqUofrys-10" edge="1" parent="1" source="cU5T3JtTBwkvSqUofrys-9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.581;entryY=0.074;entryDx=0;entryDy=0;entryPerimeter=0;" target="cU5T3JtTBwkvSqUofrys-2">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="431" y="153" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="cU5T3JtTBwkvSqUofrys-11" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="Print bill" vertex="1">
+          <mxGeometry height="30" width="60" x="220" y="330" as="geometry" />
+        </mxCell>
+        <mxCell id="cU5T3JtTBwkvSqUofrys-12" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#60a917;fontColor=#ffffff;strokeColor=#2D7600;" value="Order complete" vertex="1">
+          <mxGeometry height="40" width="105" x="127.5" y="910" as="geometry" />
+        </mxCell>
+        <mxCell id="cU5T3JtTBwkvSqUofrys-15" edge="1" parent="1" source="cU5T3JtTBwkvSqUofrys-13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="cU5T3JtTBwkvSqUofrys-12">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="cU5T3JtTBwkvSqUofrys-13" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Thermal printer" vertex="1">
+          <mxGeometry height="40" width="100" x="130" y="750" as="geometry" />
+        </mxCell>
+        <mxCell id="AAWIT8N-ofKmdmK4Ygm2-1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="SQLITE" vertex="1">
+          <mxGeometry height="40" width="95.5" x="300" y="600" as="geometry" />
+        </mxCell>
+        <mxCell id="AAWIT8N-ofKmdmK4Ygm2-3" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Queue" vertex="1">
+          <mxGeometry height="40" width="100" x="378" y="250" as="geometry" />
+        </mxCell>
+        <mxCell id="KM_H0Mei55u_G9MiBNcm-1" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="Payment process module" vertex="1">
+          <mxGeometry height="40" width="120" x="120" y="510" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

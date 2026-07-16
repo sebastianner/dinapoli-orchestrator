@@ -1,0 +1,120 @@
+erDiagram
+  RESTAURANT_TABLES ||--o{ ORDERS : seats
+
+  CATEGORIES ||--o{ PRODUCTS : contains
+  PRODUCTS ||--o{ PRODUCT_SIZES : "priced as"
+  PRODUCTS ||--o{ PRODUCT_OPTIONS : "variant of"
+
+  PIZZA_GROUPS ||--o{ PIZZA_GROUP_SIZES : prices
+  PIZZA_SIZES ||--o{ PIZZA_GROUP_SIZES : "priced in"
+  PIZZA_GROUPS ||--o{ PIZZA_GROUP_FLAVORS : offers
+  PIZZA_FLAVORS ||--o{ PIZZA_GROUP_FLAVORS : "offered by"
+
+  ORDERS ||--o{ ORDER_ITEMS : has
+  PRODUCTS ||--o{ ORDER_ITEMS : ordered_as
+  PRODUCT_SIZES ||--o{ ORDER_ITEMS : sized_as
+  PRODUCT_OPTIONS ||--o{ ORDER_ITEMS : chosen_as
+  PIZZA_GROUPS ||--o{ ORDER_ITEMS : grouped_as
+  PIZZA_SIZES ||--o{ ORDER_ITEMS : sized_as
+  PIZZA_FLAVORS ||--o{ ORDER_ITEMS : "single flavor of"
+  ORDER_ITEMS ||--o{ ORDER_ITEM_FLAVORS : includes
+  PIZZA_FLAVORS ||--o{ ORDER_ITEM_FLAVORS : chosen_in
+
+  RESTAURANT_TABLES {
+    int id PK
+    int number "1 to 9, unique"
+    text status "free or busy, derived from open orders"
+  }
+
+  CATEGORIES {
+    int id PK
+    text key "stable id, e.g. appetizers, drinks. not 'pizzas'"
+    text name
+  }
+  PRODUCTS {
+    int id PK
+    int category_id FK
+    text key "stable id within category, e.g. fancaccia"
+    text name
+    text description "nullable"
+    int price "nullable. null when priced via PRODUCT_SIZES (e.g. calzone)"
+    int is_available
+    int requires_pizza_flavor "bool. true for gratin, calzone"
+  }
+  PRODUCT_SIZES {
+    int id PK
+    int product_id FK
+    text key "e.g. small, large"
+    text name
+    int price
+  }
+  PRODUCT_OPTIONS {
+    int id PK
+    int product_id FK
+    text name "e.g. Coca-Cola, Poker. no price impact"
+  }
+
+  PIZZA_GROUPS {
+    int id PK
+    text key "classic or special"
+    text name
+  }
+  PIZZA_SIZES {
+    int id PK
+    text key "slice, personal, small, medium, large, xlarge"
+    text name
+    int slices
+    int max_flavors
+  }
+  PIZZA_GROUP_SIZES {
+    int id PK
+    int group_id FK
+    int size_id FK
+    int price "nullable. null for 'slice' in current menu data"
+  }
+  PIZZA_FLAVORS {
+    int id PK
+    text key
+    text name
+    text description "nullable"
+    int extra_cost
+    int is_available
+  }
+  PIZZA_GROUP_FLAVORS {
+    int group_id PK, FK
+    int flavor_id PK, FK
+  }
+
+  ORDERS {
+    int id PK
+    text order_type "dine_in, takeaway, delivery"
+    text status "PENDING, PRINTING, ACTIVE, COMPLETED"
+    text payment_method "nullable. cash, card, transfer"
+    int table_number "nullable. dine_in only, 1 to 9"
+    text customer_name "nullable. takeaway, delivery"
+    text phone "nullable. delivery only"
+    text address "nullable. delivery only"
+    text notes "nullable. order-level comments"
+    int total
+    text created_at
+    text completed_at "nullable. set on COMPLETED"
+    int print_attempts "recovery bookkeeping, default 0"
+  }
+  ORDER_ITEMS {
+    int id PK
+    int order_id FK
+    text item_type "pizza or product"
+    int product_id FK "nullable. set when item_type = product"
+    int product_size_id FK "nullable. set when the product is priced per size"
+    int product_option_id FK "nullable. set when the product has a chosen option"
+    int pizza_group_id FK "nullable. set when item_type = pizza, or product requires_pizza_flavor"
+    int pizza_size_id FK "nullable. set when item_type = pizza"
+    int pizza_flavor_id FK "nullable. single flavor for gratin/calzone (requires_pizza_flavor products)"
+    int quantity
+    int unit_price "price snapshot at order time, integer COP"
+    text notes "nullable. e.g. sin cebolla"
+  }
+  ORDER_ITEM_FLAVORS {
+    int order_item_id PK, FK
+    int flavor_id PK, FK
+  }
