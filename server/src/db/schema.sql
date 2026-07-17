@@ -36,8 +36,9 @@ CREATE TABLE IF NOT EXISTS product_sizes (
 CREATE TABLE IF NOT EXISTS product_options (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  key        TEXT NOT NULL,
   name       TEXT NOT NULL,
-  UNIQUE (product_id, name)
+  UNIQUE (product_id, key)
 );
 
 CREATE TABLE IF NOT EXISTS pizza_groups (
@@ -114,6 +115,47 @@ CREATE TABLE IF NOT EXISTS order_item_flavors (
   PRIMARY KEY (order_item_id, flavor_id)
 );
 
+-- One saved artifact per (order, kind): content is deterministic from the
+-- order row, so re-generating it (e.g. a queue retry) upserts in place
+-- instead of piling up duplicate rows. Reprinting re-sends this saved copy.
+CREATE TABLE IF NOT EXISTS print_jobs (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id   INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  kind       TEXT NOT NULL CHECK (kind IN ('kitchen_ticket', 'bill')),
+  content    TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  UNIQUE (order_id, kind)
+);
+
+-- Single configurable row: the default cash the register opens with. Used
+-- only to seed a new cash_flow period (see below) - not touched afterward.
+CREATE TABLE IF NOT EXISTS cash_register_settings (
+  id                    INTEGER PRIMARY KEY CHECK (id = 1),
+  default_opening_cash  INTEGER NOT NULL DEFAULT 0
+);
+
+-- One row per register period. A new period is only ever opened by an
+-- explicit staff action (the future End-of-Day Closing module's reset
+-- endpoint) - never rotated automatically by calendar date. Old rows are
+-- never deleted or overwritten; the "current" period is simply the most
+-- recently created row (highest id).
+CREATE TABLE IF NOT EXISTS cash_flow (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  date             TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d', 'now')),
+  cash_in_register INTEGER NOT NULL,
+  expenses         INTEGER NOT NULL DEFAULT 0,
+  created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS cash_expenses (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  cash_flow_id  INTEGER NOT NULL REFERENCES cash_flow(id) ON DELETE CASCADE,
+  amount        INTEGER NOT NULL CHECK (amount > 0),
+  justification TEXT NOT NULL,
+  created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_orders_table_number ON orders(table_number);
 CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);
+CREATE INDEX IF NOT EXISTS idx_cash_expenses_cash_flow_id ON cash_expenses(cash_flow_id);

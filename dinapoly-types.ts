@@ -21,6 +21,15 @@ export type PizzaSizeId =
   | 'large'
   | 'xlarge';
 
+export type ProductCategoryId =
+  | 'appetizers'
+  | 'gratinados'
+  | 'calzones'
+  | 'pastas'
+  | 'lasagnas'
+  | 'drinks'
+  | 'desserts';
+
 // ============================================================
 // MENU (shape of menu.json)
 // ============================================================
@@ -61,7 +70,7 @@ export interface PizzaFlavor {
 }
 
 export interface ProductCategory {
-  id: string; // 'appetizers' | 'gratinados' | 'calzones' | 'pastas' | 'lasagnas' | 'drinks' | 'desserts'
+  id: ProductCategoryId;
   name: string;
   products: Product[];
 }
@@ -74,9 +83,14 @@ export interface Product {
   /** Present when the product comes in sizes with their own price (calzone). */
   sizes?: ProductSize[];
   /** Selectable variants that don't affect price (drinks). */
-  options?: string[];
+  options?: ProductOption[];
   /** True when the product takes a pizza flavor (gratinados, calzones). */
   pizzaFlavor?: boolean;
+}
+
+export interface ProductOption {
+  id: string;
+  name: string;
 }
 
 export interface ProductSize {
@@ -125,11 +139,10 @@ export interface PizzaItemRequest {
 
 export interface ProductItemRequest {
   type: 'product';
-  /** ProductCategory id, e.g. 'pastas', 'drinks'. */
-  category: string;
+  category: ProductCategoryId;
   /** Product id within that category. */
   product: string;
-  /** One of the product's options (drinks). */
+  /** id of one of the product's options (drinks), e.g. 'coca_cola'. */
   option?: string;
   /** ProductSize id when the product is priced per size (calzone). */
   size?: string;
@@ -174,7 +187,7 @@ export interface OrderItem {
 }
 
 export interface ProductRef {
-  category: string;
+  category: ProductCategoryId;
   product: string;
   option?: string;
   size?: string;
@@ -185,6 +198,36 @@ export interface PizzaRef {
   group: PizzaGroupId;
   size: PizzaSizeId;
   flavors: string[];
+}
+
+// ============================================================
+// CASH FLOW (server-side representation, mirrors the DB schema)
+// ============================================================
+
+/**
+ * One register period, one per business day (Bogota local date). A new
+ * period opens automatically the moment the latest one isn't from today
+ * (checked at server boot and lazily on any cash-flow access) - bookkeeping
+ * only, not the End-of-Day Closing itself (sales report, printed receipt),
+ * which stays a manual staff action in that future module. Old periods are
+ * kept forever; "current" is simply the most recently created one.
+ */
+export interface CashFlowDay {
+  id: number;
+  /** YYYY-MM-DD, the business day this period belongs to. */
+  date: string;
+  cashInRegister: number;
+  /** Running total of all expenses recorded against this period. */
+  expenses: number;
+  createdAt: string;
+}
+
+export interface CashExpense {
+  id: number;
+  cashFlowId: number;
+  amount: number;
+  justification: string;
+  createdAt: string;
 }
 
 // ---------- Type guards ----------

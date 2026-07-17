@@ -38,6 +38,7 @@ export interface ProductSizeRow {
 export interface ProductOptionRow {
   id: number;
   product_id: number;
+  key: string;
   name: string;
 }
 
@@ -106,4 +107,35 @@ export interface OrderItemRow {
   quantity: number;
   unit_price: number;
   notes: string | null;
+}
+
+export type PrintJobKind = 'kitchen_ticket' | 'bill';
+
+export interface PrintJobRow {
+  id: number;
+  order_id: number;
+  kind: PrintJobKind;
+  content: string;
+  created_at: string;
+}
+
+export interface CashRegisterSettingsRow {
+  id: 1;
+  default_opening_cash: number;
+}
+
+export interface CashFlowRow {
+  id: number;
+  date: string;
+  cash_in_register: number;
+  expenses: number;
+  created_at: string;
+}
+
+export interface CashExpenseRow {
+  id: number;
+  cash_flow_id: number;
+  amount: number;
+  justification: string;
+  created_at: string;
 }

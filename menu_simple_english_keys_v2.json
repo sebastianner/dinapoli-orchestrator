@@ -187,7 +187,7 @@
             },
             {
               "id": "especial_di_napoli",
-              "name": "Especial Di Napoli",
+              "name": "Especial Di Nápoli",
               "description": "Salame, cábano, pimentón, cebolla, champiñón, maíz y aceitunas"
             },
             {
@@ -243,7 +243,7 @@
             {
               "id": "madrilena",
               "name": "Madrileña",
-              "description": "Jamón serrano, rúgula y mostaza antigüa"
+              "description": "Jamón serrano, rúgula y mostaza antigua"
             },
             {
               "id": "campesina",
@@ -431,13 +431,34 @@
           "name": "Gaseosa 1.5L",
           "price": 9000,
           "options": [
-            "Coca-Cola",
-            "Premio",
-            "Quatro",
-            "Uva",
-            "Manzana",
-            "Colombiana",
-            "Pepsi"
+            {
+              "id": "coca_cola",
+              "name": "Coca-Cola"
+            },
+            {
+              "id": "premio",
+              "name": "Premio"
+            },
+            {
+              "id": "quatro",
+              "name": "Quatro"
+            },
+            {
+              "id": "uva",
+              "name": "Uva"
+            },
+            {
+              "id": "manzana",
+              "name": "Manzana"
+            },
+            {
+              "id": "colombiana",
+              "name": "Colombiana"
+            },
+            {
+              "id": "pepsi",
+              "name": "Pepsi"
+            }
           ]
         },
         {
@@ -445,14 +466,38 @@
           "name": "Gaseosa Personal",
           "price": 5000,
           "options": [
-            "Coca-Cola",
-            "Premio",
-            "Quatro",
-            "Uva",
-            "Manzana",
-            "Colombiana",
-            "Pepsi",
-            "Agua"
+            {
+              "id": "coca_cola",
+              "name": "Coca-Cola"
+            },
+            {
+              "id": "premio",
+              "name": "Premio"
+            },
+            {
+              "id": "quatro",
+              "name": "Quatro"
+            },
+            {
+              "id": "uva",
+              "name": "Uva"
+            },
+            {
+              "id": "manzana",
+              "name": "Manzana"
+            },
+            {
+              "id": "colombiana",
+              "name": "Colombiana"
+            },
+            {
+              "id": "pepsi",
+              "name": "Pepsi"
+            },
+            {
+              "id": "agua",
+              "name": "Agua"
+            }
           ]
         },
         {
@@ -460,9 +505,18 @@
           "name": "Cerveza",
           "price": 6000,
           "options": [
-            "Poker",
-            "Aguila Light",
-            "Club Colombia"
+            {
+              "id": "poker",
+              "name": "Poker"
+            },
+            {
+              "id": "aguila_light",
+              "name": "Aguila Light"
+            },
+            {
+              "id": "club_colombia",
+              "name": "Club Colombia"
+            }
           ]
         },
         {
@@ -470,21 +524,66 @@
           "name": "Jugos",
           "price": 8500,
           "options": [
-            "Mango",
-            "Maracuyá",
-            "Fresa",
-            "Lulo",
-            "Guanábana",
-            "Mora",
-            "Maracumango",
-            "Manguala",
-            "Limango",
-            "Mandarina",
-            "Limonada",
-            "Lincoco",
-            "Frutos Rojos",
-            "Limonada Cerezada",
-            "Limonada de Mango Viche"
+            {
+              "id": "mango",
+              "name": "Mango"
+            },
+            {
+              "id": "maracuya",
+              "name": "Maracuyá"
+            },
+            {
+              "id": "fresa",
+              "name": "Fresa"
+            },
+            {
+              "id": "lulo",
+              "name": "Lulo"
+            },
+            {
+              "id": "guanabana",
+              "name": "Guanábana"
+            },
+            {
+              "id": "mora",
+              "name": "Mora"
+            },
+            {
+              "id": "maracumango",
+              "name": "Maracumango"
+            },
+            {
+              "id": "manguala",
+              "name": "Manguala"
+            },
+            {
+              "id": "limango",
+              "name": "Limango"
+            },
+            {
+              "id": "mandarina",
+              "name": "Mandarina"
+            },
+            {
+              "id": "limonada",
+              "name": "Limonada"
+            },
+            {
+              "id": "lincoco",
+              "name": "Lincoco"
+            },
+            {
+              "id": "frutos_rojos",
+              "name": "Frutos Rojos"
+            },
+            {
+              "id": "limonada_cerezada",
+              "name": "Limonada Cerezada"
+            },
+            {
+              "id": "limonada_de_mango_viche",
+              "name": "Limonada de Mango Viche"
+            }
           ]
         },
         {
@@ -497,12 +596,30 @@
           "name": "Sodas Italianas",
           "price": 12000,
           "options": [
-            "Frutos Rojos",
-            "Hierbabuena",
-            "Maracuyá",
-            "Piña",
-            "Lulo",
-            "Sandía"
+            {
+              "id": "frutos_rojos",
+              "name": "Frutos Rojos"
+            },
+            {
+              "id": "hierbabuena",
+              "name": "Hierbabuena"
+            },
+            {
+              "id": "maracuya",
+              "name": "Maracuyá"
+            },
+            {
+              "id": "pina",
+              "name": "Piña"
+            },
+            {
+              "id": "lulo",
+              "name": "Lulo"
+            },
+            {
+              "id": "sandia",
+              "name": "Sandía"
+            }
           ]
         },
         {
@@ -510,13 +627,34 @@
           "name": "Malteadas",
           "price": 12000,
           "options": [
-            "Oreo",
-            "Maracuyá",
-            "Frutos Rojos",
-            "Fresa",
-            "Lulo",
-            "Café",
-            "Milo"
+            {
+              "id": "oreo",
+              "name": "Oreo"
+            },
+            {
+              "id": "maracuya",
+              "name": "Maracuyá"
+            },
+            {
+              "id": "frutos_rojos",
+              "name": "Frutos Rojos"
+            },
+            {
+              "id": "fresa",
+              "name": "Fresa"
+            },
+            {
+              "id": "lulo",
+              "name": "Lulo"
+            },
+            {
+              "id": "cafe",
+              "name": "Café"
+            },
+            {
+              "id": "milo",
+              "name": "Milo"
+            }
           ]
         }
       ]

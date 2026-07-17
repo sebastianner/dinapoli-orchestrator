@@ -5,21 +5,30 @@
 
 // ---------- Shared literals ----------
 
-export type OrderType = 'dine_in' | 'takeaway' | 'delivery';
+export type OrderType = "dine_in" | "takeaway" | "delivery";
 
-export type PaymentMethod = 'cash' | 'card' | 'transfer';
+export type PaymentMethod = "cash" | "card" | "transfer";
 
-export type OrderStatus = 'PENDING' | 'PRINTING' | 'ACTIVE' | 'COMPLETED';
+export type OrderStatus = "PENDING" | "PRINTING" | "ACTIVE" | "COMPLETED";
 
-export type PizzaGroupId = 'classic' | 'special';
+export type PizzaGroupId = "classic" | "special";
 
 export type PizzaSizeId =
-  | 'slice'
-  | 'personal'
-  | 'small'
-  | 'medium'
-  | 'large'
-  | 'xlarge';
+  | "slice"
+  | "personal"
+  | "small"
+  | "medium"
+  | "large"
+  | "xlarge";
+
+export type ProductCategoryId =
+  | "appetizers"
+  | "gratinados"
+  | "calzones"
+  | "pastas"
+  | "lasagnas"
+  | "drinks"
+  | "desserts";
 
 // ============================================================
 // MENU (shape of menu.json)
@@ -33,7 +42,7 @@ export interface Menu {
 export type MenuCategory = PizzaCategory | ProductCategory;
 
 export interface PizzaCategory {
-  id: 'pizzas';
+  id: "pizzas";
   name: string;
   groups: PizzaGroup[];
 }
@@ -61,7 +70,7 @@ export interface PizzaFlavor {
 }
 
 export interface ProductCategory {
-  id: string; // 'appetizers' | 'gratinados' | 'calzones' | 'pastas' | 'lasagnas' | 'drinks' | 'desserts'
+  id: ProductCategoryId;
   name: string;
   products: Product[];
 }
@@ -74,9 +83,14 @@ export interface Product {
   /** Present when the product comes in sizes with their own price (calzone). */
   sizes?: ProductSize[];
   /** Selectable variants that don't affect price (drinks). */
-  options?: string[];
+  options?: ProductOption[];
   /** True when the product takes a pizza flavor (gratinados, calzones). */
   pizzaFlavor?: boolean;
+}
+
+export interface ProductOption {
+  id: string;
+  name: string;
 }
 
 export interface ProductSize {
@@ -111,7 +125,7 @@ export interface CustomerInfo {
 export type OrderItemRequest = PizzaItemRequest | ProductItemRequest;
 
 export interface PizzaItemRequest {
-  type: 'pizza';
+  type: "pizza";
   size: PizzaSizeId;
   /**
    * Flavor ids, length 1..maxFlavors of the size. The group is not chosen by
@@ -124,12 +138,11 @@ export interface PizzaItemRequest {
 }
 
 export interface ProductItemRequest {
-  type: 'product';
-  /** ProductCategory id, e.g. 'pastas', 'drinks'. */
-  category: string;
+  type: "product";
+  category: ProductCategoryId;
   /** Product id within that category. */
   product: string;
-  /** One of the product's options (drinks). */
+  /** id of one of the product's options (drinks), e.g. 'coca_cola'. */
   option?: string;
   /** ProductSize id when the product is priced per size (calzone). */
   size?: string;
@@ -174,7 +187,7 @@ export interface OrderItem {
 }
 
 export interface ProductRef {
-  category: string;
+  category: ProductCategoryId;
   product: string;
   option?: string;
   size?: string;
@@ -187,12 +200,42 @@ export interface PizzaRef {
   flavors: string[];
 }
 
+// ============================================================
+// CASH FLOW (server-side representation, mirrors the DB schema)
+// ============================================================
+
+/**
+ * One register period, one per business day (Bogota local date). A new
+ * period opens automatically the moment the latest one isn't from today
+ * (checked at server boot and lazily on any cash-flow access) - bookkeeping
+ * only, not the End-of-Day Closing itself (sales report, printed receipt),
+ * which stays a manual staff action in that future module. Old periods are
+ * kept forever; "current" is simply the most recently created one.
+ */
+export interface CashFlowDay {
+  id: number;
+  /** YYYY-MM-DD, the business day this period belongs to. */
+  date: string;
+  cashInRegister: number;
+  /** Running total of all expenses recorded against this period. */
+  expenses: number;
+  createdAt: string;
+}
+
+export interface CashExpense {
+  id: number;
+  cashFlowId: number;
+  amount: number;
+  justification: string;
+  createdAt: string;
+}
+
 // ---------- Type guards ----------
 
 export function isPizzaCategory(c: MenuCategory): c is PizzaCategory {
-  return c.id === 'pizzas';
+  return c.id === "pizzas";
 }
 
 export function isPizzaItem(i: OrderItemRequest): i is PizzaItemRequest {
-  return i.type === 'pizza';
+  return i.type === "pizza";
 }

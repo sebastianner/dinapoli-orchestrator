@@ -1,11 +1,19 @@
 import { ValidationError } from '../utils/errors.js';
+import type { Order, PaymentMethod } from '../types/dinapoly-types.js';
+
+export interface Payment {
+  orderId: number;
+  method: PaymentMethod;
+  amountCOP: number;
+  processedAt: string;
+}
 
 /**
  * Processes the total price of an order in COP. This is a stub for now (cash/card/transfer
  * are all "processed" the same way); swap in a real payment gateway integration here later
  * without touching call sites.
  */
-export function processPayment(order) {
+export function processPayment(order: Order): Payment {
   if (!order.paymentMethod) {
     throw new ValidationError('paymentMethod is required to process payment');
   }

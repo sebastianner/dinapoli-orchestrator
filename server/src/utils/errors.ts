@@ -1,23 +1,26 @@
 export class ValidationError extends Error {
-  constructor(message) {
+  statusCode = 400;
+
+  constructor(message: string) {
     super(message);
     this.name = 'ValidationError';
-    this.statusCode = 400;
   }
 }
 
 export class NotFoundError extends Error {
-  constructor(message) {
+  statusCode = 404;
+
+  constructor(message: string) {
     super(message);
     this.name = 'NotFoundError';
-    this.statusCode = 404;
   }
 }
 
 export class ConflictError extends Error {
-  constructor(message) {
+  statusCode = 409;
+
+  constructor(message: string) {
     super(message);
     this.name = 'ConflictError';
-    this.statusCode = 409;
   }
 }

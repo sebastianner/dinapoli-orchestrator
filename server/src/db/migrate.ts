@@ -6,6 +6,10 @@ import db from './index.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const TABLES = [
+  'cash_expenses',
+  'cash_flow',
+  'cash_register_settings',
+  'print_jobs',
   'order_item_flavors',
   'order_items',
   'orders',
@@ -21,7 +25,7 @@ const TABLES = [
   'restaurant_tables',
 ];
 
-function reset() {
+function reset(): void {
   db.pragma('foreign_keys = OFF');
   const dropAll = db.transaction(() => {
     for (const table of TABLES) {
@@ -32,7 +36,7 @@ function reset() {
   db.pragma('foreign_keys = ON');
 }
 
-function migrate() {
+function migrate(): void {
   const schemaPath = path.join(__dirname, 'schema.sql');
   const schema = fs.readFileSync(schemaPath, 'utf8');
   db.exec(schema);

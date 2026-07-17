@@ -19,6 +19,9 @@ erDiagram
   PIZZA_FLAVORS ||--o{ ORDER_ITEMS : "single flavor of"
   ORDER_ITEMS ||--o{ ORDER_ITEM_FLAVORS : includes
   PIZZA_FLAVORS ||--o{ ORDER_ITEM_FLAVORS : chosen_in
+  ORDERS ||--o{ PRINT_JOBS : "printed as"
+
+  CASH_FLOW ||--o{ CASH_EXPENSES : records
 
   RESTAURANT_TABLES {
     int id PK
@@ -51,7 +54,8 @@ erDiagram
   PRODUCT_OPTIONS {
     int id PK
     int product_id FK
-    text name "e.g. Coca-Cola, Poker. no price impact"
+    text key "stable id within product, e.g. coca_cola. no price impact"
+    text name "e.g. Coca-Cola, Poker"
   }
 
   PIZZA_GROUPS {
@@ -117,4 +121,31 @@ erDiagram
   ORDER_ITEM_FLAVORS {
     int order_item_id PK, FK
     int flavor_id PK, FK
+  }
+
+  PRINT_JOBS {
+    int id PK
+    int order_id FK
+    text kind "kitchen_ticket or bill"
+    text content "rendered ticket text, or bill HTML"
+    text created_at
+  }
+
+  CASH_REGISTER_SETTINGS {
+    int id PK "always 1, single row"
+    int default_opening_cash "seeds a new CASH_FLOW period"
+  }
+  CASH_FLOW {
+    int id PK
+    text date "YYYY-MM-DD business day. one row per day, auto-opened when stale"
+    int cash_in_register "current available cash for this period"
+    int expenses "running total of CASH_EXPENSES for this period"
+    text created_at
+  }
+  CASH_EXPENSES {
+    int id PK
+    int cash_flow_id FK
+    int amount "positive integer COP"
+    text justification
+    text created_at
   }
