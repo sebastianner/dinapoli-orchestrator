@@ -99,7 +99,9 @@ erDiagram
     text phone "nullable. delivery only"
     text address "nullable. delivery only"
     text notes "nullable. order-level comments"
-    int total
+    int total "sum of items only, excludes tip and delivery_fee"
+    int tip "default 0. settable/updatable any time, excluded from total/sales totals"
+    int delivery_fee "default 0. delivery orders only, included in invoice/sales totals (unlike tip)"
     text created_at
     text completed_at "nullable. set on COMPLETED"
     int print_attempts "recovery bookkeeping, default 0"
@@ -148,4 +150,19 @@ erDiagram
     int amount "positive integer COP"
     text justification
     text created_at
+  }
+
+  CLOSING_REPORTS {
+    int id PK
+    text date "YYYY-MM-DD business day this report covers"
+    int order_count "COMPLETED orders that day"
+    int delivery_sales "total+delivery_fee summed for delivery orders, tips excluded"
+    int dine_in_takeaway_sales "total+delivery_fee summed for dine_in/takeaway orders"
+    int cash_sales "same sum, grouped by payment_method"
+    int card_sales
+    int transfer_sales
+    int total_sales "delivery_sales + dine_in_takeaway_sales"
+    int total_expenses "sum of CASH_FLOW.expenses for the day"
+    text content "rendered receipt text, for reprint"
+    text created_at "always a manual staff action, never auto-generated"
   }

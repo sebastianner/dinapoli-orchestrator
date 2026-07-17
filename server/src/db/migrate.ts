@@ -6,6 +6,7 @@ import db from './index.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const TABLES = [
+  'closing_reports',
   'cash_expenses',
   'cash_flow',
   'cash_register_settings',

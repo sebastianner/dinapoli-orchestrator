@@ -1,5 +1,6 @@
 import db from '../db/index.js';
 import { ValidationError } from '../utils/errors.js';
+import { todayDateStrBogota } from '../utils/date.js';
 import type { CashFlowDay, CashExpense } from '../types/dinapoly-types.js';
 import type { CashRegisterSettingsRow, CashFlowRow, CashExpenseRow } from '../types/db.js';
 
@@ -25,13 +26,6 @@ function rowToCashExpense(row: CashExpenseRow): CashExpense {
 
 function isNonNegativeInteger(n: unknown): n is number {
   return typeof n === 'number' && Number.isInteger(n) && n >= 0;
-}
-
-// 'Today' is the restaurant's local business day (Bogota), not UTC - matters
-// right around midnight UTC, which is still mid-evening in Colombia.
-const bogotaDateFormat = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' });
-function todayDateStr(): string {
-  return bogotaDateFormat.format(new Date()); // en-CA formats as YYYY-MM-DD
 }
 
 // ---------------------------------------------------------------------------
@@ -76,7 +70,7 @@ const setCurrentCash = db.prepare<[number, number]>('UPDATE cash_flow SET cash_i
  * exists, this just returns it as-is.
  */
 export function getCurrentCashFlow(): CashFlowDay {
-  const today = todayDateStr();
+  const today = todayDateStrBogota();
   const latest = getLatestRow.get();
   if (latest && latest.date === today) return rowToCashFlowDay(latest);
 

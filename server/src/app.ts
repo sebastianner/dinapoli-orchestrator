@@ -3,6 +3,7 @@ import menuRouter from './routes/menu.js';
 import ordersRouter from './routes/orders.js';
 import tablesRouter from './routes/tables.js';
 import cashFlowRouter from './routes/cashFlow.js';
+import endOfDayRouter from './routes/endOfDay.js';
 
 export function createApp() {
   const app = express();
@@ -13,6 +14,7 @@ export function createApp() {
   app.use('/api/orders', ordersRouter);
   app.use('/api/tables', tablesRouter);
   app.use('/api/cash-flow', cashFlowRouter);
+  app.use('/api/end-of-day', endOfDayRouter);
 
   app.use((req, res) => {
     res.status(404).json({ error: 'not found' });

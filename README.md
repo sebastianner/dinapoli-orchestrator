@@ -8,7 +8,7 @@ handles billing/payment on completion.
 
 ```bash
 npm install
-npm run db:reset   # creates schema.sql tables and seeds menu.json + 9 tables
+npm run db:reset   # creates schema.sql tables and seeds menu.json + restaurant tables/settings
 npm run build      # compiles src/**/*.ts -> dist/
 npm start          # http://localhost:3000 (runs the compiled dist/server.js)
 ```
@@ -17,10 +17,9 @@ npm start          # http://localhost:3000 (runs the compiled dist/server.js)
 (no build step needed). `db:migrate`, `db:seed`, `db:reset`, and `ws:client` all run
 their `.ts` source directly through `tsx` too.
 
-Shared request/response/menu types live in `src/types/dinapoly-types.ts` (a copy of
-`../dinapoly-types.ts`, kept in sync manually) and are imported throughout the server
-instead of being hand-duplicated. DB row shapes used to type `better-sqlite3` prepared
-statements live in `src/types/db.ts`.
+Shared request/response/menu types live in `src/types/dinapoly-types.ts` and are
+imported throughout the server instead of being hand-duplicated. DB row shapes used
+to type `better-sqlite3` prepared statements live in `src/types/db.ts`.
 
 ## Architecture
 
@@ -29,13 +28,20 @@ statements live in `src/types/db.ts`.
   per-group pizza pricing/flavors and product sizes/options — see the mmd file
   for the up to date ER diagram).
 - **WebSocket intake** (`src/ws/orderSocket.js`, path `/ws/orders`): clients send
-  an `OrderRequest` JSON payload (see `../dinapoly-types.ts`); the server validates
-  it against the menu, prices it server-side, persists it as `PENDING`, and acks
-  with the full `Order` object (or an `{ type: 'error' }` message).
+  an `OrderRequest` JSON payload (see `src/types/dinapoly-types.ts`); the server
+  validates it against the menu, prices it server-side, persists it as `PENDING`,
+  and acks with the full `Order` object (or an `{ type: 'error' }` message).
   Pizza items pass only `size` + `flavors` — the group (classic/special) isn't
   chosen by the client; `orderService.resolvePizzaItem` derives it from the
   flavors picked, so mixing in a single `special` flavor upgrades the whole
-  pizza to the special price for that size.
+  pizza to the special price for that size. `OrderRequest.tip` is optional
+  (defaults to 0) and can also be set/overwritten later at any status via
+  `PUT /api/orders/:id/tip` — it's stored separately from `total` (which is
+  items-only) so it can be excluded from End-of-Day sales totals.
+  `OrderRequest.deliveryFee` works the same way (optional, defaults to 0,
+  updatable via `PUT /api/orders/:id/delivery-fee`) but is restricted to
+  `orderType: 'delivery'` and — unlike tip — is meant to be *included* in
+  sales totals (see End-of-Day Closing below).
 - **Persistent queue** (`src/services/queueService.js`): the queue *is* the
   `orders.status` column — no separate queue store. A poll loop (every 2s, plus
   an immediate pass on boot and right after a new order arrives) picks up every
@@ -64,8 +70,11 @@ statements live in `src/types/db.ts`.
   `{ "kind": "kitchen_ticket" | "bill" }` triggers it.
 - **Billing + payment** (`src/services/billingService.js`,
   `src/services/paymentService.js`): triggered by the complete-order endpoint.
-  Payment processes the order total in COP; billing renders the HTML bill and
-  hands it to the printer's rasterization pipeline.
+  Payment processes `order.total + order.tip + order.deliveryFee` in COP (both
+  are real cash collected even though they're excluded from `total`); billing
+  renders the HTML bill — subtotal, delivery fee (when non-zero), tip (when
+  non-zero), and grand total as separate lines — and hands it to the printer's
+  rasterization pipeline.
 - **Tables**: `restaurant_tables.status` is derived automatically — busy while a
   table has any non-`COMPLETED` order, freed the moment its last open order is
   completed. New orders for a busy table are still accepted.
@@ -78,11 +87,25 @@ statements live in `src/types/db.ts`.
   cash-flow access, so a day never goes unopened even if the server was down
   at midnight. This row rotation is just bookkeeping, not the End-of-Day
   Closing itself (sales report, printed receipt) — that stays a manual staff
-  action in a future module, which will read this table's history rather than
-  rotate it. Old periods are never deleted or overwritten. Each
+  action (see below). Old periods are never deleted or overwritten. Each
   `cash_expenses` row records one justified expense against a period; adding
   one subtracts the amount from that period's `cash_in_register` and adds it
   to `expenses` (both in the same transaction).
+- **End-of-Day Closing** (`src/services/endOfDayService.js`): a manual staff
+  action (`POST /api/end-of-day/close`) that snapshots the current Bogota
+  business day's sales — every `COMPLETED` order whose `completed_at` falls
+  on that day (Colombia has no DST, so a fixed UTC-5 SQL offset is enough to
+  match `todayDateStrBogota()`), summed as `total + delivery_fee` per order
+  (tips excluded, delivery fees included, per spec) and categorized by
+  order type (delivery vs. dine-in/takeaway) and by `paymentMethod`
+  (cash/card/transfer), plus that day's total expenses pulled from
+  `cash_flow`. The snapshot — and the exact plain-text receipt printed for
+  it — is persisted as a new `closing_reports` row rather than computed
+  live on every read, so history survives later corrections to the
+  underlying orders, and closing the same day twice (e.g. a reprint after a
+  paper jam) just appends another row instead of overwriting. This is
+  entirely independent from the cash-flow row rotation above — it doesn't
+  open a new register period or touch `cash_flow` at all, it only reads it.
 
 ## API
 
@@ -95,6 +118,12 @@ statements live in `src/types/db.ts`.
 - `POST /api/orders/:id/reprint` — re-sends a previously saved kitchen ticket or
   bill to the printer. Body: `{ "kind": "kitchen_ticket" | "bill" }`. 404s if
   nothing has been printed/saved for that order+kind yet.
+- `PUT /api/orders/:id/tip` — sets (or overwrites) the order's tip. Allowed at
+  any order status. Body: `{ "tip": number }` (non-negative integer COP).
+- `PUT /api/orders/:id/delivery-fee` — sets (or overwrites) the order's delivery
+  fee. Allowed at any order status, but a non-zero value is rejected unless the
+  order's `orderType` is `delivery`. Body: `{ "deliveryFee": number }`
+  (non-negative integer COP).
 - `GET /api/tables` — table numbers and free/busy status.
 - `GET /api/cash-flow/current` — the active register period (opens the first
   one from the configured default if none exists yet).
@@ -108,6 +137,13 @@ statements live in `src/types/db.ts`.
 - `POST /api/cash-flow/expenses` — records an expense against the current
   period, subtracting it from available cash and adding it to the period's
   expense total. Body: `{ "amount": number, "justification": string }`.
+- `POST /api/end-of-day/close` — generates, saves, and prints the closing
+  report for today's business day (Bogota local date). Safe to call more
+  than once a day; each call appends a new report rather than overwriting.
+- `GET /api/end-of-day` — every closing report ever generated, newest first.
+- `GET /api/end-of-day/:id` — one closing report.
+- `POST /api/end-of-day/:id/reprint` — re-sends a previously generated
+  closing report's exact saved receipt to the printer.
 
 ## Trying it out
 

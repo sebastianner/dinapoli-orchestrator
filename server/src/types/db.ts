@@ -87,6 +87,8 @@ export interface OrderRow {
   address: string | null;
   notes: string | null;
   total: number;
+  tip: number;
+  delivery_fee: number;
   created_at: string;
   completed_at: string | null;
   print_attempts: number;
@@ -137,5 +139,20 @@ export interface CashExpenseRow {
   cash_flow_id: number;
   amount: number;
   justification: string;
+  created_at: string;
+}
+
+export interface ClosingReportRow {
+  id: number;
+  date: string;
+  order_count: number;
+  delivery_sales: number;
+  dine_in_takeaway_sales: number;
+  cash_sales: number;
+  card_sales: number;
+  transfer_sales: number;
+  total_sales: number;
+  total_expenses: number;
+  content: string;
   created_at: string;
 }

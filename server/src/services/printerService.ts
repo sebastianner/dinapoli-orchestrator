@@ -118,6 +118,25 @@ function printText(orderId: number, kind: PrintJobKind, text: string, copies = 1
   console.log(`[printer:thermal-80mm] printed '${kind}' for order ${orderId} (${copies}x)`);
 }
 
+// Normal size (unlike the double-size kitchen ticket): this is a dense
+// operational report read up close by whoever's closing the register, not a
+// ticket glanced at from across a kitchen, so it favors fitting more per line.
+function buildPlainTextPayload(text: string): Buffer {
+  return Buffer.concat([
+    CMD_INIT,
+    CMD_SELECT_CODEPAGE,
+    Buffer.from(sanitizeForPrint(text), 'latin1'),
+    CMD_FEED_4,
+    CMD_CUT_PARTIAL,
+  ]);
+}
+
+/** Prints an arbitrary plain-text document not tied to a specific order (e.g. the End-of-Day closing receipt). */
+export function printPlainText(text: string): void {
+  writeToDevice(buildPlainTextPayload(text));
+  console.log('[printer:thermal-80mm] printed plain-text document');
+}
+
 export function formatMoney(cop: number): string {
   return `$${cop.toLocaleString('es-CO')}`;
 }

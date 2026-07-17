@@ -80,7 +80,10 @@ export function renderBillHtml(order: Order, payment: Payment): string {
     <tbody>${rows}</tbody>
   </table>
   <hr>
-  <div class="totals-row grand"><span>TOTAL</span><span>${formatMoney(order.total)}</span></div>
+  <div class="totals-row"><span>Subtotal</span><span>${formatMoney(order.total)}</span></div>
+  ${order.deliveryFee > 0 ? `<div class="totals-row"><span>Domicilio</span><span>${formatMoney(order.deliveryFee)}</span></div>` : ''}
+  ${order.tip > 0 ? `<div class="totals-row"><span>Propina</span><span>${formatMoney(order.tip)}</span></div>` : ''}
+  <div class="totals-row grand"><span>TOTAL</span><span>${formatMoney(order.total + order.deliveryFee + order.tip)}</span></div>
   <div class="totals-row"><span>Pago (${escapeHtml(describePaymentMethod(payment.method))})</span><span>${formatMoney(payment.amountCOP)}</span></div>
   <div class="thanks">Gracias por su compra!</div>
 </body>

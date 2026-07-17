@@ -113,6 +113,10 @@ export interface OrderRequest {
   customer?: CustomerInfo;
   paymentMethod?: PaymentMethod;
   notes?: string;
+  /** Integer COP. Defaults to 0 when omitted. Excluded from `total` and from sales totals. */
+  tip?: number;
+  /** Integer COP. Delivery orders only. Defaults to 0 when omitted. Included in sales totals (unlike tip). */
+  deliveryFee?: number;
   items: OrderItemRequest[];
 }
 
@@ -165,8 +169,12 @@ export interface Order {
   customerName: string | null;
   phone: string | null;
   address: string | null;
-  /** Integer COP. Computed server-side. */
+  /** Integer COP. Computed server-side, sum of items only (excludes tip). */
   total: number;
+  /** Integer COP. Defaults to 0. Settable/updatable any time via PUT /api/orders/:id/tip. */
+  tip: number;
+  /** Integer COP. Delivery orders only. Defaults to 0. Settable via PUT /api/orders/:id/delivery-fee. */
+  deliveryFee: number;
   notes: string | null;
   createdAt: string; // ISO / SQLite datetime
   completedAt: string | null;
@@ -208,9 +216,9 @@ export interface PizzaRef {
  * One register period, one per business day (Bogota local date). A new
  * period opens automatically the moment the latest one isn't from today
  * (checked at server boot and lazily on any cash-flow access) - bookkeeping
- * only, not the End-of-Day Closing itself (sales report, printed receipt),
- * which stays a manual staff action in that future module. Old periods are
- * kept forever; "current" is simply the most recently created one.
+ * only, not the End-of-Day Closing itself (sales report, printed receipt;
+ * see ClosingReport below), which stays a manual staff action. Old periods
+ * are kept forever; "current" is simply the most recently created one.
  */
 export interface CashFlowDay {
   id: number;
@@ -227,6 +235,38 @@ export interface CashExpense {
   cashFlowId: number;
   amount: number;
   justification: string;
+  createdAt: string;
+}
+
+// ============================================================
+// END-OF-DAY CLOSING (server-side representation, mirrors the DB schema)
+// ============================================================
+
+/**
+ * A generated, printed snapshot of one business day's sales. Always a manual
+ * staff action (POST /api/end-of-day/close) - unlike CashFlowDay's automatic
+ * per-day rotation, nothing creates this except that explicit request, and
+ * nothing stops calling it more than once for the same day (e.g. reprinting
+ * after a paper jam); every call appends a new row rather than overwriting,
+ * so history is never lost.
+ */
+export interface ClosingReport {
+  id: number;
+  /** YYYY-MM-DD, the business day this report covers. */
+  date: string;
+  orderCount: number;
+  /** COP. Sum of (order.total + order.deliveryFee) for delivery orders. Tips excluded. */
+  deliverySales: number;
+  /** COP. Sum of (order.total + order.deliveryFee) for dine_in/takeaway orders. Tips excluded. */
+  dineInTakeawaySales: number;
+  /** COP. Sum of (order.total + order.deliveryFee), grouped by paymentMethod. Tips excluded. */
+  cashSales: number;
+  cardSales: number;
+  transferSales: number;
+  /** COP. Grand total sales: deliverySales + dineInTakeawaySales. */
+  totalSales: number;
+  /** COP. Total cash_expenses recorded against this business day. */
+  totalExpenses: number;
   createdAt: string;
 }
 

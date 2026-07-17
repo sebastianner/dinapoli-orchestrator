@@ -89,6 +89,8 @@ CREATE TABLE IF NOT EXISTS orders (
   address        TEXT,
   notes          TEXT,
   total          INTEGER NOT NULL DEFAULT 0,
+  tip            INTEGER NOT NULL DEFAULT 0 CHECK (tip >= 0),
+  delivery_fee   INTEGER NOT NULL DEFAULT 0 CHECK (delivery_fee >= 0),
   created_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   completed_at   TEXT,
   print_attempts INTEGER NOT NULL DEFAULT 0
@@ -134,11 +136,12 @@ CREATE TABLE IF NOT EXISTS cash_register_settings (
   default_opening_cash  INTEGER NOT NULL DEFAULT 0
 );
 
--- One row per register period. A new period is only ever opened by an
--- explicit staff action (the future End-of-Day Closing module's reset
--- endpoint) - never rotated automatically by calendar date. Old rows are
--- never deleted or overwritten; the "current" period is simply the most
--- recently created row (highest id).
+-- One row per register period (one per business day). A fresh period opens
+-- automatically the moment the latest row's date isn't today anymore
+-- (cashFlowService.getCurrentCashFlow) - this bookkeeping rotation is not
+-- the End-of-Day Closing itself (see closing_reports below), which stays a
+-- manual staff action. Old rows are never deleted or overwritten; the
+-- "current" period is simply the most recently created row (highest id).
 CREATE TABLE IF NOT EXISTS cash_flow (
   id               INTEGER PRIMARY KEY AUTOINCREMENT,
   date             TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d', 'now')),
@@ -153,6 +156,28 @@ CREATE TABLE IF NOT EXISTS cash_expenses (
   amount        INTEGER NOT NULL CHECK (amount > 0),
   justification TEXT NOT NULL,
   created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+-- A snapshot of one business day's sales, generated and printed by an
+-- explicit staff action (POST /api/end-of-day/close), never automatically.
+-- Recomputed from `orders`/`cash_flow` at generation time, then frozen here
+-- (plus the exact printed text, for reprinting) so history survives even if
+-- later corrections change the underlying orders. Nothing stops closing the
+-- same day twice (e.g. a reprint after a paper jam) - every call appends a
+-- new row rather than overwriting, same append-only spirit as cash_flow.
+CREATE TABLE IF NOT EXISTS closing_reports (
+  id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+  date                   TEXT NOT NULL,
+  order_count            INTEGER NOT NULL,
+  delivery_sales         INTEGER NOT NULL,
+  dine_in_takeaway_sales INTEGER NOT NULL,
+  cash_sales             INTEGER NOT NULL,
+  card_sales             INTEGER NOT NULL,
+  transfer_sales         INTEGER NOT NULL,
+  total_sales            INTEGER NOT NULL,
+  total_expenses         INTEGER NOT NULL,
+  content                TEXT NOT NULL,
+  created_at             TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);

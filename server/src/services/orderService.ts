@@ -64,6 +64,8 @@ interface InsertOrderParams {
   address: string | null;
   notes: string | null;
   total: number;
+  tip: number;
+  deliveryFee: number;
 }
 
 interface InsertOrderItemParams {
@@ -81,8 +83,8 @@ interface InsertOrderItemParams {
 }
 
 const insertOrder = db.prepare<InsertOrderParams>(
-  `INSERT INTO orders (order_type, payment_method, table_number, customer_name, phone, address, notes, total)
-   VALUES (@orderType, @paymentMethod, @tableNumber, @customerName, @phone, @address, @notes, @total)`
+  `INSERT INTO orders (order_type, payment_method, table_number, customer_name, phone, address, notes, total, tip, delivery_fee)
+   VALUES (@orderType, @paymentMethod, @tableNumber, @customerName, @phone, @address, @notes, @total, @tip, @deliveryFee)`
 );
 const insertOrderItem = db.prepare<InsertOrderItemParams>(
   `INSERT INTO order_items
@@ -98,6 +100,10 @@ const insertOrderItemFlavor = db.prepare<[number, number]>(
 
 function isPositiveInt(n: unknown): n is number {
   return Number.isInteger(n) && (n as number) > 0;
+}
+
+function isNonNegativeInt(n: unknown): n is number {
+  return Number.isInteger(n) && (n as number) >= 0;
 }
 
 interface ResolvedItem {
@@ -250,7 +256,7 @@ function validateOrderRequest(input: unknown): OrderRequest {
     throw new ValidationError('request body must be an object');
   }
   const orderRequest = input as OrderRequest;
-  const { orderType, tableNumber, customer, paymentMethod, items } = orderRequest;
+  const { orderType, tableNumber, customer, paymentMethod, tip, deliveryFee, items } = orderRequest;
 
   if (!ORDER_TYPES.has(orderType)) {
     throw new ValidationError(`orderType must be one of ${[...ORDER_TYPES].join(', ')}`);
@@ -272,6 +278,19 @@ function validateOrderRequest(input: unknown): OrderRequest {
 
   if (paymentMethod != null && !PAYMENT_METHODS.has(paymentMethod)) {
     throw new ValidationError(`paymentMethod must be one of ${[...PAYMENT_METHODS].join(', ')}`);
+  }
+
+  if (tip != null && !isNonNegativeInt(tip)) {
+    throw new ValidationError('tip must be a non-negative integer amount in COP');
+  }
+
+  if (deliveryFee != null) {
+    if (!isNonNegativeInt(deliveryFee)) {
+      throw new ValidationError('deliveryFee must be a non-negative integer amount in COP');
+    }
+    if (deliveryFee > 0 && orderType !== 'delivery') {
+      throw new ValidationError('deliveryFee can only be set on delivery orders');
+    }
   }
 
   if (!Array.isArray(items) || items.length === 0) {
@@ -302,6 +321,8 @@ export function createOrder(input: unknown): Order {
       address: orderRequest.customer?.address ?? null,
       notes: orderRequest.notes ?? null,
       total,
+      tip: orderRequest.tip ?? 0,
+      deliveryFee: orderRequest.deliveryFee ?? 0,
     });
     const newOrderId = Number(result.lastInsertRowid);
 
@@ -406,6 +427,8 @@ export function getOrderById(id: number): Order {
     phone: row.phone,
     address: row.address,
     total: row.total,
+    tip: row.tip,
+    deliveryFee: row.delivery_fee,
     notes: row.notes,
     createdAt: row.created_at,
     completedAt: row.completed_at,
@@ -424,6 +447,40 @@ const setPaymentMethod = db.prepare<[PaymentMethod, number]>('UPDATE orders SET 
 const markCompleted = db.prepare<[number]>(
   `UPDATE orders SET status = 'COMPLETED', completed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?`
 );
+const updateTip = db.prepare<[number, number]>('UPDATE orders SET tip = ? WHERE id = ?');
+
+/**
+ * Sets (or overwrites) an order's tip. Allowed at any status: a customer may decide
+ * to tip when the order is placed, at payment time, or after the bill already
+ * printed. Excluded from `total` / sales totals either way.
+ */
+export function setOrderTip(id: number, tip: unknown): Order {
+  if (!isNonNegativeInt(tip)) {
+    throw new ValidationError('tip must be a non-negative integer amount in COP');
+  }
+  getOrderById(id); // 404s if the order doesn't exist
+  updateTip.run(tip, id);
+  return getOrderById(id);
+}
+
+const updateDeliveryFee = db.prepare<[number, number]>('UPDATE orders SET delivery_fee = ? WHERE id = ?');
+
+/**
+ * Sets (or overwrites) an order's delivery fee. Only allowed on `delivery` orders
+ * (matching the client-facing validation in `validateOrderRequest`), at any status.
+ * Unlike tip, this is included in `total` for invoicing/reporting purposes.
+ */
+export function setOrderDeliveryFee(id: number, deliveryFee: unknown): Order {
+  if (!isNonNegativeInt(deliveryFee)) {
+    throw new ValidationError('deliveryFee must be a non-negative integer amount in COP');
+  }
+  const order = getOrderById(id); // 404s if the order doesn't exist
+  if (deliveryFee > 0 && order.orderType !== 'delivery') {
+    throw new ValidationError('deliveryFee can only be set on delivery orders');
+  }
+  updateDeliveryFee.run(deliveryFee, id);
+  return getOrderById(id);
+}
 
 /**
  * Marks an order COMPLETED: resolves the payment method, processes payment for the
