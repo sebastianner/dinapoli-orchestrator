@@ -1,5 +1,5 @@
 // ============================================================
-// Gooners Pizza — shared type definitions
+// Dinapoli Pizza — shared type definitions
 // Matches menu.json structure and the client order payload.
 // ============================================================
 
