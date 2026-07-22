@@ -30,7 +30,7 @@ router.get('/:id', (req, res) => {
 
 router.post('/:id/complete', async (req, res, next) => {
   try {
-    const order = await completeOrder(parseOrderId(req.params.id), { paymentMethod: req.body?.paymentMethod });
+    const order = await completeOrder(parseOrderId(req.params.id), { payments: req.body?.payments });
     res.json(order);
   } catch (err) {
     next(err);

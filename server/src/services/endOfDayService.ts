@@ -34,14 +34,16 @@ interface SalesAggregate {
 // completed_at is stored in UTC; Bogota has no DST (fixed UTC-5 year round),
 // so a static offset reliably matches the same business day computed in JS
 // via todayDateStrBogota(). Tips are excluded (per spec) simply by never
-// including order.tip in `amount`; delivery fees are included via total + delivery_fee.
-const getCompletedOrdersForDate = db.prepare<
-  [string],
-  { order_type: string; payment_method: string | null; amount: number }
->(
-  `SELECT order_type, payment_method, (total + delivery_fee) AS amount
+// including order.tip in `sales_amount`; delivery fees are included via
+// total + delivery_fee.
+const getCompletedOrdersForDate = db.prepare<[string], { id: number; order_type: string; sales_amount: number }>(
+  `SELECT id, order_type, (total + delivery_fee) AS sales_amount
    FROM orders
    WHERE status = 'COMPLETED' AND date(completed_at, '-5 hours') = ?`
+);
+
+const getPaymentsForOrder = db.prepare<[number], { method: string; amount: number; tip_amount: number }>(
+  'SELECT method, amount, tip_amount FROM order_payments WHERE order_id = ? ORDER BY id'
 );
 
 function aggregateSales(date: string): SalesAggregate {
@@ -55,14 +57,26 @@ function aggregateSales(date: string): SalesAggregate {
     transferSales: 0,
     totalSales: 0,
   };
-  for (const row of rows) {
-    agg.totalSales += row.amount;
-    if (row.order_type === 'delivery') agg.deliverySales += row.amount;
-    else agg.dineInTakeawaySales += row.amount;
 
-    if (row.payment_method === 'cash') agg.cashSales += row.amount;
-    else if (row.payment_method === 'card') agg.cardSales += row.amount;
-    else if (row.payment_method === 'transfer') agg.transferSales += row.amount;
+  function addMethodSales(method: string, amount: number): void {
+    if (method === 'cash') agg.cashSales += amount;
+    else if (method === 'card') agg.cardSales += amount;
+    else if (method === 'transfer') agg.transferSales += amount;
+  }
+
+  for (const row of rows) {
+    agg.totalSales += row.sales_amount;
+    if (row.order_type === 'delivery') agg.deliverySales += row.sales_amount;
+    else agg.dineInTakeawaySales += row.sales_amount;
+
+    // Each payment row already knows exactly how much of its own amount is
+    // tip (order_payments.tip_amount, see schema comment), so the sales
+    // share per method is exact - no proportional guessing, no rounding.
+    // Summed across an order's rows this always equals sales_amount, since
+    // amount sums to (total + tip + delivery_fee) and tip_amount sums to tip.
+    for (const p of getPaymentsForOrder.all(row.id)) {
+      addMethodSales(p.method, p.amount - p.tip_amount);
+    }
   }
   return agg;
 }

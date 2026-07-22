@@ -72,6 +72,13 @@ export interface PizzaFlavorRow {
   is_available: 0 | 1;
 }
 
+export interface EmployeeRow {
+  id: number;
+  name: string;
+  picture_url: string | null;
+  is_active: 0 | 1;
+}
+
 export type OrderTypeDb = 'dine_in' | 'takeaway' | 'delivery';
 export type OrderStatusDb = 'PENDING' | 'PRINTING' | 'ACTIVE' | 'COMPLETED';
 export type PaymentMethodDb = 'cash' | 'card' | 'transfer';
@@ -80,6 +87,7 @@ export interface OrderRow {
   id: number;
   order_type: OrderTypeDb;
   status: OrderStatusDb;
+  employee_id: number | null;
   payment_method: PaymentMethodDb | null;
   table_number: number | null;
   customer_name: string | null;
@@ -92,6 +100,15 @@ export interface OrderRow {
   created_at: string;
   completed_at: string | null;
   print_attempts: number;
+}
+
+export interface OrderPaymentRow {
+  id: number;
+  order_id: number;
+  method: PaymentMethodDb;
+  amount: number;
+  tip_amount: number;
+  created_at: string;
 }
 
 export type OrderItemType = 'pizza' | 'product';

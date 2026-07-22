@@ -31,6 +31,10 @@ to type `better-sqlite3` prepared statements live in `src/types/db.ts`.
   an `OrderRequest` JSON payload (see `src/types/dinapoly-types.ts`); the server
   validates it against the menu, prices it server-side, persists it as `PENDING`,
   and acks with the full `Order` object (or an `{ type: 'error' }` message).
+  `OrderRequest.employeeId` is optional but, when present, must be an
+  existing, active employee (see Employees below) — the ack's `Order` object
+  carries both `employeeId` and `employeeName` (both `null` when omitted), so
+  the client gets the placing employee's name back without a second lookup.
   Pizza items pass only `size` + `flavors` — the group (classic/special) isn't
   chosen by the client; `orderService.resolvePizzaItem` derives it from the
   flavors picked, so mixing in a single `special` flavor upgrades the whole
@@ -69,12 +73,31 @@ to type `better-sqlite3` prepared statements live in `src/types/db.ts`.
   re-deriving it from the order. `POST /api/orders/:id/reprint` with
   `{ "kind": "kitchen_ticket" | "bill" }` triggers it.
 - **Billing + payment** (`src/services/billingService.js`,
-  `src/services/paymentService.js`): triggered by the complete-order endpoint.
-  Payment processes `order.total + order.tip + order.deliveryFee` in COP (both
-  are real cash collected even though they're excluded from `total`); billing
+  `src/services/paymentService.js`): triggered by `POST /api/orders/:id/complete`.
+  The full amount owed is `order.total + order.tip + order.deliveryFee` in COP
+  (tip and delivery fee are real cash collected even though they're excluded
+  from `total`). Settlement can be split across more than one method (e.g.
+  part cash, part card): `completeOrder` accepts an optional `payments` array,
+  `{ method, amount, tipAmount? }[]`, persisted one row per method to
+  `order_payments`. `amount` across all rows must sum exactly to the amount
+  owed; `tipAmount` (0 by default) marks the slice of that row's `amount`
+  that's tip rather than sales and must sum exactly to `order.tip` — this is
+  what lets a tip charged to only one method (e.g. added to the card while
+  cash covers the rest) be excluded from *that* method's sales precisely
+  instead of guessed via a proportional split (see End-of-Day below). Omitting
+  `payments` falls back to a single payment for the full amount via the
+  order's pre-declared `paymentMethod`, with that one method absorbing the
+  whole tip — the common, non-split case needs no client changes. Billing
   renders the HTML bill — subtotal, delivery fee (when non-zero), tip (when
-  non-zero), and grand total as separate lines — and hands it to the printer's
-  rasterization pipeline.
+  non-zero), grand total, and one payment line per method — and hands it to
+  the printer's rasterization pipeline.
+- **Employees** (`src/services/employeeService.js`): identification only, no
+  auth — a `name`, an optional `pictureUrl`, and `isActive` (default `true`).
+  There's no edit endpoint, only add and soft-delete: `DELETE
+  /api/employees/:id` sets `isActive: false` rather than removing the row, so
+  historical orders keep a valid `employeeId`; `POST /api/employees/:id/activate`
+  reverses that. Assigning an employee to an order is optional, but when
+  provided it must be active (see WebSocket intake above).
 - **Tables**: `restaurant_tables.status` is derived automatically — busy while a
   table has any non-`COMPLETED` order, freed the moment its last open order is
   completed. New orders for a busy table are still accepted.
@@ -96,10 +119,13 @@ to type `better-sqlite3` prepared statements live in `src/types/db.ts`.
   business day's sales — every `COMPLETED` order whose `completed_at` falls
   on that day (Colombia has no DST, so a fixed UTC-5 SQL offset is enough to
   match `todayDateStrBogota()`), summed as `total + delivery_fee` per order
-  (tips excluded, delivery fees included, per spec) and categorized by
-  order type (delivery vs. dine-in/takeaway) and by `paymentMethod`
-  (cash/card/transfer), plus that day's total expenses pulled from
-  `cash_flow`. The snapshot — and the exact plain-text receipt printed for
+  (tips excluded, delivery fees included, per spec) and categorized by order
+  type (delivery vs. dine-in/takeaway) and, per `order_payments` row, by
+  `method` (cash/card/transfer) — each row contributes `amount - tipAmount`
+  to its method's bucket, so a tip charged to only one method of a mixed
+  payment is excluded exactly rather than smeared proportionally across all
+  of them. Plus that day's total expenses pulled from `cash_flow`. The
+  snapshot — and the exact plain-text receipt printed for
   it — is persisted as a new `closing_reports` row rather than computed
   live on every read, so history survives later corrections to the
   underlying orders, and closing the same day twice (e.g. a reprint after a
@@ -113,8 +139,15 @@ to type `better-sqlite3` prepared statements live in `src/types/db.ts`.
 - `GET /api/orders?status=ACTIVE` — list orders, optionally filtered by status.
 - `GET /api/orders/:id` — one order.
 - `POST /api/orders/:id/complete` — marks an `ACTIVE` order `COMPLETED`; processes
-  payment and prints the bill. Body: `{ "paymentMethod"?: "cash"|"card"|"transfer" }`
-  (required if the order didn't already have one).
+  payment and prints the bill. Body: `{ "payments"?: { method: "cash"|"card"|"transfer", amount: number, tipAmount?: number }[] }`.
+  Omit `payments` to settle the full amount owed via the order's pre-declared
+  `paymentMethod` (errors if it doesn't have one). Otherwise `amount` across
+  all entries must sum exactly to `order.total + order.tip + order.deliveryFee`,
+  and `tipAmount` (0 by default, must be `<= amount`) must sum exactly to
+  `order.tip` — this is how a mixed payment (e.g. `[{ "method": "cash",
+  "amount": 20000 }, { "method": "card", "amount": 35000, "tipAmount": 5000 }]`)
+  attributes a tip charged to one specific method without it leaking into
+  another method's sales.
 - `POST /api/orders/:id/reprint` — re-sends a previously saved kitchen ticket or
   bill to the printer. Body: `{ "kind": "kitchen_ticket" | "bill" }`. 404s if
   nothing has been printed/saved for that order+kind yet.
@@ -125,6 +158,12 @@ to type `better-sqlite3` prepared statements live in `src/types/db.ts`.
   order's `orderType` is `delivery`. Body: `{ "deliveryFee": number }`
   (non-negative integer COP).
 - `GET /api/tables` — table numbers and free/busy status.
+- `GET /api/employees/active` / `GET /api/employees/inactive` — employees,
+  split by `isActive`.
+- `POST /api/employees` — adds a new (active) employee. Body:
+  `{ "name": string, "pictureUrl"?: string }`.
+- `DELETE /api/employees/:id` — soft-deletes: sets `isActive: false`.
+- `POST /api/employees/:id/activate` — reverses a soft delete.
 - `GET /api/cash-flow/current` — the active register period (opens the first
   one from the configured default if none exists yet).
 - `GET /api/cash-flow` — every register period ever recorded, newest first.

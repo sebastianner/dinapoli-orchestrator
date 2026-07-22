@@ -2,11 +2,14 @@ import db from '../db/index.js';
 import { ValidationError, NotFoundError, ConflictError } from '../utils/errors.js';
 import { markTableBusy, refreshTableStatus } from './tableService.js';
 import { processPayment } from './paymentService.js';
+import type { PaymentSplit } from './paymentService.js';
 import { printBill } from './billingService.js';
 import { reprintJob } from './printerService.js';
+import { getEmployeeById } from './employeeService.js';
 import type {
   Order,
   OrderItem,
+  OrderPayment,
   OrderRequest,
   OrderItemRequest,
   PizzaItemRequest,
@@ -20,6 +23,7 @@ import type {
 import type {
   CategoryRow,
   OrderItemRow,
+  OrderPaymentRow,
   OrderRow,
   PizzaFlavorRow,
   PizzaGroupRow,
@@ -57,6 +61,7 @@ const getProductOptionByKey = db.prepare<[number, string], ProductOptionRow>(
 
 interface InsertOrderParams {
   orderType: OrderType;
+  employeeId: number | null;
   paymentMethod: PaymentMethod | null;
   tableNumber: number | null;
   customerName: string | null;
@@ -83,8 +88,8 @@ interface InsertOrderItemParams {
 }
 
 const insertOrder = db.prepare<InsertOrderParams>(
-  `INSERT INTO orders (order_type, payment_method, table_number, customer_name, phone, address, notes, total, tip, delivery_fee)
-   VALUES (@orderType, @paymentMethod, @tableNumber, @customerName, @phone, @address, @notes, @total, @tip, @deliveryFee)`
+  `INSERT INTO orders (order_type, employee_id, payment_method, table_number, customer_name, phone, address, notes, total, tip, delivery_fee)
+   VALUES (@orderType, @employeeId, @paymentMethod, @tableNumber, @customerName, @phone, @address, @notes, @total, @tip, @deliveryFee)`
 );
 const insertOrderItem = db.prepare<InsertOrderItemParams>(
   `INSERT INTO order_items
@@ -256,10 +261,14 @@ function validateOrderRequest(input: unknown): OrderRequest {
     throw new ValidationError('request body must be an object');
   }
   const orderRequest = input as OrderRequest;
-  const { orderType, tableNumber, customer, paymentMethod, tip, deliveryFee, items } = orderRequest;
+  const { orderType, employeeId, tableNumber, customer, paymentMethod, tip, deliveryFee, items } = orderRequest;
 
   if (!ORDER_TYPES.has(orderType)) {
     throw new ValidationError(`orderType must be one of ${[...ORDER_TYPES].join(', ')}`);
+  }
+
+  if (employeeId != null && !isPositiveInt(employeeId)) {
+    throw new ValidationError('employeeId must be a positive integer when provided');
   }
 
   if (orderType === 'dine_in') {
@@ -303,6 +312,13 @@ function validateOrderRequest(input: unknown): OrderRequest {
 export function createOrder(input: unknown): Order {
   const orderRequest = validateOrderRequest(input);
 
+  if (orderRequest.employeeId != null) {
+    const employee = getEmployeeById(orderRequest.employeeId); // 404s if the employee doesn't exist
+    if (!employee.isActive) {
+      throw new ValidationError(`employee ${employee.id} is not active`);
+    }
+  }
+
   const resolvedItems = orderRequest.items.map((item: OrderItemRequest, index: number) => {
     if (item?.type === 'pizza') return resolvePizzaItem(item, index);
     if (item?.type === 'product') return resolveProductItem(item, index);
@@ -314,6 +330,7 @@ export function createOrder(input: unknown): Order {
   const orderId = db.transaction(() => {
     const result = insertOrder.run({
       orderType: orderRequest.orderType,
+      employeeId: orderRequest.employeeId ?? null,
       paymentMethod: orderRequest.paymentMethod ?? null,
       tableNumber: orderRequest.orderType === 'dine_in' ? (orderRequest.tableNumber as number) : null,
       customerName: orderRequest.customer?.name ?? null,
@@ -356,8 +373,11 @@ export function createOrder(input: unknown): Order {
   return getOrderById(orderId);
 }
 
-const getOrderRow = db.prepare<[number], OrderRow>('SELECT * FROM orders WHERE id = ?');
+const getOrderRow = db.prepare<[number], OrderRow & { employee_name: string | null }>(
+  `SELECT o.*, e.name AS employee_name FROM orders o LEFT JOIN employees e ON e.id = o.employee_id WHERE o.id = ?`
+);
 const getOrderItemRows = db.prepare<[number], OrderItemRow>('SELECT * FROM order_items WHERE order_id = ? ORDER BY id');
+const getOrderPaymentRows = db.prepare<[number], OrderPaymentRow>('SELECT * FROM order_payments WHERE order_id = ? ORDER BY id');
 const getOrderItemFlavorRows = db.prepare<[number], { key: string }>(
   `SELECT f.key FROM order_item_flavors oif
    JOIN pizza_flavors f ON f.id = oif.flavor_id
@@ -411,16 +431,30 @@ function rowToOrderItem(row: OrderItemRow): OrderItem {
   };
 }
 
+function rowToOrderPayment(row: OrderPaymentRow): OrderPayment {
+  return {
+    id: row.id,
+    orderId: row.order_id,
+    method: row.method,
+    amount: row.amount,
+    tipAmount: row.tip_amount,
+    createdAt: row.created_at,
+  };
+}
+
 export function getOrderById(id: number): Order {
   const row = getOrderRow.get(id);
   if (!row) throw new NotFoundError(`order ${id} not found`);
 
   const items = getOrderItemRows.all(id).map(rowToOrderItem);
+  const payments = getOrderPaymentRows.all(id).map(rowToOrderPayment);
 
   return {
     id: row.id,
     orderType: row.order_type,
     status: row.status,
+    employeeId: row.employee_id,
+    employeeName: row.employee_name,
     paymentMethod: row.payment_method,
     tableNumber: row.table_number,
     customerName: row.customer_name,
@@ -433,6 +467,7 @@ export function getOrderById(id: number): Order {
     createdAt: row.created_at,
     completedAt: row.completed_at,
     items,
+    payments,
   };
 }
 
@@ -443,7 +478,10 @@ export function listOrders({ status }: { status?: string } = {}): Order[] {
   return rows.map((r) => getOrderById(r.id));
 }
 
-const setPaymentMethod = db.prepare<[PaymentMethod, number]>('UPDATE orders SET payment_method = ? WHERE id = ?');
+const setPaymentMethod = db.prepare<[PaymentMethod | null, number]>('UPDATE orders SET payment_method = ? WHERE id = ?');
+const insertOrderPayment = db.prepare<[number, PaymentMethod, number, number]>(
+  'INSERT INTO order_payments (order_id, method, amount, tip_amount) VALUES (?, ?, ?, ?)'
+);
 const markCompleted = db.prepare<[number]>(
   `UPDATE orders SET status = 'COMPLETED', completed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?`
 );
@@ -483,27 +521,86 @@ export function setOrderDeliveryFee(id: number, deliveryFee: unknown): Order {
 }
 
 /**
- * Marks an order COMPLETED: resolves the payment method, processes payment for the
- * order total (COP), prints the bill, then frees the table if it has no other open orders.
+ * Validates and normalizes the `payments` a client submits to complete an
+ * order. Omitting `payments` falls back to a single payment for the full
+ * amount owed via the order's pre-declared `paymentMethod`, with that one
+ * method absorbing the whole tip (the common, non-split case). An explicit
+ * array is required for a mixed payment: `amount` must sum exactly to
+ * `owed`, and `tipAmount` (0 by default, must be <= that split's `amount`)
+ * must sum exactly to `order.tip` - this is what lets a tip charged to one
+ * specific method (e.g. added to the card only) be excluded from *that*
+ * method's sales without guessing at a split ratio.
  */
-export async function completeOrder(id: number, { paymentMethod }: { paymentMethod?: PaymentMethod } = {}): Promise<Order> {
-  if (paymentMethod != null && !PAYMENT_METHODS.has(paymentMethod)) {
-    throw new ValidationError(`paymentMethod must be one of ${[...PAYMENT_METHODS].join(', ')}`);
+function resolvePayments(input: unknown, order: Order, owed: number): PaymentSplit[] {
+  if (input == null) {
+    if (!order.paymentMethod) {
+      throw new ValidationError('payments is required (order has no pre-set paymentMethod)');
+    }
+    return [{ method: order.paymentMethod, amount: owed, tipAmount: order.tip }];
   }
 
+  if (!Array.isArray(input) || input.length === 0) {
+    throw new ValidationError('payments must be a non-empty array of { method, amount, tipAmount? }');
+  }
+
+  const splits = input.map((p: unknown, index: number) => {
+    const method = (p as { method?: unknown })?.method;
+    const amount = (p as { amount?: unknown })?.amount;
+    const tipAmount = (p as { tipAmount?: unknown })?.tipAmount ?? 0;
+    if (!PAYMENT_METHODS.has(method as PaymentMethod)) {
+      throw new ValidationError(`payments[${index}].method must be one of ${[...PAYMENT_METHODS].join(', ')}`);
+    }
+    if (!isPositiveInt(amount)) {
+      throw new ValidationError(`payments[${index}].amount must be a positive integer amount in COP`);
+    }
+    if (!isNonNegativeInt(tipAmount)) {
+      throw new ValidationError(`payments[${index}].tipAmount must be a non-negative integer amount in COP`);
+    }
+    if (tipAmount > amount) {
+      throw new ValidationError(`payments[${index}].tipAmount cannot exceed payments[${index}].amount`);
+    }
+    return { method: method as PaymentMethod, amount, tipAmount };
+  });
+
+  const sum = splits.reduce((s, p) => s + p.amount, 0);
+  if (sum !== owed) {
+    throw new ValidationError(`payments[].amount must sum to ${owed} (order total + tip + delivery fee), got ${sum}`);
+  }
+
+  const tipSum = splits.reduce((s, p) => s + p.tipAmount, 0);
+  if (tipSum !== order.tip) {
+    throw new ValidationError(`payments[].tipAmount must sum to the order's tip (${order.tip}), got ${tipSum}`);
+  }
+
+  return splits;
+}
+
+/**
+ * Marks an order COMPLETED: resolves how it was paid (one method, or a mixed
+ * payment split across several - see resolvePayments), records each
+ * settlement row, processes payment for the full amount owed (COP), prints
+ * the bill, then frees the table if it has no other open orders.
+ */
+export async function completeOrder(id: number, { payments }: { payments?: unknown } = {}): Promise<Order> {
   const order = getOrderById(id);
 
   if (order.status !== 'ACTIVE') {
     throw new ConflictError(`order ${id} cannot be completed from status ${order.status} (must be ACTIVE)`);
   }
 
-  const resolvedMethod = paymentMethod ?? order.paymentMethod;
-  if (paymentMethod && paymentMethod !== order.paymentMethod) {
-    setPaymentMethod.run(paymentMethod, id);
-  }
-  const orderForPayment: Order = { ...order, paymentMethod: resolvedMethod };
+  const owed = order.total + order.tip + order.deliveryFee;
+  const resolvedPayments = resolvePayments(payments, order, owed);
 
-  const payment = processPayment(orderForPayment);
+  db.transaction(() => {
+    for (const p of resolvedPayments) {
+      insertOrderPayment.run(id, p.method, p.amount, p.tipAmount);
+    }
+    const singleMethod = resolvedPayments.length === 1 ? resolvedPayments[0].method : null;
+    setPaymentMethod.run(singleMethod, id);
+  })();
+
+  const orderForPayment = getOrderById(id);
+  const payment = processPayment(orderForPayment, resolvedPayments);
   await printBill(orderForPayment, payment);
 
   markCompleted.run(id);

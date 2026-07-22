@@ -84,7 +84,12 @@ export function renderBillHtml(order: Order, payment: Payment): string {
   ${order.deliveryFee > 0 ? `<div class="totals-row"><span>Domicilio</span><span>${formatMoney(order.deliveryFee)}</span></div>` : ''}
   ${order.tip > 0 ? `<div class="totals-row"><span>Propina</span><span>${formatMoney(order.tip)}</span></div>` : ''}
   <div class="totals-row grand"><span>TOTAL</span><span>${formatMoney(order.total + order.deliveryFee + order.tip)}</span></div>
-  <div class="totals-row"><span>Pago (${escapeHtml(describePaymentMethod(payment.method))})</span><span>${formatMoney(payment.amountCOP)}</span></div>
+  ${payment.payments
+    .map(
+      (p) =>
+        `<div class="totals-row"><span>Pago (${escapeHtml(describePaymentMethod(p.method))})</span><span>${formatMoney(p.amount)}</span></div>`
+    )
+    .join('')}
   <div class="thanks">Gracias por su compra!</div>
 </body>
 </html>`;

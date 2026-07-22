@@ -100,6 +100,20 @@ export interface ProductSize {
 }
 
 // ============================================================
+// EMPLOYEES
+// Identification only, no auth: enough to attribute an order to
+// whoever placed it. Removal is a soft delete (isActive: false)
+// so past orders keep a valid employeeId.
+// ============================================================
+
+export interface Employee {
+  id: number;
+  name: string;
+  pictureUrl: string | null;
+  isActive: boolean;
+}
+
+// ============================================================
 // ORDER REQUEST (client -> server payload)
 // Client sends references and quantities only. Prices are
 // always resolved server-side from the menu.
@@ -107,10 +121,17 @@ export interface ProductSize {
 
 export interface OrderRequest {
   orderType: OrderType;
+  /** Optional. When present, must be an active employee's id. */
+  employeeId?: number;
   /** Required when orderType = 'dine_in'. 1-9. */
   tableNumber?: number;
   /** Required for 'takeaway' (name) and 'delivery' (name, phone, address). */
   customer?: CustomerInfo;
+  /**
+   * A declared single method of intent, not a settlement. Used as the default
+   * when POST /api/orders/:id/complete is called without a `payments` array;
+   * a mixed payment always requires passing `payments` explicitly.
+   */
   paymentMethod?: PaymentMethod;
   notes?: string;
   /** Integer COP. Defaults to 0 when omitted. Excluded from `total` and from sales totals. */
@@ -164,6 +185,9 @@ export interface Order {
   id: number;
   orderType: OrderType;
   status: OrderStatus;
+  /** The employee who placed the order, if any. */
+  employeeId: number | null;
+  employeeName: string | null;
   paymentMethod: PaymentMethod | null;
   tableNumber: number | null;
   customerName: string | null;
@@ -179,6 +203,24 @@ export interface Order {
   createdAt: string; // ISO / SQLite datetime
   completedAt: string | null;
   items: OrderItem[];
+  /**
+   * How the order was actually settled. Empty until completion; POST
+   * /api/orders/:id/complete writes one row per method used (a plain
+   * single-method payment is just one entry). Amounts always sum to
+   * `total + tip + deliveryFee`.
+   */
+  payments: OrderPayment[];
+}
+
+export interface OrderPayment {
+  id: number;
+  orderId: number;
+  method: PaymentMethod;
+  /** Integer COP. Total charged via this method, tip included. */
+  amount: number;
+  /** Integer COP. The slice of `amount` that's tip rather than sales; 0..amount. */
+  tipAmount: number;
+  createdAt: string;
 }
 
 export interface OrderItem {

@@ -4,6 +4,7 @@ import ordersRouter from './routes/orders.js';
 import tablesRouter from './routes/tables.js';
 import cashFlowRouter from './routes/cashFlow.js';
 import endOfDayRouter from './routes/endOfDay.js';
+import employeesRouter from './routes/employees.js';
 
 export function createApp() {
   const app = express();
@@ -15,6 +16,7 @@ export function createApp() {
   app.use('/api/tables', tablesRouter);
   app.use('/api/cash-flow', cashFlowRouter);
   app.use('/api/end-of-day', endOfDayRouter);
+  app.use('/api/employees', employeesRouter);
 
   app.use((req, res) => {
     res.status(404).json({ error: 'not found' });

@@ -1,5 +1,6 @@
 erDiagram
   RESTAURANT_TABLES ||--o{ ORDERS : seats
+  EMPLOYEES |o--o{ ORDERS : "placed by"
 
   CATEGORIES ||--o{ PRODUCTS : contains
   PRODUCTS ||--o{ PRODUCT_SIZES : "priced as"
@@ -11,6 +12,7 @@ erDiagram
   PIZZA_FLAVORS ||--o{ PIZZA_GROUP_FLAVORS : "offered by"
 
   ORDERS ||--o{ ORDER_ITEMS : has
+  ORDERS ||--o{ ORDER_PAYMENTS : "settled by"
   PRODUCTS ||--o{ ORDER_ITEMS : ordered_as
   PRODUCT_SIZES ||--o{ ORDER_ITEMS : sized_as
   PRODUCT_OPTIONS ||--o{ ORDER_ITEMS : chosen_as
@@ -27,6 +29,13 @@ erDiagram
     int id PK
     int number "1 to 9, unique"
     text status "free or busy, derived from open orders"
+  }
+
+  EMPLOYEES {
+    int id PK
+    text name
+    text picture_url "nullable"
+    int is_active "default 1. soft delete - false instead of removing the row"
   }
 
   CATEGORIES {
@@ -93,7 +102,8 @@ erDiagram
     int id PK
     text order_type "dine_in, takeaway, delivery"
     text status "PENDING, PRINTING, ACTIVE, COMPLETED"
-    text payment_method "nullable. cash, card, transfer"
+    int employee_id FK "nullable. who placed the order, if recorded"
+    text payment_method "nullable. pre-declared intent; NULL again once settled by a mixed payment (see ORDER_PAYMENTS)"
     int table_number "nullable. dine_in only, 1 to 9"
     text customer_name "nullable. takeaway, delivery"
     text phone "nullable. delivery only"
@@ -123,6 +133,15 @@ erDiagram
   ORDER_ITEM_FLAVORS {
     int order_item_id PK, FK
     int flavor_id PK, FK
+  }
+
+  ORDER_PAYMENTS {
+    int id PK
+    int order_id FK
+    text method "cash, card, or transfer"
+    int amount "total charged via this method, integer COP, tip included"
+    int tip_amount "default 0. slice of amount that's tip, not sales. 0 to amount"
+    text created_at "written once, at completion"
   }
 
   PRINT_JOBS {
@@ -158,7 +177,7 @@ erDiagram
     int order_count "COMPLETED orders that day"
     int delivery_sales "total+delivery_fee summed for delivery orders, tips excluded"
     int dine_in_takeaway_sales "total+delivery_fee summed for dine_in/takeaway orders"
-    int cash_sales "same sum, grouped by payment_method"
+    int cash_sales "grouped by ORDER_PAYMENTS.method, each row's amount - tip_amount"
     int card_sales
     int transfer_sales
     int total_sales "delivery_sales + dine_in_takeaway_sales"

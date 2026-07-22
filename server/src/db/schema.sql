@@ -6,6 +6,16 @@ CREATE TABLE IF NOT EXISTS restaurant_tables (
   status TEXT NOT NULL DEFAULT 'free' CHECK (status IN ('free', 'busy'))
 );
 
+-- Identification only: no auth, no login, just a name to attribute an order
+-- to. Soft-deleted via is_active rather than removed, so past orders keep a
+-- valid employee_id and historical reports stay accurate.
+CREATE TABLE IF NOT EXISTS employees (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  name        TEXT NOT NULL,
+  picture_url TEXT,
+  is_active   INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1))
+);
+
 CREATE TABLE IF NOT EXISTS categories (
   id   INTEGER PRIMARY KEY AUTOINCREMENT,
   key  TEXT NOT NULL UNIQUE,
@@ -82,6 +92,11 @@ CREATE TABLE IF NOT EXISTS orders (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
   order_type     TEXT NOT NULL CHECK (order_type IN ('dine_in', 'takeaway', 'delivery')),
   status         TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'PRINTING', 'ACTIVE', 'COMPLETED')),
+  employee_id    INTEGER REFERENCES employees(id),
+  -- Nullable: unset until a method is declared, and set back to NULL by
+  -- completeOrder when the order is settled with a mixed payment (more than
+  -- one row in order_payments) - see that table for the actual settlement.
+  -- Otherwise mirrors the single order_payments.method used to complete it.
   payment_method TEXT CHECK (payment_method IN ('cash', 'card', 'transfer')),
   table_number   INTEGER CHECK (table_number BETWEEN 1 AND 9),
   customer_name  TEXT,
@@ -115,6 +130,25 @@ CREATE TABLE IF NOT EXISTS order_item_flavors (
   order_item_id INTEGER NOT NULL REFERENCES order_items(id) ON DELETE CASCADE,
   flavor_id     INTEGER NOT NULL REFERENCES pizza_flavors(id),
   PRIMARY KEY (order_item_id, flavor_id)
+);
+
+-- One row per method used to settle an order. A normal order has exactly one
+-- row here; a mixed payment (e.g. part cash, part card) has several, whose
+-- amounts must sum to (total + tip + delivery_fee) - enforced in
+-- orderService.completeOrder, not by the DB. tip_amount is the slice of
+-- `amount` that's tip rather than sales (e.g. $30 owed + a $5 tip charged to
+-- the card, cash covering a separate $20: that row is amount=35,
+-- tip_amount=5) - it lets End-of-Day exclude tips from sales per payment
+-- method exactly instead of guessing via a proportional split. Across all of
+-- an order's rows, tip_amount must sum to orders.tip. Only ever written
+-- once, at completion time.
+CREATE TABLE IF NOT EXISTS order_payments (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id   INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  method     TEXT NOT NULL CHECK (method IN ('cash', 'card', 'transfer')),
+  amount     INTEGER NOT NULL CHECK (amount > 0),
+  tip_amount INTEGER NOT NULL DEFAULT 0 CHECK (tip_amount >= 0 AND tip_amount <= amount),
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
 -- One saved artifact per (order, kind): content is deterministic from the
@@ -182,5 +216,7 @@ CREATE TABLE IF NOT EXISTS closing_reports (
 
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_orders_table_number ON orders(table_number);
+CREATE INDEX IF NOT EXISTS idx_orders_employee_id ON orders(employee_id);
 CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);
+CREATE INDEX IF NOT EXISTS idx_order_payments_order_id ON order_payments(order_id);
 CREATE INDEX IF NOT EXISTS idx_cash_expenses_cash_flow_id ON cash_expenses(cash_flow_id);
