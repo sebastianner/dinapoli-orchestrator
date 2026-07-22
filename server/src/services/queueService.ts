@@ -1,6 +1,6 @@
 import db from '../db/index.js';
 import { getOrderById } from './orderService.js';
-import { printKitchenTicket } from './printerService.js';
+import { printKitchenTicket, printKitchenTicketAddendum } from './printerService.js';
 import type { OrderStatus } from '../types/dinapoly-types.js';
 
 const POLL_INTERVAL_MS = 2000;
@@ -10,7 +10,9 @@ const POLL_INTERVAL_MS = 2000;
 // already committed them, so recovery is just: on every tick (including the very
 // first one at boot) re-scan for PENDING or PRINTING rows and (re)print them.
 // A row stuck in PRINTING (process died mid-print) is retried exactly the same
-// way a fresh PENDING row would be.
+// way a fresh PENDING row would be. Items added to an already-ACTIVE order (see
+// orderService.addOrderItems) bounce it back to PENDING, landing it back in
+// this same scan.
 const getPendingOrPrinting = db.prepare<[], { id: number; status: OrderStatus }>(
   `SELECT id, status FROM orders WHERE status IN ('PENDING', 'PRINTING') ORDER BY id`
 );
@@ -18,6 +20,9 @@ const markPrinting = db.prepare<[number]>(
   `UPDATE orders SET status = 'PRINTING', print_attempts = print_attempts + 1 WHERE id = ?`
 );
 const markActive = db.prepare<[number]>(`UPDATE orders SET status = 'ACTIVE' WHERE id = ?`);
+const markItemsPrinted = db.prepare<[number]>(
+  `UPDATE order_items SET printed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE order_id = ? AND printed_at IS NULL`
+);
 
 let isTicking = false;
 let intervalHandle: ReturnType<typeof setInterval> | null = null;
@@ -25,8 +30,20 @@ let intervalHandle: ReturnType<typeof setInterval> | null = null;
 function processOrder(id: number): void {
   markPrinting.run(id);
   const order = getOrderById(id);
+  const newItems = order.items.filter((item) => item.printedAt == null);
+  // If some items already have printed_at set, the original kitchen ticket
+  // already went out and this row is back here because addOrderItems bounced
+  // it to PENDING - print only the addition. Otherwise this is the order's
+  // first pass through the queue: print the full ticket (which is every
+  // current item, since none of them have printed yet).
+  const isAddition = order.items.length > newItems.length;
   try {
-    printKitchenTicket(order);
+    if (isAddition) {
+      printKitchenTicketAddendum(order, newItems);
+    } else {
+      printKitchenTicket(order);
+    }
+    markItemsPrinted.run(id);
     markActive.run(id);
   } catch (err) {
     // Leave status as PRINTING; the next tick (or the next boot, after a
@@ -59,7 +76,11 @@ export function stopQueueWorker(): void {
   intervalHandle = null;
 }
 
-/** Nudge the worker to process immediately instead of waiting for the next poll tick. */
-export function notifyNewOrder(): void {
+/**
+ * Nudge the worker to process immediately instead of waiting for the next
+ * poll tick - used both for a brand new order and for items added to an
+ * existing one.
+ */
+export function notifyPrintQueue(): void {
   setImmediate(tick);
 }

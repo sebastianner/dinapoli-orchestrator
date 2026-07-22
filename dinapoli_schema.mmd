@@ -129,6 +129,7 @@ erDiagram
     int quantity
     int unit_price "price snapshot at order time, integer COP"
     text notes "nullable. e.g. sin cebolla"
+    text printed_at "nullable. set once this item's been sent to the kitchen (original ticket or addendum)"
   }
   ORDER_ITEM_FLAVORS {
     int order_item_id PK, FK

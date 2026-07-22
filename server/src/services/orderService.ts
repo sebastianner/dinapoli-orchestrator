@@ -15,6 +15,7 @@ import type {
   PizzaItemRequest,
   ProductItemRequest,
   OrderType,
+  OrderStatus,
   PaymentMethod,
   PizzaGroupId,
   PizzaSizeId,
@@ -309,6 +310,14 @@ function validateOrderRequest(input: unknown): OrderRequest {
   return orderRequest;
 }
 
+function resolveItems(items: OrderItemRequest[]): ResolvedItem[] {
+  return items.map((item, index) => {
+    if (item?.type === 'pizza') return resolvePizzaItem(item, index);
+    if (item?.type === 'product') return resolveProductItem(item, index);
+    throw new ValidationError(`items[${index}]: type must be 'pizza' or 'product'`);
+  });
+}
+
 export function createOrder(input: unknown): Order {
   const orderRequest = validateOrderRequest(input);
 
@@ -319,11 +328,7 @@ export function createOrder(input: unknown): Order {
     }
   }
 
-  const resolvedItems = orderRequest.items.map((item: OrderItemRequest, index: number) => {
-    if (item?.type === 'pizza') return resolvePizzaItem(item, index);
-    if (item?.type === 'product') return resolveProductItem(item, index);
-    throw new ValidationError(`items[${index}]: type must be 'pizza' or 'product'`);
-  });
+  const resolvedItems = resolveItems(orderRequest.items);
 
   const total = resolvedItems.reduce((sum, it) => sum + it.unitPrice * it.quantity, 0);
 
@@ -400,6 +405,7 @@ function rowToOrderItem(row: OrderItemRow): OrderItem {
     quantity: row.quantity,
     unitPrice: row.unit_price,
     notes: row.notes,
+    printedAt: row.printed_at,
   };
 
   if (row.item_type === 'pizza') {
@@ -517,6 +523,63 @@ export function setOrderDeliveryFee(id: number, deliveryFee: unknown): Order {
     throw new ValidationError('deliveryFee can only be set on delivery orders');
   }
   updateDeliveryFee.run(deliveryFee, id);
+  return getOrderById(id);
+}
+
+const ADDABLE_ITEM_STATUSES = new Set<OrderStatus>(['PENDING', 'PRINTING', 'ACTIVE']);
+const addToOrderTotal = db.prepare<[number, number]>('UPDATE orders SET total = total + ? WHERE id = ?');
+const markOrderPending = db.prepare<[number]>(`UPDATE orders SET status = 'PENDING' WHERE id = ?`);
+
+/**
+ * Adds items to an order that hasn't been completed yet. If the order is
+ * already ACTIVE (its original kitchen ticket already printed), this bounces
+ * it back to PENDING so the same queue pass that printed the original ticket
+ * picks it up again - queueService.processOrder tells "first ticket" from
+ * "addition" apart by whether any of the order's items already have
+ * printed_at set, printing an addendum (new items only) in that case instead
+ * of the whole order again. The caller (routes/orders.ts) nudges the queue
+ * worker afterward so this doesn't wait for the next poll tick.
+ */
+export function addOrderItems(id: number, items: unknown): Order {
+  const order = getOrderById(id);
+  if (!ADDABLE_ITEM_STATUSES.has(order.status)) {
+    throw new ConflictError(
+      `order ${id} cannot accept new items from status ${order.status} (must be PENDING, PRINTING, or ACTIVE)`
+    );
+  }
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new ValidationError('items must be a non-empty array');
+  }
+
+  const resolvedItems = resolveItems(items as OrderItemRequest[]);
+  const addedTotal = resolvedItems.reduce((sum, it) => sum + it.unitPrice * it.quantity, 0);
+
+  db.transaction(() => {
+    for (const item of resolvedItems) {
+      const itemResult = insertOrderItem.run({
+        orderId: id,
+        itemType: item.itemType,
+        productId: item.productId,
+        productSizeId: item.productSizeId,
+        productOptionId: item.productOptionId,
+        pizzaGroupId: item.pizzaGroupId,
+        pizzaSizeId: item.pizzaSizeId,
+        pizzaFlavorId: item.pizzaFlavorId,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        notes: item.notes,
+      });
+      const orderItemId = Number(itemResult.lastInsertRowid);
+      for (const flavorId of item.flavorIds) {
+        insertOrderItemFlavor.run(orderItemId, flavorId);
+      }
+    }
+    addToOrderTotal.run(addedTotal, id);
+    if (order.status === 'ACTIVE') {
+      markOrderPending.run(id);
+    }
+  })();
+
   return getOrderById(id);
 }
 

@@ -48,10 +48,23 @@ to type `better-sqlite3` prepared statements live in `src/types/db.ts`.
   sales totals (see End-of-Day Closing below).
 - **Persistent queue** (`src/services/queueService.js`): the queue *is* the
   `orders.status` column — no separate queue store. A poll loop (every 2s, plus
-  an immediate pass on boot and right after a new order arrives) picks up every
-  `PENDING` or `PRINTING` row, prints the kitchen ticket, and advances it to
-  `ACTIVE`. A row stuck in `PRINTING` (crash/blackout mid-print) is retried
-  exactly like a fresh order on the next tick — this is the recovery strategy.
+  an immediate pass on boot and right after a new order or item addition
+  arrives) picks up every `PENDING` or `PRINTING` row, prints a kitchen
+  ticket, and advances it to `ACTIVE`. A row stuck in `PRINTING`
+  (crash/blackout mid-print) is retried exactly like a fresh order on the
+  next tick — this is the recovery strategy. Which ticket gets printed
+  depends on `order_items.printed_at`: if none of the order's items have it
+  set yet, this is the order's first pass through the queue and the full
+  kitchen ticket prints; if some already do, this row is here because
+  `POST /api/orders/:id/items` bounced an `ACTIVE` order back to `PENDING`,
+  and only a short addendum ticket for the unprinted items prints instead
+  (the kitchen already has the rest cooking/plated). Either way,
+  successfully-printed items get `printed_at` stamped so the same item is
+  never printed twice.
+  - `POST /api/orders/:id/items` — adds items to any order that isn't
+    `COMPLETED` yet (`PENDING`, `PRINTING`, or `ACTIVE`), using the same
+    item validation/pricing as order creation, and adds their cost to
+    `order.total`.
 - **Printer** (`src/services/printerService.js`): a single 80mm ESC/POS thermal
   printer, reached through its CUPS queue (`POS-80` by default, override with
   `PRINTER_QUEUE`) via `lp -d <queue> -o raw`, which hands our ESC/POS bytes to
@@ -138,6 +151,11 @@ to type `better-sqlite3` prepared statements live in `src/types/db.ts`.
 - `GET /api/menu` — full menu, shaped exactly like `menu_simple_english_keys_v2.json`.
 - `GET /api/orders?status=ACTIVE` — list orders, optionally filtered by status.
 - `GET /api/orders/:id` — one order.
+- `POST /api/orders/:id/items` — adds items to an order that isn't `COMPLETED`
+  yet. Body: `{ "items": OrderItemRequest[] }` (same item shape as order
+  creation). Adds their cost to `order.total` and, if the order was already
+  `ACTIVE`, bounces it back to `PENDING` so the queue worker prints a short
+  addendum ticket for just the new items.
 - `POST /api/orders/:id/complete` — marks an `ACTIVE` order `COMPLETED`; processes
   payment and prints the bill. Body: `{ "payments"?: { method: "cash"|"card"|"transfer", amount: number, tipAmount?: number }[] }`.
   Omit `payments` to settle the full amount owed via the order's pre-declared

@@ -126,6 +126,7 @@ export interface OrderItemRow {
   quantity: number;
   unit_price: number;
   notes: string | null;
+  printed_at: string | null;
 }
 
 export type PrintJobKind = 'kitchen_ticket' | 'bill';

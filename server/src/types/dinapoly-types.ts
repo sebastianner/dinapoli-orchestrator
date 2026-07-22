@@ -234,6 +234,8 @@ export interface OrderItem {
   /** Price snapshot at order time, integer COP. */
   unitPrice: number;
   notes: string | null;
+  /** Null until the queue worker includes this item in a kitchen ticket (original or addendum). */
+  printedAt: string | null;
 }
 
 export interface ProductRef {

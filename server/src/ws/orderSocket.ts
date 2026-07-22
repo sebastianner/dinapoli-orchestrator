@@ -1,7 +1,7 @@
 import type { Server as HttpServer } from 'node:http';
 import { WebSocketServer } from 'ws';
 import { createOrder } from '../services/orderService.js';
-import { notifyNewOrder } from '../services/queueService.js';
+import { notifyPrintQueue } from '../services/queueService.js';
 
 const WS_PATH = '/ws/orders';
 
@@ -22,7 +22,7 @@ export function attachOrderSocket(httpServer: HttpServer): WebSocketServer {
 
       try {
         const order = createOrder(orderRequest);
-        notifyNewOrder();
+        notifyPrintQueue();
         socket.send(JSON.stringify({ type: 'order_created', order }));
       } catch (err) {
         socket.send(JSON.stringify({ type: 'error', message: (err as Error).message }));

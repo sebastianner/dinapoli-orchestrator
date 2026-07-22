@@ -307,6 +307,45 @@ export function printKitchenTicket(order: Order): void {
   printText(order.id, 'kitchen_ticket', text, KITCHEN_TICKET_COPIES);
 }
 
+/**
+ * A short "addition" ticket for items added to an order that's already
+ * ACTIVE (see orderService.addOrderItems) - lists only the newly added
+ * items, since the kitchen already has the original items cooking/plated.
+ * Unlike printKitchenTicket, this isn't saved to print_jobs: it isn't the
+ * order's single reprintable "kitchen_ticket" snapshot, just a delta
+ * notification, and retry safety on printer failure comes from
+ * order_items.printed_at / the order bouncing back through PENDING instead.
+ */
+export function renderKitchenTicketAddendum(order: Order, newItems: OrderItem[]): string {
+  const width = TICKET_TEXT_WIDTH;
+  const lines: string[] = [];
+  const pushLabeled = (label: string, value: string) => lines.push(...wordWrap(`${label}: ${value}`, width));
+
+  lines.push(centerText('DINAPOLI PIZZA', width));
+  lines.push(centerText('ADICION A COMANDA', width));
+  lines.push(`Orden #${order.id}`);
+  lines.push(`${describeOrderType(order.orderType)}`);
+  if (order.tableNumber) lines.push(`Mesa: ${order.tableNumber}`);
+  if (order.customerName) pushLabeled('Cliente', order.customerName);
+  lines.push('-'.repeat(width));
+  for (const item of newItems) {
+    const [firstLine, ...restLines] = describeItemTicketLines(item, width - 3);
+    lines.push(`${item.quantity}x ${firstLine}`);
+    for (const line of restLines) lines.push(`   ${line}`);
+    if (item.notes) {
+      for (const line of wordWrap(`nota: ${item.notes}`, width - 3)) lines.push(`   ${line}`);
+    }
+  }
+  lines.push('='.repeat(width));
+  return toAsciiText(lines.join('\n'));
+}
+
+export function printKitchenTicketAddendum(order: Order, newItems: OrderItem[]): void {
+  const text = renderKitchenTicketAddendum(order, newItems);
+  writeToDevice(buildTextPayload(text, KITCHEN_TICKET_COPIES));
+  console.log(`[printer:thermal-80mm] printed kitchen ticket addendum for order ${order.id} (${KITCHEN_TICKET_COPIES}x)`);
+}
+
 // ---------------------------------------------------------------------------
 // HTML -> rasterized image printing (bill)
 // ---------------------------------------------------------------------------

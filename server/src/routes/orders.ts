@@ -6,7 +6,9 @@ import {
   reprintOrderDocument,
   setOrderTip,
   setOrderDeliveryFee,
+  addOrderItems,
 } from '../services/orderService.js';
+import { notifyPrintQueue } from '../services/queueService.js';
 import { ValidationError } from '../utils/errors.js';
 
 const router = Router();
@@ -49,6 +51,16 @@ router.put('/:id/tip', (req, res, next) => {
 router.put('/:id/delivery-fee', (req, res, next) => {
   try {
     const order = setOrderDeliveryFee(parseOrderId(req.params.id), req.body?.deliveryFee);
+    res.json(order);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/:id/items', (req, res, next) => {
+  try {
+    const order = addOrderItems(parseOrderId(req.params.id), req.body?.items);
+    notifyPrintQueue();
     res.json(order);
   } catch (err) {
     next(err);

@@ -111,6 +111,14 @@ CREATE TABLE IF NOT EXISTS orders (
   print_attempts INTEGER NOT NULL DEFAULT 0
 );
 
+-- printed_at is NULL until the queue worker includes this item in a kitchen
+-- ticket. Items added to an order that's already ACTIVE (see
+-- orderService.addOrderItems) come in with it NULL too, and flip the order's
+-- status back to PENDING so the same PENDING/PRINTING queue pass that
+-- printed the original ticket picks it up again - the worker tells "first
+-- ticket" from "addition" apart by whether any of the order's items already
+-- have printed_at set (queueService.processOrder), printing an addendum
+-- (new items only) in the latter case instead of the whole order again.
 CREATE TABLE IF NOT EXISTS order_items (
   id                INTEGER PRIMARY KEY AUTOINCREMENT,
   order_id          INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
@@ -123,7 +131,8 @@ CREATE TABLE IF NOT EXISTS order_items (
   pizza_flavor_id   INTEGER REFERENCES pizza_flavors(id),
   quantity          INTEGER NOT NULL CHECK (quantity > 0),
   unit_price        INTEGER NOT NULL,
-  notes             TEXT
+  notes             TEXT,
+  printed_at        TEXT
 );
 
 CREATE TABLE IF NOT EXISTS order_item_flavors (
