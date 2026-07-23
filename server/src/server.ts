@@ -1,8 +1,8 @@
-import http from 'node:http';
-import { createApp } from './app.js';
-import { attachOrderSocket } from './ws/orderSocket.js';
-import { startQueueWorker } from './services/queueService.js';
-import { getCurrentCashFlow } from './services/cashFlowService.js';
+import http from "node:http";
+import { createApp } from "./app.js";
+import { attachOrderSocket } from "./ws/orderSocket.js";
+import { startQueueWorker } from "./services/queueService.js";
+import { getCurrentCashFlow } from "./services/cashFlowService.js";
 
 const PORT = process.env.PORT ?? 3000;
 

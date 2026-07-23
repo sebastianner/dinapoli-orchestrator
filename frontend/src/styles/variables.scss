@@ -1,0 +1,97 @@
+// Color palette and design tokens, consumed as CSS custom properties so
+// Tailwind utilities (via globals.scss @theme) and hand-written SCSS both
+// read from the same source. Light values are the default; dark overrides
+// apply under [data-theme='dark'] (see globals.scss for the toggle).
+
+:root {
+  // Brand
+  --color-brand-50: #fff1eb;
+  --color-brand-100: #ffdfd0;
+  --color-brand-200: #ffbb9e;
+  --color-brand-300: #ff9563;
+  --color-brand-400: #fb6d33;
+  --color-brand-500: #e8501a;
+  --color-brand-600: #c33c12;
+  --color-brand-700: #9c2f12;
+  --color-brand-800: #7c2814;
+  --color-brand-900: #672313;
+
+  // Surfaces
+  --color-bg: #f7f6f4;
+  --color-surface: #ffffff;
+  --color-surface-raised: #ffffff;
+  --color-border: #e6e2dc;
+
+  // Text
+  --color-text-primary: #201a16;
+  --color-text-secondary: #6b6058;
+  --color-text-inverted: #ffffff;
+
+  // Semantic
+  --color-success: #1f9254;
+  --color-success-bg: #e7f7ee;
+  --color-danger: #d1372f;
+  --color-danger-bg: #fbeae9;
+  --color-warning: #b5790a;
+  --color-warning-bg: #fdf3df;
+
+  // Tables
+  --color-table-free: #1f9254;
+  --color-table-free-bg: #e7f7ee;
+  --color-table-busy: #d1372f;
+  --color-table-busy-bg: #fbeae9;
+
+  // Motion
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 320ms;
+}
+
+[data-theme='dark'] {
+  --color-bg: #17140f;
+  --color-surface: #211c17;
+  --color-surface-raised: #2a241d;
+  --color-border: #3a332a;
+
+  --color-text-primary: #f5f1ec;
+  --color-text-secondary: #a89f93;
+  --color-text-inverted: #1a1613;
+
+  --color-success: #34c37f;
+  --color-success-bg: #143627;
+  --color-danger: #f0645c;
+  --color-danger-bg: #3a1917;
+  --color-warning: #e0a838;
+  --color-warning-bg: #3a2c0f;
+
+  --color-table-free: #34c37f;
+  --color-table-free-bg: #143627;
+  --color-table-busy: #f0645c;
+  --color-table-busy-bg: #3a1917;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --color-bg: #17140f;
+    --color-surface: #211c17;
+    --color-surface-raised: #2a241d;
+    --color-border: #3a332a;
+
+    --color-text-primary: #f5f1ec;
+    --color-text-secondary: #a89f93;
+    --color-text-inverted: #1a1613;
+
+    --color-success: #34c37f;
+    --color-success-bg: #143627;
+    --color-danger: #f0645c;
+    --color-danger-bg: #3a1917;
+    --color-warning: #e0a838;
+    --color-warning-bg: #3a2c0f;
+
+    --color-table-free: #34c37f;
+    --color-table-free-bg: #143627;
+    --color-table-busy: #f0645c;
+    --color-table-busy-bg: #3a1917;
+  }
+}

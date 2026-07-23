@@ -8,6 +8,7 @@ const order: OrderRequest = {
   orderType: "dine_in",
   customer: { name: "Don Chimbo", phone: "555-1234", address: "123 Main St" },
   paymentMethod: "cash",
+  tableNumber: 6,
   items: [
     {
       type: "pizza",

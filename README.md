@@ -149,7 +149,7 @@ to type `better-sqlite3` prepared statements live in `src/types/db.ts`.
 ## API
 
 - `GET /api/menu` — full menu, shaped exactly like `menu_simple_english_keys_v2.json`.
-- `GET /api/orders?status=ACTIVE` — list orders, optionally filtered by status.
+- `GET /api/orders?status=ACTIVE&date=YYYY-MM-DD&orderType=dine_in` — list orders, optionally filtered by status, business day (Bogotá, UTC-5), and/or order type.
 - `GET /api/orders/:id` — one order.
 - `POST /api/orders/:id/items` — adds items to an order that isn't `COMPLETED`
   yet. Body: `{ "items": OrderItemRequest[] }` (same item shape as order

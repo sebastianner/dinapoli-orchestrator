@@ -2,6 +2,10 @@
 
 ## Requirements
 
+- Create a new folder for the frontend project.
+- Use React with TypeScript.
+- Use the latest version of vite as the build tool. 
+- Use a file-based routing solution.
 - The UI should resemble modern POS systems such as TOAST, featuring a clean, consistent color palette with support for both light and dark mode.
 - The application should include smooth animations to improve the overall user experience.
 - Use Zustand as the state management solution.
@@ -224,3 +228,9 @@ POST /api/orders/:id/complete
   - Current time
   - Current date
   - Current day
+
+## Active orders tab
+- Clickable component that opens or minimizes a persistent tab showing all active delivery and takeaway orders, each with a **View** button that navigates to the order's detail page.
+- Should be placed at the left bottom of the screen.
+- Should be visible on all pages except the Dashboard.
+- Each order should display how long ago was the order created, using a human-readable format (e.g. "5 minutes ago", "2 hours ago").

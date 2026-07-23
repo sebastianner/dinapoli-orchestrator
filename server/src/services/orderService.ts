@@ -477,10 +477,36 @@ export function getOrderById(id: number): Order {
   };
 }
 
-export function listOrders({ status }: { status?: string } = {}): Order[] {
-  const rows = status
-    ? db.prepare<[string], { id: number }>('SELECT id FROM orders WHERE status = ? ORDER BY id').all(status)
-    : db.prepare<[], { id: number }>('SELECT id FROM orders ORDER BY id').all();
+/**
+ * `date` matches orders whose `created_at` falls on that Bogotá business day
+ * (same UTC-5 convention as End-of-Day's sales aggregation), regardless of
+ * status. `orderType` is the "category" filter from the Order History page.
+ */
+export function listOrders({ status, date, orderType }: { status?: string; date?: string; orderType?: string } = {}): Order[] {
+  if (date != null && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    throw new ValidationError("date must be in 'YYYY-MM-DD' format");
+  }
+  if (orderType != null && !ORDER_TYPES.has(orderType as OrderType)) {
+    throw new ValidationError(`orderType must be one of ${[...ORDER_TYPES].join(', ')}`);
+  }
+
+  const conditions: string[] = [];
+  const params: string[] = [];
+  if (status) {
+    conditions.push('status = ?');
+    params.push(status);
+  }
+  if (date) {
+    conditions.push(`date(created_at, '-5 hours') = ?`);
+    params.push(date);
+  }
+  if (orderType) {
+    conditions.push('order_type = ?');
+    params.push(orderType);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const rows = db.prepare<string[], { id: number }>(`SELECT id FROM orders ${where} ORDER BY id`).all(...params);
   return rows.map((r) => getOrderById(r.id));
 }
 

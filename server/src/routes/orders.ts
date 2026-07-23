@@ -23,7 +23,9 @@ function parseOrderId(param: string): number {
 
 router.get('/', (req, res) => {
   const status = typeof req.query.status === 'string' ? req.query.status : undefined;
-  res.json(listOrders({ status }));
+  const date = typeof req.query.date === 'string' ? req.query.date : undefined;
+  const orderType = typeof req.query.orderType === 'string' ? req.query.orderType : undefined;
+  res.json(listOrders({ status, date, orderType }));
 });
 
 router.get('/:id', (req, res) => {
