@@ -5,9 +5,8 @@ const url = process.env.WS_URL ?? "ws://localhost:3000/ws/orders";
 const ws = new WebSocket(url);
 
 const order: OrderRequest = {
-  orderType: "takeaway",
+  orderType: "dine_in",
   customer: { name: "Don Chimbo", phone: "555-1234", address: "123 Main St" },
-  tableNumber: 5,
   paymentMethod: "cash",
   items: [
     {
