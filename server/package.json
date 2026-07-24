@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc && cp -r src/assets dist/assets",
     "start": "node dist/server.js",
-    "dev": "tsx watch src/server.ts",
+    "dev": "node --env-file=.env --import tsx/esm --watch --watch-path=src src/server.ts",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed.ts",
     "db:reset": "tsx src/db/migrate.ts --reset && tsx src/db/seed.ts",
