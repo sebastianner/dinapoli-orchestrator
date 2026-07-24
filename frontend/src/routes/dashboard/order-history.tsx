@@ -37,6 +37,10 @@ function OrderHistoryContent({ today }: { today: string }) {
     date: selectedDate,
     orderType: category === 'all' ? undefined : category,
   });
+  // Unfiltered, just to gate "Generar cierre del día" - the category filter above
+  // shouldn't make the button disappear/disable just because e.g. "Domicilio" is
+  // empty while the day still has dine_in orders.
+  const { data: ordersToday = [] } = useOrdersByFilter({ date: selectedDate });
   const { data: closingReports = [] } = useClosingReports();
   const pushToast = useToastStore((s) => s.push);
   const navigate = useNavigate();
@@ -110,7 +114,8 @@ function OrderHistoryContent({ today }: { today: string }) {
               <button
                 type="button"
                 onClick={handleGenerateReport}
-                disabled={generating}
+                disabled={generating || ordersToday.length === 0}
+                title={ordersToday.length === 0 ? 'No hay órdenes hoy todavía' : undefined}
                 className="rounded-full bg-success px-4 py-2 text-sm font-semibold text-white transition-opacity duration-fast hover:opacity-90 disabled:opacity-60"
               >
                 {generating ? 'Generando...' : 'Generar cierre del día'}

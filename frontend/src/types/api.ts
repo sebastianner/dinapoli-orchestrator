@@ -117,10 +117,17 @@ export interface CustomerInfo {
 
 export type OrderItemRequest = PizzaItemRequest | ProductItemRequest;
 
+export interface PizzaFlavorSelection {
+  /** Flavor id. */
+  flavor: string;
+  /** This flavor's share of the pizza, percent, 1-100. */
+  portion: number;
+}
+
 export interface PizzaItemRequest {
   type: 'pizza';
   size: PizzaSizeId;
-  flavors: string[];
+  flavors: PizzaFlavorSelection[];
   quantity: number;
   notes?: string;
 }
@@ -148,11 +155,7 @@ export interface OrderRequest {
   tableNumber?: number;
   /** Required for 'takeaway' (name) and 'delivery' (name, phone, address). */
   customer?: CustomerInfo;
-  /** A declared single method of intent, not a settlement. */
-  paymentMethod?: PaymentMethod;
   notes?: string;
-  tip?: number;
-  deliveryFee?: number;
   items: OrderItemRequest[];
 }
 
@@ -167,7 +170,7 @@ export interface ProductRef {
 export interface PizzaRef {
   group: PizzaGroupId;
   size: PizzaSizeId;
-  flavors: string[];
+  flavors: PizzaFlavorSelection[];
 }
 
 export interface OrderItem {
@@ -185,10 +188,14 @@ export interface OrderPayment {
   id: number;
   orderId: number;
   method: PaymentMethod;
-  /** Integer COP. Total charged via this method, tip included. */
+  /** Integer COP. Total charged via this method, tip and delivery fee included - the gross amount, before this split's own discount. */
   amount: number;
   /** Integer COP. The slice of `amount` that's tip rather than sales; 0..amount. */
   tipAmount: number;
+  /** Integer COP. The slice of `amount` that's delivery fee rather than sales; 0..amount. */
+  deliveryFee: number;
+  /** Integer COP. The slice of `amount` this split's discount accounts for; actual cash collected is `amount - discount`. */
+  discount: number;
   createdAt: string;
 }
 
@@ -196,6 +203,8 @@ export interface PaymentSplitRequest {
   method: PaymentMethod;
   amount: number;
   tipAmount?: number;
+  deliveryFee?: number;
+  discount?: number;
 }
 
 export interface Order {
@@ -204,7 +213,6 @@ export interface Order {
   status: OrderStatus;
   employeeId: number | null;
   employeeName: string | null;
-  paymentMethod: PaymentMethod | null;
   tableNumber: number | null;
   customerName: string | null;
   phone: string | null;
@@ -213,6 +221,7 @@ export interface Order {
   total: number;
   tip: number;
   deliveryFee: number;
+  discount: number;
   notes: string | null;
   createdAt: string;
   completedAt: string | null;

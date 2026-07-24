@@ -1,55 +1,58 @@
-import { useEffect, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { mutate } from 'swr';
 import classNames from 'classnames';
 import { CreditCard, Send, Trash2 } from 'lucide-react';
-import { useOrderStore } from '@/store/useOrderStore';
+import { useOrderStore, type CartItem } from '@/store/useOrderStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useToastStore } from '@/store/useToastStore';
-import { useOrder } from '@/lib/queries';
+import { useMenu, useOrder } from '@/lib/queries';
 import { formatCOP } from '@/lib/format';
-import { addOrderItems, setOrderDeliveryFee, setOrderTip } from '@/lib/api';
+import { addOrderItems } from '@/lib/api';
 import { orderSocketClient } from '@/lib/orderSocket';
 import { PaymentModal } from '@/components/order/PaymentModal';
+import { allPizzaFlavors, formatPortionFraction, getPizzaCategory, getProduct } from '@/lib/pricing';
+import { useOrderNotificationStore } from '@/store/useOrderNotificationStore';
+import type { Menu, Order, OrderItem, PizzaCategory } from '@/types/api';
 
 type TipMode = 'none' | 'ten' | 'twenty' | 'custom';
 
 const TIP_PERCENTAGES: Record<'ten' | 'twenty', number> = { ten: 0.1, twenty: 0.2 };
 
 export function OrderOverview() {
+  const { data: menu } = useMenu();
   const currentOrderId = useOrderStore((s) => s.currentOrderId);
   const newOrderInfo = useOrderStore((s) => s.newOrderInfo);
   const cart = useOrderStore((s) => s.cart);
   const removeCartItem = useOrderStore((s) => s.removeCartItem);
+  const removeCartItems = useOrderStore((s) => s.removeCartItems);
   const clearCart = useOrderStore((s) => s.clearCart);
-  const openExistingOrder = useOrderStore((s) => s.openExistingOrder);
+  const promoteDraftToOrder = useOrderStore((s) => s.promoteDraftToOrder);
   const upsertActiveOrder = useOrderStore((s) => s.upsertActiveOrder);
   const clearCurrentOrder = useOrderStore((s) => s.clearCurrentOrder);
+  const pendingTip = useOrderStore((s) => s.pendingTip);
+  const pendingDeliveryFee = useOrderStore((s) => s.pendingDeliveryFee);
+  const pendingDiscount = useOrderStore((s) => s.pendingDiscount);
+  const setPendingTip = useOrderStore((s) => s.setPendingTip);
+  const setPendingDeliveryFee = useOrderStore((s) => s.setPendingDeliveryFee);
+  const setPendingDiscount = useOrderStore((s) => s.setPendingDiscount);
 
   const employee = useSessionStore((s) => s.employee);
   const pushToast = useToastStore((s) => s.push);
+  const showOrderNotification = useOrderNotificationStore((s) => s.show);
   const navigate = useNavigate();
 
   const { data: existingOrder } = useOrder(currentOrderId);
 
-  const [tipMode, setTipMode] = useState<TipMode>('none');
-  const [localTip, setLocalTip] = useState('0');
-  const [localDeliveryFee, setLocalDeliveryFee] = useState('0');
+  // Tip/delivery fee/discount are purely client-side drafts until checkout
+  // (see useOrderStore) - there's nowhere on the server to persist them
+  // before a payment method is chosen. customTipOpen only exists to keep the
+  // custom-amount input visible while it's still 0 (e.g. right after
+  // clicking "Otra", before typing anything) - tipMode itself is derived
+  // from pendingTip so it survives navigating away and back.
+  const [customTipOpen, setCustomTipOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [paymentOpen, setPaymentOpen] = useState(false);
-
-  useEffect(() => {
-    if (existingOrder) {
-      const tenPct = Math.round(existingOrder.total * TIP_PERCENTAGES.ten);
-      const twentyPct = Math.round(existingOrder.total * TIP_PERCENTAGES.twenty);
-      if (existingOrder.tip === 0) setTipMode('none');
-      else if (existingOrder.tip === tenPct) setTipMode('ten');
-      else if (existingOrder.tip === twentyPct) setTipMode('twenty');
-      else setTipMode('custom');
-      setLocalTip(String(existingOrder.tip));
-      setLocalDeliveryFee(String(existingOrder.deliveryFee));
-    }
-  }, [existingOrder]);
 
   const cartSubtotal = cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
   const existingSubtotal = existingOrder?.total ?? 0;
@@ -61,49 +64,30 @@ export function OrderOverview() {
   const orderType = existingOrder?.orderType ?? newOrderInfo?.orderType;
   const isDelivery = orderType === 'delivery';
 
-  const applyTip = async (amount: number) => {
-    if (!existingOrder || amount === existingOrder.tip) return;
-    try {
-      const updated = await setOrderTip(existingOrder.id, amount);
-      upsertActiveOrder(updated);
-      await mutate(`/orders/${existingOrder.id}`, updated, { revalidate: false });
-    } catch (err) {
-      pushToast(err instanceof Error ? err.message : 'No se pudo actualizar la propina', 'error');
-    }
-  };
+  const tenPct = Math.round(subtotal * TIP_PERCENTAGES.ten);
+  const twentyPct = Math.round(subtotal * TIP_PERCENTAGES.twenty);
+  const tipMode: TipMode =
+    tenPct > 0 && pendingTip === tenPct
+      ? 'ten'
+      : twentyPct > 0 && pendingTip === twentyPct
+        ? 'twenty'
+        : pendingTip > 0 || customTipOpen
+          ? 'custom'
+          : 'none';
+
+  const grossTotal = subtotal + pendingTip + (isDelivery ? pendingDeliveryFee : 0);
+  const netTotal = grossTotal - pendingDiscount;
 
   const handlePercentClick = (mode: 'ten' | 'twenty') => {
-    const nextMode = tipMode === mode ? 'none' : mode;
-    const amount = nextMode === 'none' ? 0 : Math.round(subtotal * TIP_PERCENTAGES[mode]);
-    setTipMode(nextMode);
-    setLocalTip(String(amount));
-    applyTip(amount);
+    const turningOn = tipMode !== mode;
+    setPendingTip(turningOn ? (mode === 'ten' ? tenPct : twentyPct) : 0);
+    setCustomTipOpen(false);
   };
 
   const handleCustomClick = () => {
-    const nextMode = tipMode === 'custom' ? 'none' : 'custom';
-    setTipMode(nextMode);
-    if (nextMode === 'none') {
-      setLocalTip('0');
-      applyTip(0);
-    }
-  };
-
-  const handleCustomTipBlur = () => {
-    applyTip(Number(localTip) || 0);
-  };
-
-  const handleDeliveryFeeBlur = async () => {
-    if (!existingOrder) return;
-    const fee = Number(localDeliveryFee) || 0;
-    if (fee === existingOrder.deliveryFee) return;
-    try {
-      const updated = await setOrderDeliveryFee(existingOrder.id, fee);
-      upsertActiveOrder(updated);
-      await mutate(`/orders/${existingOrder.id}`, updated, { revalidate: false });
-    } catch (err) {
-      pushToast(err instanceof Error ? err.message : 'No se pudo actualizar el domicilio', 'error');
-    }
+    const turningOn = tipMode !== 'custom';
+    setCustomTipOpen(turningOn);
+    if (!turningOn) setPendingTip(0);
   };
 
   const handleSubmitNewOrder = async () => {
@@ -115,13 +99,12 @@ export function OrderOverview() {
         tableNumber: newOrderInfo.tableNumber,
         customer: newOrderInfo.customer,
         employeeId: employee?.id,
-        tip: Number(localTip) || 0,
-        deliveryFee: isDelivery ? Number(localDeliveryFee) || 0 : undefined,
         items: cart.map((item) => item.request),
       });
       upsertActiveOrder(order);
-      openExistingOrder(order.id);
+      promoteDraftToOrder(order.id);
       pushToast('Orden enviada a cocina');
+      showOrderNotification('created');
     } catch (err) {
       pushToast(err instanceof Error ? err.message : 'No se pudo enviar la orden', 'error');
     } finally {
@@ -148,10 +131,12 @@ export function OrderOverview() {
     }
   };
 
-  const handlePaymentSuccess = () => {
+  const handlePaymentSuccess = (completedOrder: Order) => {
     setPaymentOpen(false);
+    upsertActiveOrder(completedOrder); // status is COMPLETED, so this drops it out of activeOrders / Órdenes activas
     clearCurrentOrder();
     pushToast('Orden cobrada y cerrada');
+    showOrderNotification('closed');
     navigate({ to: '/tables' });
   };
 
@@ -167,35 +152,25 @@ export function OrderOverview() {
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-3">
-        {existingOrder?.items.map((item) => (
-          <div key={item.id} className="flex items-center justify-between gap-2 border-b border-border py-2 text-sm">
+        {groupCommittedItems(menu, existingOrder?.items ?? []).map((group) => (
+          <div key={group.key} className="flex items-center justify-between gap-2 border-b border-border py-2 text-sm">
             <div className="min-w-0">
               <p className="truncate text-text-primary">
-                {item.quantity}x {describeCommittedItem(item)}
+                {group.quantity}x {group.description}
               </p>
-              {item.notes && <p className="truncate text-xs text-text-secondary">{item.notes}</p>}
+              {group.notes && <p className="truncate text-xs text-text-secondary">{group.notes}</p>}
             </div>
-            <span className="shrink-0 font-medium text-text-secondary">{formatCOP(item.unitPrice * item.quantity)}</span>
+            <span className="shrink-0 font-medium text-text-secondary">{formatCOP(group.unitPrice * group.quantity)}</span>
           </div>
         ))}
 
-        {cart.map((item) => (
-          <div key={item.clientId} className="flex items-center justify-between gap-2 border-b border-border py-2 text-sm">
-            <div className="min-w-0">
-              <p className="truncate text-text-primary">{item.label}</p>
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              <span className="font-medium text-text-primary">{formatCOP(item.unitPrice * item.quantity)}</span>
-              <button
-                type="button"
-                onClick={() => removeCartItem(item.clientId)}
-                aria-label="Quitar producto"
-                className="text-text-secondary hover:text-danger"
-              >
-                <Trash2 size={15} />
-              </button>
-            </div>
-          </div>
+        {groupCartItems(cart).map((group) => (
+          <CartRow
+            key={group.key}
+            group={group}
+            onRemoveOne={() => removeCartItem(group.clientIds[group.clientIds.length - 1])}
+            onRemoveAll={() => removeCartItems(group.clientIds)}
+          />
         ))}
 
         {!existingOrder && cart.length === 0 && <p className="py-6 text-center text-sm text-text-secondary">Agrega productos del menú</p>}
@@ -207,10 +182,21 @@ export function OrderOverview() {
           <span className="font-medium text-text-primary">{formatCOP(subtotal)}</span>
         </div>
 
+        <label className="flex items-center justify-between text-sm text-text-secondary">
+          <span>Descuento</span>
+          <input
+            type="number"
+            min={0}
+            value={pendingDiscount}
+            onChange={(e) => setPendingDiscount(Number(e.target.value) || 0)}
+            className="w-28 rounded-lg border border-border bg-surface px-2 py-1 text-right text-text-primary outline-none focus:border-brand-400"
+          />
+        </label>
+
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between text-sm text-text-secondary">
             <span>Propina</span>
-            <span className="font-medium text-text-primary">{formatCOP(Number(localTip) || 0)}</span>
+            <span className="font-medium text-text-primary">{formatCOP(pendingTip)}</span>
           </div>
           <div className="flex gap-1.5">
             <button
@@ -249,9 +235,8 @@ export function OrderOverview() {
               autoFocus
               type="number"
               min={0}
-              value={localTip}
-              onChange={(e) => setLocalTip(e.target.value)}
-              onBlur={handleCustomTipBlur}
+              value={pendingTip}
+              onChange={(e) => setPendingTip(Number(e.target.value) || 0)}
               placeholder="Monto de la propina"
               className="w-full rounded-lg border border-border bg-surface px-2 py-1.5 text-right text-text-primary outline-none focus:border-brand-400"
             />
@@ -264,13 +249,24 @@ export function OrderOverview() {
             <input
               type="number"
               min={0}
-              value={localDeliveryFee}
-              onChange={(e) => setLocalDeliveryFee(e.target.value)}
-              onBlur={handleDeliveryFeeBlur}
+              value={pendingDeliveryFee}
+              onChange={(e) => setPendingDeliveryFee(Number(e.target.value) || 0)}
               className="w-28 rounded-lg border border-border bg-surface px-2 py-1 text-right text-text-primary outline-none focus:border-brand-400"
             />
           </label>
         )}
+
+        <div className="flex items-center justify-between border-t border-border pt-2 text-sm">
+          <span className="font-semibold text-text-primary">Total</span>
+          {pendingDiscount > 0 ? (
+            <span className="flex items-baseline gap-1.5">
+              <span className="text-text-secondary line-through">{formatCOP(grossTotal)}</span>
+              <span className="font-semibold text-success">{formatCOP(netTotal)}</span>
+            </span>
+          ) : (
+            <span className="font-semibold text-text-primary">{formatCOP(netTotal)}</span>
+          )}
+        </div>
 
         {existingOrder ? (
           <button
@@ -317,8 +313,145 @@ function orderTitle(orderType: string | undefined, tableNumber: number | null | 
   return 'Orden';
 }
 
-function describeCommittedItem(item: { menuItemRef: unknown; pizzaRef: { size: string; flavors: string[] } | null }): string {
-  if (item.pizzaRef) return `Pizza ${item.pizzaRef.size} - ${item.pizzaRef.flavors.join(', ')}`;
-  const ref = item.menuItemRef as { product: string } | null;
-  return ref?.product ?? 'Producto';
+function pizzaSizeName(pizzas: PizzaCategory, sizeId: string): string {
+  for (const group of pizzas.groups) {
+    const size = group.sizes.find((s) => s.id === sizeId);
+    if (size) return size.name;
+  }
+  return sizeId;
+}
+
+/** Order items only carry menu ids (e.g. 'margherita', 'large') - resolve them to their Spanish menu names for display. */
+function describeCommittedItem(menu: Menu | undefined, item: OrderItem): string {
+  const pizzas = menu ? getPizzaCategory(menu) : undefined;
+  const flavorName = (flavorId: string) => (pizzas ? (allPizzaFlavors(pizzas).find((f) => f.id === flavorId)?.name ?? flavorId) : flavorId);
+
+  if (item.pizzaRef) {
+    const sizeName = pizzas ? pizzaSizeName(pizzas, item.pizzaRef.size) : item.pizzaRef.size;
+    const flavorNames = item.pizzaRef.flavors.map(({ flavor, portion }) => {
+      const name = flavorName(flavor);
+      const fraction = formatPortionFraction(portion);
+      return fraction ? `${name} (${fraction})` : name;
+    });
+    return `Pizza ${sizeName} - ${flavorNames.join(', ')}`;
+  }
+
+  const ref = item.menuItemRef;
+  if (!ref) return 'Producto';
+  const product = menu ? getProduct(menu, ref.category, ref.product) : undefined;
+  const bits = [product?.name ?? ref.product];
+  if (ref.size) bits.push(product?.sizes?.find((s) => s.id === ref.size)?.name ?? ref.size);
+  if (ref.option) bits.push(product?.options?.find((o) => o.id === ref.option)?.name ?? ref.option);
+  if (ref.pizzaFlavor) bits.push(flavorName(ref.pizzaFlavor));
+  return bits.join(' - ');
+}
+
+interface GroupedCommittedItem {
+  key: string;
+  description: string;
+  notes: string | null;
+  unitPrice: number;
+  quantity: number;
+}
+
+/** Collapses repeated additions of the same item (same ref + notes + price) into one row with a summed quantity. */
+function groupCommittedItems(menu: Menu | undefined, items: OrderItem[]): GroupedCommittedItem[] {
+  const groups = new Map<string, GroupedCommittedItem>();
+  for (const item of items) {
+    const key = JSON.stringify([item.pizzaRef, item.menuItemRef, item.notes, item.unitPrice]);
+    const existing = groups.get(key);
+    if (existing) {
+      existing.quantity += item.quantity;
+    } else {
+      groups.set(key, {
+        key,
+        description: describeCommittedItem(menu, item),
+        notes: item.notes,
+        unitPrice: item.unitPrice,
+        quantity: item.quantity,
+      });
+    }
+  }
+  return [...groups.values()];
+}
+
+interface GroupedCartItem {
+  key: string;
+  label: string;
+  unitPrice: number;
+  quantity: number;
+  /** Cart entries folded into this row, most-recently-added last - removing the row pops from the end. */
+  clientIds: string[];
+}
+
+/** Same idea as groupCommittedItems, but for the not-yet-submitted cart (grouped by label + request payload). */
+function groupCartItems(cart: CartItem[]): GroupedCartItem[] {
+  const groups = new Map<string, GroupedCartItem>();
+  for (const item of cart) {
+    const key = JSON.stringify([item.label, item.unitPrice, item.request]);
+    const existing = groups.get(key);
+    if (existing) {
+      existing.quantity += item.quantity;
+      existing.clientIds.push(item.clientId);
+    } else {
+      groups.set(key, { key, label: item.label, unitPrice: item.unitPrice, quantity: item.quantity, clientIds: [item.clientId] });
+    }
+  }
+  return [...groups.values()];
+}
+
+const LONG_PRESS_MS = 600;
+
+/** A grouped, not-yet-submitted cart line. Tap the trash icon to drop one; hold it to drop the whole group. */
+function CartRow({ group, onRemoveOne, onRemoveAll }: { group: GroupedCartItem; onRemoveOne: () => void; onRemoveAll: () => void }) {
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressFiredRef = useRef(false);
+
+  const startPress = () => {
+    longPressFiredRef.current = false;
+    timerRef.current = setTimeout(() => {
+      longPressFiredRef.current = true;
+      onRemoveAll();
+    }, LONG_PRESS_MS);
+  };
+  const cancelPress = () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+  };
+  const handleClick = () => {
+    // A completed long-press already removed everything - swallow the click
+    // that follows mouseup/touchend so it doesn't also remove one more.
+    if (longPressFiredRef.current) {
+      longPressFiredRef.current = false;
+      return;
+    }
+    onRemoveOne();
+  };
+
+  return (
+    <div className="flex items-center justify-between gap-2 border-b border-border py-2 text-sm">
+      <div className="min-w-0">
+        <p className="truncate text-text-primary">
+          {group.quantity > 1 ? `${group.quantity}x ` : ''}
+          {group.label}
+        </p>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <span className="font-medium text-text-primary">{formatCOP(group.unitPrice * group.quantity)}</span>
+        <button
+          type="button"
+          onMouseDown={startPress}
+          onMouseUp={cancelPress}
+          onMouseLeave={cancelPress}
+          onTouchStart={startPress}
+          onTouchEnd={cancelPress}
+          onClick={handleClick}
+          aria-label={group.quantity > 1 ? 'Quitar uno (mantén presionado para quitar todos)' : 'Quitar producto'}
+          title={group.quantity > 1 ? 'Mantener para borrar todo' : undefined}
+          className="text-text-secondary hover:text-danger"
+        >
+          <Trash2 size={15} />
+        </button>
+      </div>
+    </div>
+  );
 }

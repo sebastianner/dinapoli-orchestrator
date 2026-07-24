@@ -103,15 +103,12 @@ erDiagram
     text order_type "dine_in, takeaway, delivery"
     text status "PENDING, PRINTING, ACTIVE, COMPLETED"
     int employee_id FK "nullable. who placed the order, if recorded"
-    text payment_method "nullable. pre-declared intent; NULL again once settled by a mixed payment (see ORDER_PAYMENTS)"
     int table_number "nullable. dine_in only, 1 to 9"
     text customer_name "nullable. takeaway, delivery"
     text phone "nullable. delivery only"
     text address "nullable. delivery only"
     text notes "nullable. order-level comments"
     int total "sum of items only, excludes tip and delivery_fee"
-    int tip "default 0. settable/updatable any time, excluded from total/sales totals"
-    int delivery_fee "default 0. delivery orders only, included in invoice/sales totals (unlike tip)"
     text created_at
     text completed_at "nullable. set on COMPLETED"
     int print_attempts "recovery bookkeeping, default 0"
@@ -134,15 +131,18 @@ erDiagram
   ORDER_ITEM_FLAVORS {
     int order_item_id PK, FK
     int flavor_id PK, FK
+    int portion "percent, 1-100. all rows for one order_item sum to 100"
   }
 
   ORDER_PAYMENTS {
     int id PK
     int order_id FK
     text method "cash, card, or transfer"
-    int amount "total charged via this method, integer COP, tip included"
+    int amount "GROSS total charged via this method, integer COP - tip and delivery fee included, discount NOT subtracted"
     int tip_amount "default 0. slice of amount that's tip, not sales. 0 to amount"
-    text created_at "written once, at completion"
+    int delivery_fee "default 0. slice of amount that's delivery fee, not sales. 0 to amount"
+    int discount "default 0. slice of amount this split's discount accounts for. 0 to amount. actual cash collected is amount - discount, derived when needed"
+    text created_at "written once, at completion - the ONLY place tip/delivery fee/discount are ever recorded; ORDERS.tip/deliveryFee/discount (API-level, not a column) are always 0 before this and derived by summing these rows afterward"
   }
 
   PRINT_JOBS {

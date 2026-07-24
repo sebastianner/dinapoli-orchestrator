@@ -1,13 +1,5 @@
 import { Router } from 'express';
-import {
-  getOrderById,
-  listOrders,
-  completeOrder,
-  reprintOrderDocument,
-  setOrderTip,
-  setOrderDeliveryFee,
-  addOrderItems,
-} from '../services/orderService.js';
+import { getOrderById, listOrders, completeOrder, reprintOrderDocument, addOrderItems } from '../services/orderService.js';
 import { notifyPrintQueue } from '../services/queueService.js';
 import { ValidationError } from '../utils/errors.js';
 
@@ -35,24 +27,6 @@ router.get('/:id', (req, res) => {
 router.post('/:id/complete', async (req, res, next) => {
   try {
     const order = await completeOrder(parseOrderId(req.params.id), { payments: req.body?.payments });
-    res.json(order);
-  } catch (err) {
-    next(err);
-  }
-});
-
-router.put('/:id/tip', (req, res, next) => {
-  try {
-    const order = setOrderTip(parseOrderId(req.params.id), req.body?.tip);
-    res.json(order);
-  } catch (err) {
-    next(err);
-  }
-});
-
-router.put('/:id/delivery-fee', (req, res, next) => {
-  try {
-    const order = setOrderDeliveryFee(parseOrderId(req.params.id), req.body?.deliveryFee);
     res.json(order);
   } catch (err) {
     next(err);

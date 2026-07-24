@@ -2,7 +2,6 @@ import classNames from 'classnames';
 import { AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
 import { useLocation } from '@tanstack/react-router';
 import { useToastStore } from '@/store/useToastStore';
-import { useOrderStore } from '@/store/useOrderStore';
 
 const variantStyles = {
   success: 'border-success/30 bg-success-bg text-success',
@@ -20,21 +19,19 @@ export function ToastViewport() {
   const toasts = useToastStore((s) => s.toasts);
   const dismiss = useToastStore((s) => s.dismiss);
 
-  // The Order Overview panel (see components/order/OrderOverview.tsx) is a fixed
-  // w-80 sidebar docked to the right edge on /menu; clear it so toasts don't cover
-  // its Enviar orden / Cobrar orden buttons.
+  // The main Sidebar (w-20, sm:w-24) is always on the left; the CategorySidebar
+  // (w-28) stacks next to it on /menu routes only. Clear whichever is present so
+  // toasts never sit under either.
   const { pathname } = useLocation();
-  const currentOrderId = useOrderStore((s) => s.currentOrderId);
-  const cart = useOrderStore((s) => s.cart);
-  const orderOverviewVisible = pathname.startsWith('/menu') && (currentOrderId != null || cart.length > 0);
+  const categorySidebarVisible = pathname.startsWith('/menu');
 
   if (toasts.length === 0) return null;
 
   return (
     <div
       className={classNames(
-        'pointer-events-none fixed bottom-4 z-50 flex w-80 flex-col gap-2 transition-[right] duration-base',
-        orderOverviewVisible ? 'right-[336px]' : 'right-4',
+        'pointer-events-none fixed bottom-4 z-50 flex w-80 flex-col gap-2 transition-[left] duration-base',
+        categorySidebarVisible ? 'left-[260px]' : 'left-32',
       )}
     >
       {toasts.map((toast) => {
@@ -44,7 +41,7 @@ export function ToastViewport() {
             key={toast.id}
             role="status"
             className={classNames(
-              'anim-slide-in-right pointer-events-auto flex items-start gap-2 rounded-lg border px-4 py-3 text-sm font-medium shadow-md',
+              'anim-slide-up pointer-events-auto flex items-start gap-2 rounded-lg border px-4 py-3 text-sm font-medium shadow-md',
               variantStyles[toast.variant],
             )}
           >

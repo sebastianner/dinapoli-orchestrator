@@ -88,15 +88,12 @@ export interface OrderRow {
   order_type: OrderTypeDb;
   status: OrderStatusDb;
   employee_id: number | null;
-  payment_method: PaymentMethodDb | null;
   table_number: number | null;
   customer_name: string | null;
   phone: string | null;
   address: string | null;
   notes: string | null;
   total: number;
-  tip: number;
-  delivery_fee: number;
   created_at: string;
   completed_at: string | null;
   print_attempts: number;
@@ -108,6 +105,8 @@ export interface OrderPaymentRow {
   method: PaymentMethodDb;
   amount: number;
   tip_amount: number;
+  delivery_fee: number;
+  discount: number;
   created_at: string;
 }
 

@@ -63,6 +63,51 @@ export function maxFlavorsFor(pizzas: PizzaCategory, sizeId: string): number {
   return 1;
 }
 
+/**
+ * How a pizza can be split by number of flavors. Only 3-flavor pizzas have a
+ * real choice: equal thirds, or one flavor at half with the other two at a
+ * quarter each. 1, 2, and 4 flavors only ever split evenly.
+ */
+export type FlavorSplitPattern = 'equal' | 'half';
+
+export function splitPatternsFor(flavorCount: number): FlavorSplitPattern[] {
+  return flavorCount === 3 ? ['equal', 'half'] : ['equal'];
+}
+
+/**
+ * Turns selected flavor ids + a chosen pattern into { flavor, portion } pairs
+ * summing to exactly 100. 'equal' thirds can't divide evenly (100/3), so
+ * that remainder goes to the first selected flavor (34/33/33).
+ */
+export function computeFlavorPortions(
+  selectedFlavors: string[],
+  pattern: FlavorSplitPattern,
+  halfFlavorId?: string,
+): { flavor: string; portion: number }[] {
+  const n = selectedFlavors.length;
+  if (n === 0) return [];
+  if (pattern === 'half' && n === 3) {
+    const big = halfFlavorId ?? selectedFlavors[0];
+    return selectedFlavors.map((f) => ({ flavor: f, portion: f === big ? 50 : 25 }));
+  }
+  const base = Math.floor(100 / n);
+  const remainder = 100 - base * n;
+  return selectedFlavors.map((f, i) => ({ flavor: f, portion: i === 0 ? base + remainder : base }));
+}
+
+/** Percent -> the simplified fraction it represents, e.g. 25 -> "1/4". Empty for a whole (100%) flavor. */
+export function formatPortionFraction(portion: number): string {
+  if (portion >= 100) return '';
+  // 100/3 isn't an integer, so equal thirds are stored as 34/33/33 - still just "1/3" to a reader.
+  if (portion === 33 || portion === 34) return '1/3';
+  const divisor = gcd(portion, 100);
+  return `${portion / divisor}/${100 / divisor}`;
+}
+
+function gcd(a: number, b: number): number {
+  return b === 0 ? a : gcd(b, a % b);
+}
+
 export function productUnitPrice(product: Product, sizeId?: string): number {
   if (product.sizes && product.sizes.length > 0) {
     return product.sizes.find((s) => s.id === sizeId)?.price ?? 0;

@@ -37,9 +37,9 @@ export function CategorySidebar({ menu }: CategorySidebarProps) {
             className="group flex flex-col items-center gap-1.5 px-2 py-3 text-text-secondary transition-colors duration-fast hover:text-brand-600 data-[status=active]:text-brand-600"
           >
             <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-brand-500/10 text-brand-600 transition-colors duration-fast group-data-[status=active]:bg-brand-500 group-data-[status=active]:text-white">
-              <Icon size={22} />
+              <Icon size={24} />
             </span>
-            <span className="text-center text-[11px] font-medium leading-tight">{category.name}</span>
+            <span className="text-center text-sm font-medium leading-tight">{category.name}</span>
           </Link>
         );
       })}

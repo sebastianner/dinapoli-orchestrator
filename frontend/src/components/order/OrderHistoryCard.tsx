@@ -55,7 +55,19 @@ export function OrderHistoryCard({ order }: OrderHistoryCardProps) {
       </div>
 
       <div className="flex items-center gap-4">
-        <span className="font-semibold text-brand-700">{formatCOP(order.total + order.tip + order.deliveryFee)}</span>
+        {(() => {
+          const gross = order.total + (order.tip ?? 0) + (order.deliveryFee ?? 0);
+          const discount = order.discount ?? 0;
+          if (discount > 0) {
+            return (
+              <span className="flex items-baseline gap-1.5">
+                <span className="text-sm text-text-secondary line-through">{formatCOP(gross)}</span>
+                <span className="font-semibold text-success">{formatCOP(gross - discount)}</span>
+              </span>
+            );
+          }
+          return <span className="font-semibold text-brand-700">{formatCOP(gross)}</span>;
+        })()}
         <div className="flex gap-1">
           <button
             type="button"

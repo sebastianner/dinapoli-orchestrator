@@ -62,8 +62,9 @@ export function CustomerInfoModal({ open, orderType, onClose, onSubmit }: Custom
           <>
             <input
               type="tel"
+              inputMode="numeric"
               value={phone}
-              onChange={(e) => setPhone(e.target.value)}
+              onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))}
               placeholder="Teléfono"
               className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary outline-none focus:border-brand-400"
             />

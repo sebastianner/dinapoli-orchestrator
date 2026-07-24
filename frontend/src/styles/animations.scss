@@ -58,3 +58,15 @@
 .anim-slide-in-right {
   animation: slide-in-right var(--duration-base) var(--ease-standard) both;
 }
+
+/* Draw-in ring + checkmark/arrow for OrderNotification - stroke-dasharray is
+   set inline per icon, these keyframes just animate the offset to 0. */
+@keyframes stroke-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.anim-stroke-draw {
+  animation: stroke-draw 0.45s ease-out both;
+}

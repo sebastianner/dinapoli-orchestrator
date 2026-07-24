@@ -4,6 +4,7 @@ import { Header } from '@/components/layout/Header';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { ActiveOrdersTab } from '@/components/layout/ActiveOrdersTab';
 import { ToastViewport } from '@/components/common/ToastViewport';
+import { OrderNotification } from '@/components/common/OrderNotification';
 import { useMenu, useActiveEmployees, useTables } from '@/lib/queries';
 import { fetchOrders } from '@/lib/api';
 import { useOrderStore } from '@/store/useOrderStore';
@@ -32,6 +33,7 @@ function RootLayout() {
       </div>
       <ActiveOrdersTab />
       <ToastViewport />
+      <OrderNotification />
     </div>
   );
 }

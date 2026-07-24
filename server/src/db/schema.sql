@@ -93,23 +93,17 @@ CREATE TABLE IF NOT EXISTS orders (
   order_type     TEXT NOT NULL CHECK (order_type IN ('dine_in', 'takeaway', 'delivery')),
   status         TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'PRINTING', 'ACTIVE', 'COMPLETED')),
   employee_id    INTEGER REFERENCES employees(id),
-  -- Nullable: unset until a method is declared, and set back to NULL by
-  -- completeOrder when the order is settled with a mixed payment (more than
-  -- one row in order_payments) - see that table for the actual settlement.
-  -- Otherwise mirrors the single order_payments.method used to complete it.
-  payment_method TEXT CHECK (payment_method IN ('cash', 'card', 'transfer')),
   table_number   INTEGER CHECK (table_number BETWEEN 1 AND 9),
   customer_name  TEXT,
   phone          TEXT,
   address        TEXT,
   notes          TEXT,
   total          INTEGER NOT NULL DEFAULT 0,
-  tip            INTEGER NOT NULL DEFAULT 0 CHECK (tip >= 0),
-  delivery_fee   INTEGER NOT NULL DEFAULT 0 CHECK (delivery_fee >= 0),
   created_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   completed_at   TEXT,
   print_attempts INTEGER NOT NULL DEFAULT 0
 );
+
 
 -- printed_at is NULL until the queue worker includes this item in a kitchen
 -- ticket. Items added to an order that's already ACTIVE (see
@@ -135,29 +129,44 @@ CREATE TABLE IF NOT EXISTS order_items (
   printed_at        TEXT
 );
 
+-- portion is this flavor's share of the pizza, as a percent (1-100). Across
+-- all of one order_item's rows here, portion must sum to exactly 100 -
+-- enforced in orderService.resolvePizzaItem, not by the DB (SQLite can't
+-- check a cross-row sum in a CHECK constraint).
 CREATE TABLE IF NOT EXISTS order_item_flavors (
   order_item_id INTEGER NOT NULL REFERENCES order_items(id) ON DELETE CASCADE,
   flavor_id     INTEGER NOT NULL REFERENCES pizza_flavors(id),
+  portion       INTEGER NOT NULL DEFAULT 100 CHECK (portion BETWEEN 1 AND 100),
   PRIMARY KEY (order_item_id, flavor_id)
 );
 
--- One row per method used to settle an order. A normal order has exactly one
--- row here; a mixed payment (e.g. part cash, part card) has several, whose
--- amounts must sum to (total + tip + delivery_fee) - enforced in
--- orderService.completeOrder, not by the DB. tip_amount is the slice of
--- `amount` that's tip rather than sales (e.g. $30 owed + a $5 tip charged to
--- the card, cash covering a separate $20: that row is amount=35,
--- tip_amount=5) - it lets End-of-Day exclude tips from sales per payment
--- method exactly instead of guessing via a proportional split. Across all of
--- an order's rows, tip_amount must sum to orders.tip. Only ever written
--- once, at completion time.
+-- One row per method used to settle an order, written once at completion -
+-- this is the ONLY place tip/delivery fee/discount are ever recorded (there's
+-- no way to declare them before a payment method is chosen; Order.tip/
+-- deliveryFee/discount are always 0 before this and derived by summing these
+-- rows afterward, see orderService.getOrderById). A normal order has exactly
+-- one row here; a mixed payment (e.g. part cash, part card) has several,
+-- whose amounts must sum to (total + the payments' own declared tip/delivery
+-- fee totals) - enforced in orderService.resolvePayments, not by the DB.
+-- `amount` is always the GROSS charge for that split, before its own
+-- discount slice - discount is never subtracted from it, so the full
+-- pre-discount price is always on record; the actual cash collected for a
+-- split is derived as (amount - discount) whenever needed, never stored
+-- directly. tip_amount, delivery_fee, and discount are each a slice of
+-- `amount` (e.g. $30 owed + a $5 tip charged to the card, cash covering a
+-- separate $20: that row is amount=35, tip_amount=5) - this lets End-of-Day
+-- exclude tips and discounts (while keeping delivery fees, where relevant)
+-- from sales per payment method exactly instead of guessing via a
+-- proportional split.
 CREATE TABLE IF NOT EXISTS order_payments (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  order_id   INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-  method     TEXT NOT NULL CHECK (method IN ('cash', 'card', 'transfer')),
-  amount     INTEGER NOT NULL CHECK (amount > 0),
-  tip_amount INTEGER NOT NULL DEFAULT 0 CHECK (tip_amount >= 0 AND tip_amount <= amount),
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id     INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  method       TEXT NOT NULL CHECK (method IN ('cash', 'card', 'transfer')),
+  amount       INTEGER NOT NULL CHECK (amount > 0),
+  tip_amount   INTEGER NOT NULL DEFAULT 0 CHECK (tip_amount >= 0 AND tip_amount <= amount),
+  delivery_fee INTEGER NOT NULL DEFAULT 0 CHECK (delivery_fee >= 0 AND delivery_fee <= amount),
+  discount     INTEGER NOT NULL DEFAULT 0 CHECK (discount >= 0 AND discount <= amount),
+  created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
 -- One saved artifact per (order, kind): content is deterministic from the

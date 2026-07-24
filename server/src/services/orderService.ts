@@ -63,15 +63,12 @@ const getProductOptionByKey = db.prepare<[number, string], ProductOptionRow>(
 interface InsertOrderParams {
   orderType: OrderType;
   employeeId: number | null;
-  paymentMethod: PaymentMethod | null;
   tableNumber: number | null;
   customerName: string | null;
   phone: string | null;
   address: string | null;
   notes: string | null;
   total: number;
-  tip: number;
-  deliveryFee: number;
 }
 
 interface InsertOrderItemParams {
@@ -89,8 +86,8 @@ interface InsertOrderItemParams {
 }
 
 const insertOrder = db.prepare<InsertOrderParams>(
-  `INSERT INTO orders (order_type, employee_id, payment_method, table_number, customer_name, phone, address, notes, total, tip, delivery_fee)
-   VALUES (@orderType, @employeeId, @paymentMethod, @tableNumber, @customerName, @phone, @address, @notes, @total, @tip, @deliveryFee)`
+  `INSERT INTO orders (order_type, employee_id, table_number, customer_name, phone, address, notes, total)
+   VALUES (@orderType, @employeeId, @tableNumber, @customerName, @phone, @address, @notes, @total)`
 );
 const insertOrderItem = db.prepare<InsertOrderItemParams>(
   `INSERT INTO order_items
@@ -100,8 +97,8 @@ const insertOrderItem = db.prepare<InsertOrderItemParams>(
      (@orderId, @itemType, @productId, @productSizeId, @productOptionId,
       @pizzaGroupId, @pizzaSizeId, @pizzaFlavorId, @quantity, @unitPrice, @notes)`
 );
-const insertOrderItemFlavor = db.prepare<[number, number]>(
-  'INSERT INTO order_item_flavors (order_item_id, flavor_id) VALUES (?, ?)'
+const insertOrderItemFlavor = db.prepare<[number, number, number]>(
+  'INSERT INTO order_item_flavors (order_item_id, flavor_id, portion) VALUES (?, ?, ?)'
 );
 
 function isPositiveInt(n: unknown): n is number {
@@ -123,7 +120,7 @@ interface ResolvedItem {
   quantity: number;
   unitPrice: number;
   notes: string | null;
-  flavorIds: number[];
+  flavorPortions: { flavorId: number; portion: number }[];
 }
 
 function resolvePizzaItem(item: PizzaItemRequest, index: number): ResolvedItem {
@@ -136,16 +133,26 @@ function resolvePizzaItem(item: PizzaItemRequest, index: number): ResolvedItem {
   if (item.flavors.length > size.max_flavors) {
     throw new ValidationError(`items[${index}]: size '${item.size}' allows at most ${size.max_flavors} flavor(s)`);
   }
-  const uniqueFlavors = new Set(item.flavors);
+  const uniqueFlavors = new Set(item.flavors.map((f) => f?.flavor));
   if (uniqueFlavors.size !== item.flavors.length) {
     throw new ValidationError(`items[${index}]: duplicate flavors are not allowed`);
+  }
+  for (const f of item.flavors) {
+    if (!isPositiveInt(f?.portion) || f.portion > 100) {
+      throw new ValidationError(`items[${index}]: each flavor's portion must be an integer between 1 and 100`);
+    }
+  }
+  const portionSum = item.flavors.reduce((sum, f) => sum + f.portion, 0);
+  if (portionSum !== 100) {
+    throw new ValidationError(`items[${index}]: flavor portions must sum to 100, got ${portionSum}`);
   }
 
   // Group is not chosen by the client: it's derived from the flavors picked.
   // A flavor pulls the whole pizza into whichever of its groups prices this
-  // size highest (e.g. a single 'special' flavor upgrades an otherwise-classic pizza).
+  // size highest (e.g. a single 'special' flavor upgrades an otherwise-classic
+  // pizza to the special price, regardless of how small that flavor's portion is).
   const candidateGroups = new Map<number, PizzaGroupRow>();
-  const flavors = item.flavors.map((flavorKey) => {
+  const flavors = item.flavors.map(({ flavor: flavorKey, portion }) => {
     const flavor = getPizzaFlavorByKey.get(flavorKey);
     if (!flavor) throw new ValidationError(`items[${index}]: unknown pizza flavor '${flavorKey}'`);
     if (!flavor.is_available) {
@@ -156,7 +163,7 @@ function resolvePizzaItem(item: PizzaItemRequest, index: number): ResolvedItem {
       throw new ValidationError(`items[${index}]: flavor '${flavorKey}' is not offered as a pizza flavor`);
     }
     for (const g of groups) candidateGroups.set(g.id, g);
-    return flavor;
+    return { ...flavor, portion };
   });
 
   let resolvedGroup: PizzaGroupRow | null = null;
@@ -177,7 +184,9 @@ function resolvePizzaItem(item: PizzaItemRequest, index: number): ResolvedItem {
     throw new ValidationError(`items[${index}]: quantity must be a positive integer`);
   }
 
-  const extraCost = flavors.reduce((sum, f) => sum + f.extra_cost, 0);
+  // Extra cost scales with each flavor's share of the pizza (e.g. a premium
+  // topping on only a quarter of the pie only adds a quarter of its extra cost).
+  const extraCost = flavors.reduce((sum, f) => sum + Math.round(f.extra_cost * (f.portion / 100)), 0);
   const unitPrice = (groupSize.price as number) + extraCost;
 
   return {
@@ -191,7 +200,7 @@ function resolvePizzaItem(item: PizzaItemRequest, index: number): ResolvedItem {
     quantity: item.quantity,
     unitPrice,
     notes: item.notes ?? null,
-    flavorIds: flavors.map((f) => f.id),
+    flavorPortions: flavors.map((f) => ({ flavorId: f.id, portion: f.portion })),
   };
 }
 
@@ -253,7 +262,7 @@ function resolveProductItem(item: ProductItemRequest, index: number): ResolvedIt
     quantity: item.quantity,
     unitPrice,
     notes: item.notes ?? null,
-    flavorIds: [],
+    flavorPortions: [],
   };
 }
 
@@ -262,7 +271,7 @@ function validateOrderRequest(input: unknown): OrderRequest {
     throw new ValidationError('request body must be an object');
   }
   const orderRequest = input as OrderRequest;
-  const { orderType, employeeId, tableNumber, customer, paymentMethod, tip, deliveryFee, items } = orderRequest;
+  const { orderType, employeeId, tableNumber, customer, items } = orderRequest;
 
   if (!ORDER_TYPES.has(orderType)) {
     throw new ValidationError(`orderType must be one of ${[...ORDER_TYPES].join(', ')}`);
@@ -284,23 +293,6 @@ function validateOrderRequest(input: unknown): OrderRequest {
     if (!customer?.name) throw new ValidationError('customer.name is required for delivery orders');
     if (!customer?.phone) throw new ValidationError('customer.phone is required for delivery orders');
     if (!customer?.address) throw new ValidationError('customer.address is required for delivery orders');
-  }
-
-  if (paymentMethod != null && !PAYMENT_METHODS.has(paymentMethod)) {
-    throw new ValidationError(`paymentMethod must be one of ${[...PAYMENT_METHODS].join(', ')}`);
-  }
-
-  if (tip != null && !isNonNegativeInt(tip)) {
-    throw new ValidationError('tip must be a non-negative integer amount in COP');
-  }
-
-  if (deliveryFee != null) {
-    if (!isNonNegativeInt(deliveryFee)) {
-      throw new ValidationError('deliveryFee must be a non-negative integer amount in COP');
-    }
-    if (deliveryFee > 0 && orderType !== 'delivery') {
-      throw new ValidationError('deliveryFee can only be set on delivery orders');
-    }
   }
 
   if (!Array.isArray(items) || items.length === 0) {
@@ -336,15 +328,12 @@ export function createOrder(input: unknown): Order {
     const result = insertOrder.run({
       orderType: orderRequest.orderType,
       employeeId: orderRequest.employeeId ?? null,
-      paymentMethod: orderRequest.paymentMethod ?? null,
       tableNumber: orderRequest.orderType === 'dine_in' ? (orderRequest.tableNumber as number) : null,
       customerName: orderRequest.customer?.name ?? null,
       phone: orderRequest.customer?.phone ?? null,
       address: orderRequest.customer?.address ?? null,
       notes: orderRequest.notes ?? null,
       total,
-      tip: orderRequest.tip ?? 0,
-      deliveryFee: orderRequest.deliveryFee ?? 0,
     });
     const newOrderId = Number(result.lastInsertRowid);
 
@@ -363,8 +352,8 @@ export function createOrder(input: unknown): Order {
         notes: item.notes,
       });
       const orderItemId = Number(itemResult.lastInsertRowid);
-      for (const flavorId of item.flavorIds) {
-        insertOrderItemFlavor.run(orderItemId, flavorId);
+      for (const fp of item.flavorPortions) {
+        insertOrderItemFlavor.run(orderItemId, fp.flavorId, fp.portion);
       }
     }
 
@@ -383,8 +372,15 @@ const getOrderRow = db.prepare<[number], OrderRow & { employee_name: string | nu
 );
 const getOrderItemRows = db.prepare<[number], OrderItemRow>('SELECT * FROM order_items WHERE order_id = ? ORDER BY id');
 const getOrderPaymentRows = db.prepare<[number], OrderPaymentRow>('SELECT * FROM order_payments WHERE order_id = ? ORDER BY id');
-const getOrderItemFlavorRows = db.prepare<[number], { key: string }>(
-  `SELECT f.key FROM order_item_flavors oif
+// Tip/delivery fee/discount only ever exist as the per-method breakdown in
+// order_payments, written once at completion - so they're 0 for any order
+// that hasn't been paid yet (no rows to sum), and the real totals once it has.
+const getOrderPaymentTotals = db.prepare<[number], { tip: number; delivery_fee: number; discount: number }>(
+  `SELECT COALESCE(SUM(tip_amount), 0) AS tip, COALESCE(SUM(delivery_fee), 0) AS delivery_fee, COALESCE(SUM(discount), 0) AS discount
+   FROM order_payments WHERE order_id = ?`
+);
+const getOrderItemFlavorRows = db.prepare<[number], { key: string; portion: number }>(
+  `SELECT f.key, oif.portion FROM order_item_flavors oif
    JOIN pizza_flavors f ON f.id = oif.flavor_id
    WHERE oif.order_item_id = ?
    ORDER BY oif.rowid`
@@ -411,7 +407,7 @@ function rowToOrderItem(row: OrderItemRow): OrderItem {
   if (row.item_type === 'pizza') {
     const group = getPizzaGroupById.get(row.pizza_group_id!)!;
     const size = getPizzaSizeById.get(row.pizza_size_id!)!;
-    const flavors = getOrderItemFlavorRows.all(row.id).map((f) => f.key);
+    const flavors = getOrderItemFlavorRows.all(row.id).map((f) => ({ flavor: f.key, portion: f.portion }));
     return {
       ...base,
       menuItemRef: null,
@@ -444,6 +440,8 @@ function rowToOrderPayment(row: OrderPaymentRow): OrderPayment {
     method: row.method,
     amount: row.amount,
     tipAmount: row.tip_amount,
+    deliveryFee: row.delivery_fee,
+    discount: row.discount,
     createdAt: row.created_at,
   };
 }
@@ -454,6 +452,7 @@ export function getOrderById(id: number): Order {
 
   const items = getOrderItemRows.all(id).map(rowToOrderItem);
   const payments = getOrderPaymentRows.all(id).map(rowToOrderPayment);
+  const totals = getOrderPaymentTotals.get(id)!;
 
   return {
     id: row.id,
@@ -461,14 +460,14 @@ export function getOrderById(id: number): Order {
     status: row.status,
     employeeId: row.employee_id,
     employeeName: row.employee_name,
-    paymentMethod: row.payment_method,
     tableNumber: row.table_number,
     customerName: row.customer_name,
     phone: row.phone,
     address: row.address,
     total: row.total,
-    tip: row.tip,
-    deliveryFee: row.delivery_fee,
+    tip: totals.tip,
+    deliveryFee: totals.delivery_fee,
+    discount: totals.discount,
     notes: row.notes,
     createdAt: row.created_at,
     completedAt: row.completed_at,
@@ -510,47 +509,12 @@ export function listOrders({ status, date, orderType }: { status?: string; date?
   return rows.map((r) => getOrderById(r.id));
 }
 
-const setPaymentMethod = db.prepare<[PaymentMethod | null, number]>('UPDATE orders SET payment_method = ? WHERE id = ?');
-const insertOrderPayment = db.prepare<[number, PaymentMethod, number, number]>(
-  'INSERT INTO order_payments (order_id, method, amount, tip_amount) VALUES (?, ?, ?, ?)'
+const insertOrderPayment = db.prepare<[number, PaymentMethod, number, number, number, number]>(
+  'INSERT INTO order_payments (order_id, method, amount, tip_amount, delivery_fee, discount) VALUES (?, ?, ?, ?, ?, ?)'
 );
 const markCompleted = db.prepare<[number]>(
   `UPDATE orders SET status = 'COMPLETED', completed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?`
 );
-const updateTip = db.prepare<[number, number]>('UPDATE orders SET tip = ? WHERE id = ?');
-
-/**
- * Sets (or overwrites) an order's tip. Allowed at any status: a customer may decide
- * to tip when the order is placed, at payment time, or after the bill already
- * printed. Excluded from `total` / sales totals either way.
- */
-export function setOrderTip(id: number, tip: unknown): Order {
-  if (!isNonNegativeInt(tip)) {
-    throw new ValidationError('tip must be a non-negative integer amount in COP');
-  }
-  getOrderById(id); // 404s if the order doesn't exist
-  updateTip.run(tip, id);
-  return getOrderById(id);
-}
-
-const updateDeliveryFee = db.prepare<[number, number]>('UPDATE orders SET delivery_fee = ? WHERE id = ?');
-
-/**
- * Sets (or overwrites) an order's delivery fee. Only allowed on `delivery` orders
- * (matching the client-facing validation in `validateOrderRequest`), at any status.
- * Unlike tip, this is included in `total` for invoicing/reporting purposes.
- */
-export function setOrderDeliveryFee(id: number, deliveryFee: unknown): Order {
-  if (!isNonNegativeInt(deliveryFee)) {
-    throw new ValidationError('deliveryFee must be a non-negative integer amount in COP');
-  }
-  const order = getOrderById(id); // 404s if the order doesn't exist
-  if (deliveryFee > 0 && order.orderType !== 'delivery') {
-    throw new ValidationError('deliveryFee can only be set on delivery orders');
-  }
-  updateDeliveryFee.run(deliveryFee, id);
-  return getOrderById(id);
-}
 
 const ADDABLE_ITEM_STATUSES = new Set<OrderStatus>(['PENDING', 'PRINTING', 'ACTIVE']);
 const addToOrderTotal = db.prepare<[number, number]>('UPDATE orders SET total = total + ? WHERE id = ?');
@@ -596,8 +560,8 @@ export function addOrderItems(id: number, items: unknown): Order {
         notes: item.notes,
       });
       const orderItemId = Number(itemResult.lastInsertRowid);
-      for (const flavorId of item.flavorIds) {
-        insertOrderItemFlavor.run(orderItemId, flavorId);
+      for (const fp of item.flavorPortions) {
+        insertOrderItemFlavor.run(orderItemId, fp.flavorId, fp.portion);
       }
     }
     addToOrderTotal.run(addedTotal, id);
@@ -611,31 +575,26 @@ export function addOrderItems(id: number, items: unknown): Order {
 
 /**
  * Validates and normalizes the `payments` a client submits to complete an
- * order. Omitting `payments` falls back to a single payment for the full
- * amount owed via the order's pre-declared `paymentMethod`, with that one
- * method absorbing the whole tip (the common, non-split case). An explicit
- * array is required for a mixed payment: `amount` must sum exactly to
- * `owed`, and `tipAmount` (0 by default, must be <= that split's `amount`)
- * must sum exactly to `order.tip` - this is what lets a tip charged to one
- * specific method (e.g. added to the card only) be excluded from *that*
- * method's sales without guessing at a split ratio.
+ * order. Always required, one entry per method used (a single-method payment
+ * is just a one-entry array). Tip, delivery fee, and discount are declared
+ * here for the first and only time - Order.tip/deliveryFee/discount are
+ * always 0 before this point (see getOrderById) and derived from these rows
+ * afterward. `amount` must sum to order.total plus the declared tip/delivery
+ * fee totals - the GROSS total; discount is never subtracted from it, so the
+ * full pre-discount price is always on record. The actual cash collected for
+ * a split is `amount - discount`, derived when needed rather than stored.
  */
-function resolvePayments(input: unknown, order: Order, owed: number): PaymentSplit[] {
-  if (input == null) {
-    if (!order.paymentMethod) {
-      throw new ValidationError('payments is required (order has no pre-set paymentMethod)');
-    }
-    return [{ method: order.paymentMethod, amount: owed, tipAmount: order.tip }];
-  }
-
+function resolvePayments(input: unknown, order: Order): PaymentSplit[] {
   if (!Array.isArray(input) || input.length === 0) {
-    throw new ValidationError('payments must be a non-empty array of { method, amount, tipAmount? }');
+    throw new ValidationError('payments must be a non-empty array of { method, amount, tipAmount?, deliveryFee?, discount? }');
   }
 
   const splits = input.map((p: unknown, index: number) => {
     const method = (p as { method?: unknown })?.method;
     const amount = (p as { amount?: unknown })?.amount;
     const tipAmount = (p as { tipAmount?: unknown })?.tipAmount ?? 0;
+    const deliveryFee = (p as { deliveryFee?: unknown })?.deliveryFee ?? 0;
+    const discount = (p as { discount?: unknown })?.discount ?? 0;
     if (!PAYMENT_METHODS.has(method as PaymentMethod)) {
       throw new ValidationError(`payments[${index}].method must be one of ${[...PAYMENT_METHODS].join(', ')}`);
     }
@@ -648,17 +607,31 @@ function resolvePayments(input: unknown, order: Order, owed: number): PaymentSpl
     if (tipAmount > amount) {
       throw new ValidationError(`payments[${index}].tipAmount cannot exceed payments[${index}].amount`);
     }
-    return { method: method as PaymentMethod, amount, tipAmount };
+    if (!isNonNegativeInt(deliveryFee)) {
+      throw new ValidationError(`payments[${index}].deliveryFee must be a non-negative integer amount in COP`);
+    }
+    if (deliveryFee > amount) {
+      throw new ValidationError(`payments[${index}].deliveryFee cannot exceed payments[${index}].amount`);
+    }
+    if (!isNonNegativeInt(discount)) {
+      throw new ValidationError(`payments[${index}].discount must be a non-negative integer amount in COP`);
+    }
+    if (discount > amount) {
+      throw new ValidationError(`payments[${index}].discount cannot exceed payments[${index}].amount`);
+    }
+    return { method: method as PaymentMethod, amount, tipAmount, deliveryFee, discount };
   });
 
+  const tipTotal = splits.reduce((s, p) => s + p.tipAmount, 0);
+  const deliveryFeeTotal = splits.reduce((s, p) => s + p.deliveryFee, 0);
+  if (deliveryFeeTotal > 0 && order.orderType !== 'delivery') {
+    throw new ValidationError('deliveryFee can only be set on delivery orders');
+  }
+
+  const owed = order.total + tipTotal + deliveryFeeTotal;
   const sum = splits.reduce((s, p) => s + p.amount, 0);
   if (sum !== owed) {
     throw new ValidationError(`payments[].amount must sum to ${owed} (order total + tip + delivery fee), got ${sum}`);
-  }
-
-  const tipSum = splits.reduce((s, p) => s + p.tipAmount, 0);
-  if (tipSum !== order.tip) {
-    throw new ValidationError(`payments[].tipAmount must sum to the order's tip (${order.tip}), got ${tipSum}`);
   }
 
   return splits;
@@ -677,15 +650,12 @@ export async function completeOrder(id: number, { payments }: { payments?: unkno
     throw new ConflictError(`order ${id} cannot be completed from status ${order.status} (must be ACTIVE)`);
   }
 
-  const owed = order.total + order.tip + order.deliveryFee;
-  const resolvedPayments = resolvePayments(payments, order, owed);
+  const resolvedPayments = resolvePayments(payments, order);
 
   db.transaction(() => {
     for (const p of resolvedPayments) {
-      insertOrderPayment.run(id, p.method, p.amount, p.tipAmount);
+      insertOrderPayment.run(id, p.method, p.amount, p.tipAmount, p.deliveryFee, p.discount);
     }
-    const singleMethod = resolvedPayments.length === 1 ? resolvedPayments[0].method : null;
-    setPaymentMethod.run(singleMethod, id);
   })();
 
   const orderForPayment = getOrderById(id);

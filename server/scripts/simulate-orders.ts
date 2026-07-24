@@ -11,12 +11,14 @@ const ORDERS: OrderRequest[] = [
   {
     orderType: "dine_in",
     tableNumber: 3,
-    paymentMethod: "cash",
     items: [
       {
         type: "pizza",
         size: "medium",
-        flavors: ["margherita", "hawaiian"],
+        flavors: [
+          { flavor: "margherita", portion: 50 },
+          { flavor: "hawaiian", portion: 50 },
+        ],
         quantity: 1,
         notes: "sin cebolla",
       },
@@ -32,12 +34,14 @@ const ORDERS: OrderRequest[] = [
   {
     orderType: "dine_in",
     tableNumber: 7,
-    paymentMethod: "card",
     items: [
       {
         type: "pizza",
         size: "large",
-        flavors: ["margherita", "bbq"],
+        flavors: [
+          { flavor: "margherita", portion: 50 },
+          { flavor: "bbq", portion: 50 },
+        ],
         quantity: 1,
       },
       {
@@ -52,7 +56,6 @@ const ORDERS: OrderRequest[] = [
   {
     orderType: "takeaway",
     customer: { name: "Laura Gómez" },
-    paymentMethod: "cash",
     items: [
       {
         type: "product",
@@ -81,7 +84,6 @@ const ORDERS: OrderRequest[] = [
       phone: "3011234567",
       address: "Cra 45 #12-30",
     },
-    paymentMethod: "transfer",
     items: [
       {
         type: "product",
@@ -102,7 +104,6 @@ const ORDERS: OrderRequest[] = [
   {
     orderType: "dine_in",
     tableNumber: 9,
-    paymentMethod: "cash",
     notes: "Cumpleaños, por favor traer vela",
     items: [
       {
@@ -130,12 +131,16 @@ const ORDERS: OrderRequest[] = [
   {
     orderType: "takeaway",
     customer: { name: "Andrea" },
-    paymentMethod: "card",
     items: [
       {
         type: "pizza",
         size: "xlarge",
-        flavors: ["bbq", "tropical", "tricaccio", "bella_napoli"],
+        flavors: [
+          { flavor: "bbq", portion: 25 },
+          { flavor: "tropical", portion: 25 },
+          { flavor: "tricaccio", portion: 25 },
+          { flavor: "bella_napoli", portion: 25 },
+        ],
         quantity: 1,
         notes: "extra queso",
       },
@@ -155,7 +160,6 @@ const ORDERS: OrderRequest[] = [
       phone: "3009876543",
       address: "Calle 80 #10-05",
     },
-    paymentMethod: "cash",
     items: [
       { type: "product", category: "pastas", product: "seafood", quantity: 2 },
       {
@@ -176,12 +180,11 @@ const ORDERS: OrderRequest[] = [
   {
     orderType: "dine_in",
     tableNumber: 4,
-    paymentMethod: "cash",
     items: [
       {
         type: "pizza",
         size: "personal",
-        flavors: ["napolitana"],
+        flavors: [{ flavor: "napolitana", portion: 100 }],
         quantity: 3,
         notes: "bien cocidas",
       },

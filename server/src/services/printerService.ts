@@ -6,7 +6,7 @@ import puppeteer, { type Browser } from 'puppeteer';
 import { PNG } from 'pngjs';
 import db from '../db/index.js';
 import { NotFoundError } from '../utils/errors.js';
-import type { Order, OrderItem } from '../types/dinapoly-types.js';
+import type { Order, OrderItem, PaymentMethod } from '../types/dinapoly-types.js';
 import type { PrintJobKind, PrintJobRow } from '../types/db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -187,7 +187,7 @@ const ORDER_TYPE_ES: Record<Order['orderType'], string> = {
   takeaway: 'Para llevar',
   delivery: 'Domicilio',
 };
-const PAYMENT_METHOD_ES: Record<NonNullable<Order['paymentMethod']>, string> = {
+const PAYMENT_METHOD_ES: Record<PaymentMethod, string> = {
   cash: 'Efectivo',
   card: 'Tarjeta',
   transfer: 'Transferencia',
@@ -197,15 +197,28 @@ export function describeOrderType(orderType: Order['orderType']): string {
   return ORDER_TYPE_ES[orderType];
 }
 
-export function describePaymentMethod(method: NonNullable<Order['paymentMethod']>): string {
+export function describePaymentMethod(method: PaymentMethod): string {
   return PAYMENT_METHOD_ES[method];
+}
+
+/** Percent -> the simplified fraction it represents, e.g. 25 -> "1/4". Empty for a whole (100%) flavor. */
+function formatPortionFraction(portion: number): string {
+  if (portion >= 100) return '';
+  // 100/3 isn't an integer, so equal thirds are stored as 34/33/33 - still just "1/3" to a reader.
+  if (portion === 33 || portion === 34) return '1/3';
+  const divisor = gcd(portion, 100);
+  return `${portion / divisor}/${100 / divisor}`;
+}
+
+function gcd(a: number, b: number): number {
+  return b === 0 ? a : gcd(b, a % b);
 }
 
 export function describeItem(item: OrderItem): string {
   if (item.pizzaRef) {
     const groupName = getPizzaGroupName.get(item.pizzaRef.group)?.name ?? item.pizzaRef.group;
     const sizeName = getPizzaSizeName.get(item.pizzaRef.size)?.name ?? item.pizzaRef.size;
-    const flavorNames = item.pizzaRef.flavors.map((key) => getPizzaFlavorName.get(key)?.name ?? key);
+    const flavorNames = item.pizzaRef.flavors.map((f) => getPizzaFlavorName.get(f.flavor)?.name ?? f.flavor);
     return `Pizza ${groupName} ${sizeName} (${flavorNames.join(', ')})`;
   }
   const ref = item.menuItemRef!;
@@ -256,7 +269,11 @@ function describeItemTicketLines(item: OrderItem, width: number): string[] {
   if (item.pizzaRef) {
     const groupName = getPizzaGroupName.get(item.pizzaRef.group)?.name ?? item.pizzaRef.group;
     const sizeName = getPizzaSizeName.get(item.pizzaRef.size)?.name ?? item.pizzaRef.size;
-    const flavorNames = item.pizzaRef.flavors.map((key) => getPizzaFlavorName.get(key)?.name ?? key);
+    const flavorNames = item.pizzaRef.flavors.map((f) => {
+      const name = getPizzaFlavorName.get(f.flavor)?.name ?? f.flavor;
+      const fraction = formatPortionFraction(f.portion);
+      return fraction ? `${name} (${fraction})` : name;
+    });
     return [...wordWrap(`Pizza ${groupName} ${sizeName}`, width), ...wordWrap(flavorNames.join(', '), width)];
   }
   return wordWrap(describeItem(item), width);

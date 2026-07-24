@@ -34,12 +34,29 @@ interface OrderState {
   /** Items staged in the Menu/Order Overview flow, for either a new or an existing order. */
   cart: CartItem[];
 
+  /**
+   * Draft tip/delivery fee/discount for the order currently open in the
+   * Order Overview panel - purely client-side. The server has nowhere to
+   * store these before a payment method is chosen (see order_payments), so
+   * they're only ever sent once, as part of the `payments` array at
+   * POST /orders/:id/complete. Reset whenever the open order changes.
+   */
+  pendingTip: number;
+  pendingDeliveryFee: number;
+  pendingDiscount: number;
+
   startDraft: (input: NewOrderInfo) => void;
   openExistingOrder: (orderId: number) => void;
+  /** Like openExistingOrder, but for a draft that just got submitted and became this same order - keeps pendingTip/DeliveryFee/Discount instead of resetting them. */
+  promoteDraftToOrder: (orderId: number) => void;
   addCartItem: (item: CartItem) => void;
   removeCartItem: (clientId: string) => void;
+  removeCartItems: (clientIds: string[]) => void;
   clearCart: () => void;
   clearCurrentOrder: () => void;
+  setPendingTip: (tip: number) => void;
+  setPendingDeliveryFee: (deliveryFee: number) => void;
+  setPendingDiscount: (discount: number) => void;
 }
 
 export const useOrderStore = create<OrderState>((set) => ({
@@ -55,11 +72,24 @@ export const useOrderStore = create<OrderState>((set) => ({
   currentOrderId: null,
   newOrderInfo: null,
   cart: [],
+  pendingTip: 0,
+  pendingDeliveryFee: 0,
+  pendingDiscount: 0,
 
-  startDraft: (info) => set({ currentOrderId: null, newOrderInfo: info, cart: [] }),
-  openExistingOrder: (orderId) => set({ currentOrderId: orderId, newOrderInfo: null, cart: [] }),
+  startDraft: (info) => set({ currentOrderId: null, newOrderInfo: info, cart: [], pendingTip: 0, pendingDeliveryFee: 0, pendingDiscount: 0 }),
+  openExistingOrder: (orderId) =>
+    set({ currentOrderId: orderId, newOrderInfo: null, cart: [], pendingTip: 0, pendingDeliveryFee: 0, pendingDiscount: 0 }),
+  promoteDraftToOrder: (orderId) => set({ currentOrderId: orderId, newOrderInfo: null, cart: [] }),
   addCartItem: (item) => set((state) => ({ cart: [...state.cart, item] })),
   removeCartItem: (clientId) => set((state) => ({ cart: state.cart.filter((i) => i.clientId !== clientId) })),
+  removeCartItems: (clientIds) =>
+    set((state) => {
+      const ids = new Set(clientIds);
+      return { cart: state.cart.filter((i) => !ids.has(i.clientId)) };
+    }),
   clearCart: () => set({ cart: [] }),
-  clearCurrentOrder: () => set({ currentOrderId: null, newOrderInfo: null, cart: [] }),
+  clearCurrentOrder: () => set({ currentOrderId: null, newOrderInfo: null, cart: [], pendingTip: 0, pendingDeliveryFee: 0, pendingDiscount: 0 }),
+  setPendingTip: (tip) => set({ pendingTip: tip }),
+  setPendingDeliveryFee: (deliveryFee) => set({ pendingDeliveryFee: deliveryFee }),
+  setPendingDiscount: (discount) => set({ pendingDiscount: discount }),
 }));

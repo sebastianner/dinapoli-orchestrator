@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from '@tanstack/react-router';
 import { Bike, ChevronDown, ChevronUp, ClipboardList, ShoppingBag } from 'lucide-react';
+import classNames from 'classnames';
 import { useOrderStore } from '@/store/useOrderStore';
 import { timeAgo } from '@/lib/date';
 
@@ -11,6 +12,8 @@ export function ActiveOrdersTab() {
 
   const activeOrders = useOrderStore((s) => s.activeOrders);
   const openExistingOrder = useOrderStore((s) => s.openExistingOrder);
+  const currentOrderId = useOrderStore((s) => s.currentOrderId);
+  const cart = useOrderStore((s) => s.cart);
   const navigate = useNavigate();
 
   // Re-render periodically so "hace N minutos" stays current without a full refetch.
@@ -22,6 +25,9 @@ export function ActiveOrdersTab() {
   if (pathname.startsWith('/dashboard')) return null;
 
   const orders = activeOrders.filter((o) => o.orderType !== 'dine_in');
+  // Same collision check as ToastViewport: shift clear of the Order Overview
+  // panel (w-80 + border) when it's showing on /menu.
+  const orderOverviewVisible = pathname.startsWith('/menu') && (currentOrderId != null || cart.length > 0);
 
   const handleView = (orderId: number) => {
     openExistingOrder(orderId);
@@ -30,7 +36,12 @@ export function ActiveOrdersTab() {
   };
 
   return (
-    <div className="fixed bottom-4 left-28 z-40 flex flex-col items-start gap-2 sm:left-32">
+    <div
+      className={classNames(
+        'fixed bottom-[30px] z-40 flex flex-col items-end gap-2 transition-[right] duration-base',
+        orderOverviewVisible ? 'right-[392px]' : 'right-16',
+      )}
+    >
       {open && (
         <div className="anim-slide-up flex max-h-96 w-72 flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-lg">
           <div className="border-b border-border px-4 py-3">

@@ -3,10 +3,14 @@ import type { Order, PaymentMethod } from '../types/dinapoly-types.js';
 
 export interface PaymentSplit {
   method: PaymentMethod;
-  /** Integer COP. Total charged via this method, tip included. */
+  /** Integer COP. Total charged via this method, tip and delivery fee included - the gross amount, before this split's own `discount`. */
   amount: number;
   /** Integer COP. The slice of `amount` that's tip rather than sales. */
   tipAmount: number;
+  /** Integer COP. The slice of `amount` that's delivery fee rather than sales. */
+  deliveryFee: number;
+  /** Integer COP. The slice of `amount` this split's discount accounts for; actual cash collected is `amount - discount`. */
+  discount: number;
 }
 
 export interface Payment {
@@ -34,7 +38,10 @@ export function processPayment(order: Order, payments: PaymentSplit[]): Payment 
 
   const amountCOP = order.total + order.tip + order.deliveryFee;
   const breakdown = payments
-    .map((p) => `${p.amount} COP via ${p.method}${p.tipAmount > 0 ? ` (incl. ${p.tipAmount} tip)` : ''}`)
+    .map((p) => {
+      const notes = [p.tipAmount > 0 ? `${p.tipAmount} tip` : null, p.discount > 0 ? `${p.discount} discount` : null].filter(Boolean);
+      return `${p.amount} COP via ${p.method}${notes.length > 0 ? ` (incl. ${notes.join(', ')})` : ''}`;
+    })
     .join(' + ');
   console.log(`[payment] processed ${amountCOP} COP (${breakdown}) for order ${order.id}`);
 

@@ -127,17 +127,7 @@ export interface OrderRequest {
   tableNumber?: number;
   /** Required for 'takeaway' (name) and 'delivery' (name, phone, address). */
   customer?: CustomerInfo;
-  /**
-   * A declared single method of intent, not a settlement. Used as the default
-   * when POST /api/orders/:id/complete is called without a `payments` array;
-   * a mixed payment always requires passing `payments` explicitly.
-   */
-  paymentMethod?: PaymentMethod;
   notes?: string;
-  /** Integer COP. Defaults to 0 when omitted. Excluded from `total` and from sales totals. */
-  tip?: number;
-  /** Integer COP. Delivery orders only. Defaults to 0 when omitted. Included in sales totals (unlike tip). */
-  deliveryFee?: number;
   items: OrderItemRequest[];
 }
 
@@ -149,15 +139,23 @@ export interface CustomerInfo {
 
 export type OrderItemRequest = PizzaItemRequest | ProductItemRequest;
 
+export interface PizzaFlavorSelection {
+  /** Flavor id. */
+  flavor: string;
+  /** This flavor's share of the pizza, percent, 1-100. */
+  portion: number;
+}
+
 export interface PizzaItemRequest {
   type: "pizza";
   size: PizzaSizeId;
   /**
-   * Flavor ids, length 1..maxFlavors of the size. The group is not chosen by
-   * the client: the server derives it from the flavors picked (mixing in any
-   * 'special' flavor upgrades the whole pizza to the special price for this size).
+   * 1..maxFlavors selections; portions must sum to exactly 100. The group is
+   * not chosen by the client: the server derives it from the flavors picked
+   * (mixing in any 'special' flavor upgrades the whole pizza to the special
+   * price for this size, regardless of that flavor's portion).
    */
-  flavors: string[];
+  flavors: PizzaFlavorSelection[];
   quantity: number;
   notes?: string;
 }
@@ -188,17 +186,27 @@ export interface Order {
   /** The employee who placed the order, if any. */
   employeeId: number | null;
   employeeName: string | null;
-  paymentMethod: PaymentMethod | null;
   tableNumber: number | null;
   customerName: string | null;
   phone: string | null;
   address: string | null;
   /** Integer COP. Computed server-side, sum of items only (excludes tip). */
   total: number;
-  /** Integer COP. Defaults to 0. Settable/updatable any time via PUT /api/orders/:id/tip. */
+  /**
+   * Integer COP. Always 0 until the order is COMPLETED - there's nowhere to
+   * declare a tip before a payment method is chosen. Set for the first and
+   * only time via POST /api/orders/:id/complete's `payments[].tipAmount`,
+   * and derived from summing those rows afterward (see getOrderById).
+   */
   tip: number;
-  /** Integer COP. Delivery orders only. Defaults to 0. Settable via PUT /api/orders/:id/delivery-fee. */
+  /** Integer COP. Delivery orders only. Same lifecycle as `tip`, set via `payments[].deliveryFee` at completion. */
   deliveryFee: number;
+  /**
+   * Integer COP. Same lifecycle as `tip`, set via `payments[].discount` at
+   * completion. Reduces what the customer actually pays, but `total`/item
+   * prices are never decreased by it - see OrderPayment.amount for why.
+   */
+  discount: number;
   notes: string | null;
   createdAt: string; // ISO / SQLite datetime
   completedAt: string | null;
@@ -216,10 +224,20 @@ export interface OrderPayment {
   id: number;
   orderId: number;
   method: PaymentMethod;
-  /** Integer COP. Total charged via this method, tip included. */
+  /**
+   * Integer COP. Total charged via this method, tip and delivery fee
+   * included - always the GROSS amount, before this split's `discount`. It's
+   * never reduced to reflect a discount, so the original pre-discount price
+   * stays on record; the actual cash collected is `amount - discount`,
+   * derived whenever needed rather than stored.
+   */
   amount: number;
   /** Integer COP. The slice of `amount` that's tip rather than sales; 0..amount. */
   tipAmount: number;
+  /** Integer COP. The slice of `amount` that's delivery fee rather than sales; 0..amount. */
+  deliveryFee: number;
+  /** Integer COP. The slice of `amount` this split's discount accounts for; 0..amount. */
+  discount: number;
   createdAt: string;
 }
 
@@ -249,7 +267,7 @@ export interface ProductRef {
 export interface PizzaRef {
   group: PizzaGroupId;
   size: PizzaSizeId;
-  flavors: string[];
+  flavors: PizzaFlavorSelection[];
 }
 
 // ============================================================

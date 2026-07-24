@@ -87,8 +87,6 @@ export const fetchOrders = (filter: FetchOrdersFilter = {}) => {
 };
 export const fetchOrder = (id: number) => get<Order>(`/orders/${id}`);
 export const addOrderItems = (id: number, items: unknown[]) => post<Order>(`/orders/${id}/items`, { items });
-export const setOrderTip = (id: number, tip: number) => put<Order>(`/orders/${id}/tip`, { tip });
-export const setOrderDeliveryFee = (id: number, deliveryFee: number) => put<Order>(`/orders/${id}/delivery-fee`, { deliveryFee });
 export const completeOrder = (id: number, payments?: PaymentSplitRequest[]) => post<Order>(`/orders/${id}/complete`, { payments });
 export const reprintOrderDocument = (id: number, kind: 'kitchen_ticket' | 'bill') =>
   post<{ status: string; orderId: number; kind: string }>(`/orders/${id}/reprint`, { kind });

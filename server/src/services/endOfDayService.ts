@@ -33,17 +33,17 @@ interface SalesAggregate {
 
 // completed_at is stored in UTC; Bogota has no DST (fixed UTC-5 year round),
 // so a static offset reliably matches the same business day computed in JS
-// via todayDateStrBogota(). Tips are excluded (per spec) simply by never
-// including order.tip in `sales_amount`; delivery fees are included via
-// total + delivery_fee.
-const getCompletedOrdersForDate = db.prepare<[string], { id: number; order_type: string; sales_amount: number }>(
-  `SELECT id, order_type, (total + delivery_fee) AS sales_amount
-   FROM orders
-   WHERE status = 'COMPLETED' AND date(completed_at, '-5 hours') = ?`
+// via todayDateStrBogota(). Tip and delivery fee/discount only ever exist as
+// the per-method breakdown in order_payments (see schema comment), so an
+// order's sales figure is derived by summing (amount - tip_amount - discount)
+// across its payment rows - this excludes tips and discounts from sales
+// while keeping delivery fees in, exactly, with no proportional guessing.
+const getCompletedOrdersForDate = db.prepare<[string], { id: number; order_type: string }>(
+  `SELECT id, order_type FROM orders WHERE status = 'COMPLETED' AND date(completed_at, '-5 hours') = ?`
 );
 
-const getPaymentsForOrder = db.prepare<[number], { method: string; amount: number; tip_amount: number }>(
-  'SELECT method, amount, tip_amount FROM order_payments WHERE order_id = ? ORDER BY id'
+const getPaymentsForOrder = db.prepare<[number], { method: string; amount: number; tip_amount: number; discount: number }>(
+  'SELECT method, amount, tip_amount, discount FROM order_payments WHERE order_id = ? ORDER BY id'
 );
 
 function aggregateSales(date: string): SalesAggregate {
@@ -65,26 +65,22 @@ function aggregateSales(date: string): SalesAggregate {
   }
 
   for (const row of rows) {
-    agg.totalSales += row.sales_amount;
-    if (row.order_type === 'delivery') agg.deliverySales += row.sales_amount;
-    else agg.dineInTakeawaySales += row.sales_amount;
-
-    // Each payment row already knows exactly how much of its own amount is
-    // tip (order_payments.tip_amount, see schema comment), so the sales
-    // share per method is exact - no proportional guessing, no rounding.
-    // Summed across an order's rows this always equals sales_amount, since
-    // amount sums to (total + tip + delivery_fee) and tip_amount sums to tip.
+    let salesAmount = 0;
     for (const p of getPaymentsForOrder.all(row.id)) {
-      addMethodSales(p.method, p.amount - p.tip_amount);
+      const net = p.amount - p.tip_amount - p.discount;
+      addMethodSales(p.method, net);
+      salesAmount += net;
     }
+    agg.totalSales += salesAmount;
+    if (row.order_type === 'delivery') agg.deliverySales += salesAmount;
+    else agg.dineInTakeawaySales += salesAmount;
   }
   return agg;
 }
 
-// A COMPLETED order always has a resolved paymentMethod (completeOrder
-// requires it), but cash_flow.date rows are seeded before any expense is
-// recorded, so a day with zero expenses simply has no matching row - hence
-// COALESCE rather than relying on a guaranteed row.
+// cash_flow rows are seeded before any expense is recorded, so a day with
+// zero expenses simply has no matching row - hence COALESCE rather than
+// relying on a guaranteed row.
 const getExpensesForDate = db.prepare<[string], { total: number | null }>(
   'SELECT COALESCE(SUM(expenses), 0) AS total FROM cash_flow WHERE date = ?'
 );

@@ -29,6 +29,7 @@ function PizzaSizePage() {
             className="anim-scale-in flex w-36 flex-col items-center gap-1 rounded-2xl border border-border bg-surface p-5 shadow-sm transition-transform duration-fast hover:scale-105 hover:border-brand-400 active:scale-95"
           >
             <span className="text-lg font-semibold text-text-primary">{size.name}</span>
+            <span className="text-xs text-text-secondary">Sabores: {size.maxFlavors}</span>
           </button>
         ))}
       </div>

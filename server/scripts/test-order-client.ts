@@ -7,19 +7,25 @@ const ws = new WebSocket(url);
 const order: OrderRequest = {
   orderType: "dine_in",
   customer: { name: "Don Chimbo", phone: "555-1234", address: "123 Main St" },
-  paymentMethod: "cash",
   tableNumber: 6,
   items: [
     {
       type: "pizza",
       size: "xlarge",
-      flavors: ["hawaiian", "pepperoni", "margherita"],
+      flavors: [
+        { flavor: "hawaiian", portion: 50 },
+        { flavor: "pepperoni", portion: 25 },
+        { flavor: "margherita", portion: 25 },
+      ],
       quantity: 1,
     },
     {
       type: "pizza",
       size: "xlarge",
-      flavors: ["curramba", "tropical"],
+      flavors: [
+        { flavor: "curramba", portion: 50 },
+        { flavor: "tropical", portion: 50 },
+      ],
       quantity: 1,
     },
     {
