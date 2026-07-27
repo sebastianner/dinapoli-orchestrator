@@ -3,13 +3,15 @@ import type { Order, PaymentMethod } from '../types/dinapoly-types.js';
 
 export interface PaymentSplit {
   method: PaymentMethod;
-  /** Integer COP. Total charged via this method, tip and delivery fee included - the gross amount, before this split's own `discount`. */
-  amount: number;
-  /** Integer COP. The slice of `amount` that's tip rather than sales. */
+  /** Integer COP. Total charged via this method, tip and delivery fee included - the gross amount, before this split's own `discount`. Named distinctly from Order.total (items only). */
+  grossAmount: number;
+  /** Integer COP. The slice of `grossAmount` that's tip rather than sales. */
   tipAmount: number;
-  /** Integer COP. The slice of `amount` that's delivery fee rather than sales. */
+  /** Integer COP. The slice of `grossAmount` that's delivery fee rather than sales. */
   deliveryFee: number;
-  /** Integer COP. The slice of `amount` this split's discount accounts for; actual cash collected is `amount - discount`. */
+  /** Integer COP. `grossAmount - tipAmount - deliveryFee` - the products-only slice; computed server-side in resolvePayments, never client-supplied. */
+  netAmount: number;
+  /** Integer COP. The slice of `netAmount` this split's discount accounts for (discounts apply to products, not tip/delivery fee); actual cash collected is `grossAmount - discount`. */
   discount: number;
 }
 
@@ -36,11 +38,11 @@ export function processPayment(order: Order, payments: PaymentSplit[]): Payment 
     throw new ValidationError('order total must be a positive integer amount in COP');
   }
 
-  const amountCOP = order.total + order.tip + order.deliveryFee;
+  const amountCOP = order.grandTotal;
   const breakdown = payments
     .map((p) => {
       const notes = [p.tipAmount > 0 ? `${p.tipAmount} tip` : null, p.discount > 0 ? `${p.discount} discount` : null].filter(Boolean);
-      return `${p.amount} COP via ${p.method}${notes.length > 0 ? ` (incl. ${notes.join(', ')})` : ''}`;
+      return `${p.grossAmount} COP via ${p.method}${notes.length > 0 ? ` (incl. ${notes.join(', ')})` : ''}`;
     })
     .join(' + ');
   console.log(`[payment] processed ${amountCOP} COP (${breakdown}) for order ${order.id}`);

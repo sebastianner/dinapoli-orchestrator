@@ -46,6 +46,21 @@ to type `better-sqlite3` prepared statements live in `src/types/db.ts`.
   updatable via `PUT /api/orders/:id/delivery-fee`) but is restricted to
   `orderType: 'delivery'` and — unlike tip — is meant to be *included* in
   sales totals (see End-of-Day Closing below).
+- **Promotions** (`orderService.validatePromoItems`/`applyPromoPricing`): an
+  optional `OrderRequest.promoType` (`'duo' | 'pizza_xl'`), validated and
+  flat-priced server-side regardless of what the frontend already restricts,
+  same as every other price in this app. `'duo'` requires exactly 2 items from
+  personal pizza (single flavor only, no mitad y mitad) / lasaña (not Mamma
+  Mia) / pasta (not Marinera) / gratinado, excluding 5 "special" flavors
+  (campesina, madrileña, atarraya, tricaccio, ardiente) wherever they'd
+  otherwise apply, for a flat $37,000. `'pizza_xl'` requires exactly an XL
+  pizza + a Gaseosa Personal + a Panes al Gratín for a flat $80,000, the soda
+  and bread priced at $0 — except choosing the Coca-Cola or Quatro soda option
+  adds a $2,000 surcharge. Either way the *first* qualifying item (the pizza,
+  for `pizza_xl`) carries the full promo price and the rest are priced $0, so
+  the sum of `order_items.unit_price` always equals `orders.total`. Persisted
+  as `orders.promo_type`, set once at creation and never changed; printed on
+  the kitchen ticket via `printerService.describePromoType`.
 - **Persistent queue** (`src/services/queueService.js`): the queue *is* the
   `orders.status` column — no separate queue store. A poll loop (every 2s, plus
   an immediate pass on boot and right after a new order or item addition
@@ -87,20 +102,20 @@ to type `better-sqlite3` prepared statements live in `src/types/db.ts`.
   `{ "kind": "kitchen_ticket" | "bill" }` triggers it.
 - **Billing + payment** (`src/services/billingService.js`,
   `src/services/paymentService.js`): triggered by `POST /api/orders/:id/complete`.
-  The full amount owed is `order.total + order.tip + order.deliveryFee` in COP
-  (tip and delivery fee are real cash collected even though they're excluded
-  from `total`). Settlement can be split across more than one method (e.g.
-  part cash, part card): `completeOrder` accepts an optional `payments` array,
-  `{ method, amount, tipAmount? }[]`, persisted one row per method to
-  `order_payments`. `amount` across all rows must sum exactly to the amount
-  owed; `tipAmount` (0 by default) marks the slice of that row's `amount`
+  The full amount owed is `order.grandTotal` (= `order.total + order.tip +
+  order.deliveryFee`) in COP (tip and delivery fee are real cash collected
+  even though they're excluded from `total`). Settlement can be split across
+  more than one method (e.g. part cash, part card): `completeOrder` requires
+  a `payments` array, `{ method, grossAmount, tipAmount? }[]` (one entry per
+  method used — a plain single-method payment is just a one-entry array),
+  persisted one row per method to `order_payments`. `grossAmount` — named
+  distinctly from `order.total` so the two can't be confused, since it's the
+  gross figure *including* tip/delivery fee — must sum exactly to the amount
+  owed; `tipAmount` (0 by default) marks the slice of that row's `grossAmount`
   that's tip rather than sales and must sum exactly to `order.tip` — this is
   what lets a tip charged to only one method (e.g. added to the card while
   cash covers the rest) be excluded from *that* method's sales precisely
-  instead of guessed via a proportional split (see End-of-Day below). Omitting
-  `payments` falls back to a single payment for the full amount via the
-  order's pre-declared `paymentMethod`, with that one method absorbing the
-  whole tip — the common, non-split case needs no client changes. Billing
+  instead of guessed via a proportional split (see End-of-Day below). Billing
   renders the HTML bill — subtotal, delivery fee (when non-zero), tip (when
   non-zero), grand total, and one payment line per method — and hands it to
   the printer's rasterization pipeline.
@@ -132,12 +147,15 @@ to type `better-sqlite3` prepared statements live in `src/types/db.ts`.
   business day's sales — every `COMPLETED` order whose `completed_at` falls
   on that day (Colombia has no DST, so a fixed UTC-5 SQL offset is enough to
   match `todayDateStrBogota()`), summed as `total + delivery_fee` per order
-  (tips excluded, delivery fees included, per spec) and categorized by order
-  type (delivery vs. dine-in/takeaway) and, per `order_payments` row, by
-  `method` (cash/card/transfer) — each row contributes `amount - tipAmount`
-  to its method's bucket, so a tip charged to only one method of a mixed
-  payment is excluded exactly rather than smeared proportionally across all
-  of them. Plus that day's total expenses pulled from `cash_flow`. The
+  (tips and discounts excluded, delivery fees included, per spec) and
+  categorized by order type (delivery vs. dine-in/takeaway) and, per
+  `order_payments` row, by `method` (cash/card/transfer) — each row
+  contributes `amount - tipAmount - discount` to its method's bucket, so a
+  tip or discount on only one method of a mixed payment is excluded exactly
+  rather than smeared proportionally across all of them. Tips and discounts
+  are still tracked on the report as their own totals (`tips`, `discounts`)
+  for visibility, they're just excluded from `total_sales` itself. Plus that
+  day's total expenses pulled from `cash_flow`. The
   snapshot — and the exact plain-text receipt printed for
   it — is persisted as a new `closing_reports` row rather than computed
   live on every read, so history survives later corrections to the
@@ -157,15 +175,15 @@ to type `better-sqlite3` prepared statements live in `src/types/db.ts`.
   `ACTIVE`, bounces it back to `PENDING` so the queue worker prints a short
   addendum ticket for just the new items.
 - `POST /api/orders/:id/complete` — marks an `ACTIVE` order `COMPLETED`; processes
-  payment and prints the bill. Body: `{ "payments"?: { method: "cash"|"card"|"transfer", amount: number, tipAmount?: number }[] }`.
-  Omit `payments` to settle the full amount owed via the order's pre-declared
-  `paymentMethod` (errors if it doesn't have one). Otherwise `amount` across
-  all entries must sum exactly to `order.total + order.tip + order.deliveryFee`,
-  and `tipAmount` (0 by default, must be `<= amount`) must sum exactly to
-  `order.tip` — this is how a mixed payment (e.g. `[{ "method": "cash",
-  "amount": 20000 }, { "method": "card", "amount": 35000, "tipAmount": 5000 }]`)
-  attributes a tip charged to one specific method without it leaking into
-  another method's sales.
+  payment and prints the bill. Body: `{ "payments": { method: "cash"|"card"|"transfer", grossAmount: number, tipAmount?: number, deliveryFee?: number, discount?: number }[] }`
+  (required, non-empty — one entry per method used; a plain single-method
+  payment is just a one-entry array). `grossAmount` across all entries must
+  sum exactly to `order.grandTotal` (= `order.total + order.tip +
+  order.deliveryFee`), and `tipAmount` (0 by default, must be `<= grossAmount`)
+  must sum exactly to `order.tip` — this is how a mixed payment (e.g.
+  `[{ "method": "cash", "grossAmount": 20000 }, { "method": "card",
+  "grossAmount": 35000, "tipAmount": 5000 }]`) attributes a tip charged to one
+  specific method without it leaking into another method's sales.
 - `POST /api/orders/:id/reprint` — re-sends a previously saved kitchen ticket or
   bill to the printer. Body: `{ "kind": "kitchen_ticket" | "bill" }`. 404s if
   nothing has been printed/saved for that order+kind yet.

@@ -1,4 +1,5 @@
 import classNames from 'classnames';
+import { Link } from '@tanstack/react-router';
 import { Printer, Receipt } from 'lucide-react';
 import type { Order, OrderStatus } from '@/types/api';
 import { formatCOP } from '@/lib/format';
@@ -43,7 +44,11 @@ export function OrderHistoryCard({ order }: OrderHistoryCardProps) {
   };
 
   return (
-    <div className="flex items-center justify-between gap-4 rounded-2xl border border-border bg-surface p-4">
+    <Link
+      to="/dashboard/order-history/$id"
+      params={{ id: String(order.id) }}
+      className="flex items-center justify-between gap-4 rounded-2xl border border-border bg-surface p-4 transition-colors duration-fast hover:border-brand-400"
+    >
       <div>
         <div className="flex items-center gap-2">
           <span className="font-semibold text-text-primary">Orden #{order.id}</span>
@@ -56,7 +61,7 @@ export function OrderHistoryCard({ order }: OrderHistoryCardProps) {
 
       <div className="flex items-center gap-4">
         {(() => {
-          const gross = order.total + (order.tip ?? 0) + (order.deliveryFee ?? 0);
+          const gross = order.grandTotal;
           const discount = order.discount ?? 0;
           if (discount > 0) {
             return (
@@ -71,7 +76,10 @@ export function OrderHistoryCard({ order }: OrderHistoryCardProps) {
         <div className="flex gap-1">
           <button
             type="button"
-            onClick={() => handleReprint('kitchen_ticket')}
+            onClick={(e) => {
+              e.preventDefault();
+              handleReprint('kitchen_ticket');
+            }}
             title="Reimprimir comanda"
             className="flex h-9 w-9 items-center justify-center rounded-lg border border-border text-text-secondary hover:border-brand-400 hover:text-brand-600"
           >
@@ -79,7 +87,10 @@ export function OrderHistoryCard({ order }: OrderHistoryCardProps) {
           </button>
           <button
             type="button"
-            onClick={() => handleReprint('bill')}
+            onClick={(e) => {
+              e.preventDefault();
+              handleReprint('bill');
+            }}
             title="Reimprimir factura"
             className="flex h-9 w-9 items-center justify-center rounded-lg border border-border text-text-secondary hover:border-brand-400 hover:text-brand-600"
           >
@@ -87,6 +98,6 @@ export function OrderHistoryCard({ order }: OrderHistoryCardProps) {
           </button>
         </div>
       </div>
-    </div>
+    </Link>
   );
 }

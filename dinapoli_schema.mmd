@@ -108,7 +108,8 @@ erDiagram
     text phone "nullable. delivery only"
     text address "nullable. delivery only"
     text notes "nullable. order-level comments"
-    int total "sum of items only, excludes tip and delivery_fee"
+    text promo_type "nullable. 'duo' or 'pizza_xl'. set once at creation, never changed - see resolvePromoItems"
+    int total "sum of items only, excludes tip and delivery_fee - see grandTotal (API-level, not a column) for total+tip+delivery_fee"
     text created_at
     text completed_at "nullable. set on COMPLETED"
     int print_attempts "recovery bookkeeping, default 0"
@@ -138,10 +139,10 @@ erDiagram
     int id PK
     int order_id FK
     text method "cash, card, or transfer"
-    int amount "GROSS total charged via this method, integer COP - tip and delivery fee included, discount NOT subtracted"
-    int tip_amount "default 0. slice of amount that's tip, not sales. 0 to amount"
-    int delivery_fee "default 0. slice of amount that's delivery fee, not sales. 0 to amount"
-    int discount "default 0. slice of amount this split's discount accounts for. 0 to amount. actual cash collected is amount - discount, derived when needed"
+    int gross_amount "GROSS total charged via this method, integer COP - tip and delivery fee included, discount NOT subtracted. Named distinctly from ORDERS.total (items only) so the two can't be confused"
+    int tip_amount "default 0. slice of gross_amount that's tip, not sales. 0 to gross_amount"
+    int delivery_fee "default 0. slice of gross_amount that's delivery fee, not sales. 0 to gross_amount"
+    int discount "default 0. slice of gross_amount this split's discount accounts for. 0 to gross_amount. actual cash collected is gross_amount - discount, derived when needed"
     text created_at "written once, at completion - the ONLY place tip/delivery fee/discount are ever recorded; ORDERS.tip/deliveryFee/discount (API-level, not a column) are always 0 before this and derived by summing these rows afterward"
   }
 
@@ -176,12 +177,14 @@ erDiagram
     int id PK
     text date "YYYY-MM-DD business day this report covers"
     int order_count "COMPLETED orders that day"
-    int delivery_sales "total+delivery_fee summed for delivery orders, tips excluded"
+    int delivery_sales "total+delivery_fee summed for delivery orders, tips/discounts excluded"
     int dine_in_takeaway_sales "total+delivery_fee summed for dine_in/takeaway orders"
-    int cash_sales "grouped by ORDER_PAYMENTS.method, each row's amount - tip_amount"
+    int cash_sales "grouped by ORDER_PAYMENTS.method, each row's amount - tip_amount - discount"
     int card_sales
     int transfer_sales
     int total_sales "delivery_sales + dine_in_takeaway_sales"
+    int tips "sum of ORDER_PAYMENTS.tip_amount for the day, not part of total_sales"
+    int discounts "sum of ORDER_PAYMENTS.discount for the day, not subtracted from total_sales"
     int total_expenses "sum of CASH_FLOW.expenses for the day"
     text content "rendered receipt text, for reprint"
     text created_at "always a manual staff action, never auto-generated"

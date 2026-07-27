@@ -12,7 +12,9 @@
     "db:seed": "tsx src/db/seed.ts",
     "db:reset": "tsx src/db/migrate.ts --reset && tsx src/db/seed.ts",
     "ws:client": "tsx scripts/test-order-client.ts",
-    "ws:simulate": "tsx scripts/simulate-orders.ts"
+    "ws:simulate": "tsx scripts/simulate-orders.ts",
+    "ws:stress": "tsx scripts/stress-test-orders.ts",
+    "orders:complete-random": "tsx scripts/complete-random-orders.ts"
   },
   "dependencies": {
     "better-sqlite3": "^11.9.1",

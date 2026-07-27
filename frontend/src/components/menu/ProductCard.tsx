@@ -5,23 +5,29 @@ import { formatCOP } from '@/lib/format';
 import { productUnitPrice } from '@/lib/pricing';
 import { useOrderStore } from '@/store/useOrderStore';
 import { useToastStore } from '@/store/useToastStore';
+import { promoProgressText } from '@/lib/promos';
 
 interface ProductCardProps {
   categoryId: ProductCategoryId;
   product: Product;
   /** All pizza flavors, only needed for products with `pizzaFlavor: true` (e.g. gratin). */
   pizzaFlavors: PizzaFlavor[];
+  /** Flavor ids to hide from the picker, e.g. the 5 flavors the 'duo' promo excludes from gratinados. */
+  excludedFlavorIds?: Set<string>;
 }
 
-export function ProductCard({ categoryId, product, pizzaFlavors }: ProductCardProps) {
+export function ProductCard({ categoryId, product, pizzaFlavors, excludedFlavorIds }: ProductCardProps) {
+  const availableFlavors = excludedFlavorIds ? pizzaFlavors.filter((f) => !excludedFlavorIds.has(f.id)) : pizzaFlavors;
   const [optionId, setOptionId] = useState(product.options?.[0]?.id ?? '');
-  const [flavorId, setFlavorId] = useState(pizzaFlavors[0]?.id ?? '');
+  const [flavorId, setFlavorId] = useState(availableFlavors[0]?.id ?? '');
   const [showComment, setShowComment] = useState(false);
   const [notes, setNotes] = useState('');
 
   const currentOrderId = useOrderStore((s) => s.currentOrderId);
   const newOrderInfo = useOrderStore((s) => s.newOrderInfo);
   const addCartItem = useOrderStore((s) => s.addCartItem);
+  const promoDraft = useOrderStore((s) => s.promoDraft);
+  const addPromoItem = useOrderStore((s) => s.addPromoItem);
   const pushToast = useToastStore((s) => s.push);
 
   const hasOrderContext = currentOrderId != null || newOrderInfo != null;
@@ -42,13 +48,13 @@ export function ProductCard({ categoryId, product, pizzaFlavors }: ProductCardPr
     }
 
     const option = product.options?.find((o) => o.id === optionId);
-    const flavor = pizzaFlavors.find((f) => f.id === flavorId);
+    const flavor = availableFlavors.find((f) => f.id === flavorId);
     const labelParts = [product.name, option?.name, flavor?.name].filter(Boolean);
 
-    addCartItem({
+    const item = {
       clientId: crypto.randomUUID(),
       request: {
-        type: 'product',
+        type: 'product' as const,
         category: categoryId,
         product: product.id,
         option: optionId || undefined,
@@ -59,8 +65,17 @@ export function ProductCard({ categoryId, product, pizzaFlavors }: ProductCardPr
       label: labelParts.join(' - '),
       unitPrice: price,
       quantity: 1,
-    });
+    };
 
+    if (promoDraft) {
+      addPromoItem(item);
+      pushToast(promoProgressText(promoDraft.type, promoDraft.items.length + 1));
+      setNotes('');
+      setShowComment(false);
+      return;
+    }
+
+    addCartItem(item);
     pushToast(`${product.name} agregado`);
     setNotes('');
     setShowComment(false);
@@ -73,7 +88,7 @@ export function ProductCard({ categoryId, product, pizzaFlavors }: ProductCardPr
           <h3 className="font-semibold text-text-primary">{product.name}</h3>
           {product.description && <p className="mt-0.5 text-sm text-text-secondary">{product.description}</p>}
         </div>
-        <span className="shrink-0 whitespace-nowrap font-semibold text-brand-700">{formatCOP(price)}</span>
+        <span className="shrink-0 whitespace-nowrap font-semibold text-brand-700">{promoDraft ? 'Promo' : formatCOP(price)}</span>
       </div>
 
       {product.options && product.options.length > 0 && (
@@ -96,7 +111,7 @@ export function ProductCard({ categoryId, product, pizzaFlavors }: ProductCardPr
           onChange={(e) => setFlavorId(e.target.value)}
           className="rounded-lg border border-border bg-surface px-2 py-1.5 text-sm text-text-primary outline-none focus:border-brand-400"
         >
-          {pizzaFlavors.map((flavor) => (
+          {availableFlavors.map((flavor) => (
             <option key={flavor.id} value={flavor.id}>
               {flavor.name}
             </option>

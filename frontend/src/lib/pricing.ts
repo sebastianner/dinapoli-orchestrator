@@ -1,4 +1,4 @@
-import type { Menu, PizzaCategory, PizzaFlavor, PizzaGroupId, PizzaSize, Product, ProductCategory, ProductCategoryId } from '@/types/api';
+import type { Menu, OrderItem, PizzaCategory, PizzaFlavor, PizzaGroupId, PizzaSize, Product, ProductCategory, ProductCategoryId } from '@/types/api';
 import { isPizzaCategory } from '@/types/api';
 
 /**
@@ -113,4 +113,66 @@ export function productUnitPrice(product: Product, sizeId?: string): number {
     return product.sizes.find((s) => s.id === sizeId)?.price ?? 0;
   }
   return product.price ?? 0;
+}
+
+function pizzaSizeName(pizzas: PizzaCategory, sizeId: string): string {
+  for (const group of pizzas.groups) {
+    const size = group.sizes.find((s) => s.id === sizeId);
+    if (size) return size.name;
+  }
+  return sizeId;
+}
+
+/** Order items only carry menu ids (e.g. 'margherita', 'large') - resolve them to their Spanish menu names for display. */
+export function describeOrderItem(menu: Menu | undefined, item: OrderItem): string {
+  const pizzas = menu ? getPizzaCategory(menu) : undefined;
+  const flavorName = (flavorId: string) => (pizzas ? (allPizzaFlavors(pizzas).find((f) => f.id === flavorId)?.name ?? flavorId) : flavorId);
+
+  if (item.pizzaRef) {
+    const sizeName = pizzas ? pizzaSizeName(pizzas, item.pizzaRef.size) : item.pizzaRef.size;
+    const flavorNames = item.pizzaRef.flavors.map(({ flavor, portion }) => {
+      const name = flavorName(flavor);
+      const fraction = formatPortionFraction(portion);
+      return fraction ? `${name} (${fraction})` : name;
+    });
+    return `Pizza ${sizeName} - ${flavorNames.join(', ')}`;
+  }
+
+  const ref = item.menuItemRef;
+  if (!ref) return 'Producto';
+  const product = menu ? getProduct(menu, ref.category, ref.product) : undefined;
+  const bits = [product?.name ?? ref.product];
+  if (ref.size) bits.push(product?.sizes?.find((s) => s.id === ref.size)?.name ?? ref.size);
+  if (ref.option) bits.push(product?.options?.find((o) => o.id === ref.option)?.name ?? ref.option);
+  if (ref.pizzaFlavor) bits.push(flavorName(ref.pizzaFlavor));
+  return bits.join(' - ');
+}
+
+export interface GroupedOrderItem {
+  key: string;
+  description: string;
+  notes: string | null;
+  unitPrice: number;
+  quantity: number;
+}
+
+/** Collapses repeated additions of the same item (same ref + notes + price) into one row with a summed quantity. */
+export function groupOrderItems(menu: Menu | undefined, items: OrderItem[]): GroupedOrderItem[] {
+  const groups = new Map<string, GroupedOrderItem>();
+  for (const item of items) {
+    const key = JSON.stringify([item.pizzaRef, item.menuItemRef, item.notes, item.unitPrice]);
+    const existing = groups.get(key);
+    if (existing) {
+      existing.quantity += item.quantity;
+    } else {
+      groups.set(key, {
+        key,
+        description: describeOrderItem(menu, item),
+        notes: item.notes,
+        unitPrice: item.unitPrice,
+        quantity: item.quantity,
+      });
+    }
+  }
+  return [...groups.values()];
 }

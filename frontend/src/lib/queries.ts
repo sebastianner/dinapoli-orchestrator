@@ -11,6 +11,7 @@ import {
   fetchMenu,
   fetchOrder,
   fetchOrders,
+  fetchOrdersPage,
   fetchTables,
   type FetchOrdersFilter,
 } from '@/lib/api';
@@ -43,6 +44,12 @@ export function useOrder(id: number | null) {
 export function useOrdersByFilter(filter: FetchOrdersFilter) {
   const key = `/orders?${JSON.stringify(filter)}`;
   return useSWR(key, () => fetchOrders(filter));
+}
+
+/** Paginated variant for lists that can grow large (e.g. Order History) - one page at a time instead of every match. */
+export function useOrdersPage(filter: FetchOrdersFilter, page: number, pageSize: number) {
+  const key = `/orders?${JSON.stringify(filter)}&page=${page}&pageSize=${pageSize}`;
+  return useSWR(key, () => fetchOrdersPage(filter, page, pageSize));
 }
 
 export function useCurrentCashFlow() {

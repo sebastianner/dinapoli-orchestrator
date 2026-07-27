@@ -93,6 +93,7 @@ export interface OrderRow {
   phone: string | null;
   address: string | null;
   notes: string | null;
+  promo_type: string | null;
   total: number;
   created_at: string;
   completed_at: string | null;
@@ -103,9 +104,10 @@ export interface OrderPaymentRow {
   id: number;
   order_id: number;
   method: PaymentMethodDb;
-  amount: number;
+  gross_amount: number;
   tip_amount: number;
   delivery_fee: number;
+  net_amount: number;
   discount: number;
   created_at: string;
 }
@@ -169,6 +171,8 @@ export interface ClosingReportRow {
   card_sales: number;
   transfer_sales: number;
   total_sales: number;
+  tips: number;
+  discounts: number;
   total_expenses: number;
   content: string;
   created_at: string;

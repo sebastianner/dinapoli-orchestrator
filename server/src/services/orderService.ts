@@ -20,6 +20,7 @@ import type {
   PizzaGroupId,
   PizzaSizeId,
   ProductCategoryId,
+  PromoType,
 } from '../types/dinapoly-types.js';
 import type {
   CategoryRow,
@@ -68,6 +69,7 @@ interface InsertOrderParams {
   phone: string | null;
   address: string | null;
   notes: string | null;
+  promoType: PromoType | null;
   total: number;
 }
 
@@ -86,8 +88,8 @@ interface InsertOrderItemParams {
 }
 
 const insertOrder = db.prepare<InsertOrderParams>(
-  `INSERT INTO orders (order_type, employee_id, table_number, customer_name, phone, address, notes, total)
-   VALUES (@orderType, @employeeId, @tableNumber, @customerName, @phone, @address, @notes, @total)`
+  `INSERT INTO orders (order_type, employee_id, table_number, customer_name, phone, address, notes, promo_type, total)
+   VALUES (@orderType, @employeeId, @tableNumber, @customerName, @phone, @address, @notes, @promoType, @total)`
 );
 const insertOrderItem = db.prepare<InsertOrderItemParams>(
   `INSERT INTO order_items
@@ -299,6 +301,10 @@ function validateOrderRequest(input: unknown): OrderRequest {
     throw new ValidationError('items must be a non-empty array');
   }
 
+  if (orderRequest.promoType != null && !PROMO_TYPES.has(orderRequest.promoType)) {
+    throw new ValidationError(`promoType must be one of ${[...PROMO_TYPES].join(', ')}`);
+  }
+
   return orderRequest;
 }
 
@@ -308,6 +314,119 @@ function resolveItems(items: OrderItemRequest[]): ResolvedItem[] {
     if (item?.type === 'product') return resolveProductItem(item, index);
     throw new ValidationError(`items[${index}]: type must be 'pizza' or 'product'`);
   });
+}
+
+const PROMO_TYPES = new Set<PromoType>(['duo', 'pizza_xl']);
+const DUO_PRICE = 37000;
+const XL_PRICE = 80000;
+const XL_SODA_SURCHARGE = 2000;
+// A single flavor pulled out of the 'duo' promo entirely, whether as a personal
+// pizza's only flavor or as a gratinado's pizzaFlavor - these are the same 5
+// "special" flavors either way, so one set covers both checks below.
+const DUO_EXCLUDED_FLAVORS = new Set(['campesina', 'madrilena', 'atarraya', 'tricaccio', 'ardiente']);
+// Coca-Cola and Quatro are the two soft_drink options that cost extra inside
+// the 'pizza_xl' promo; every other option (Postobón's own brands, water) is free.
+const XL_SODA_SURCHARGE_OPTIONS = new Set(['coca_cola', 'quatro']);
+
+/**
+ * Validates that `items` is exactly the required composition for `promoType`,
+ * checked against the raw client-submitted keys (not resolveItems' DB ids,
+ * which don't carry the string keys needed for the flavor/product exclusions
+ * below). Throws ValidationError on any violation; returns nothing on success.
+ */
+function validatePromoItems(promoType: PromoType, items: OrderItemRequest[]): void {
+  for (const [index, item] of items.entries()) {
+    if (item.quantity !== 1) {
+      throw new ValidationError(`items[${index}]: promo items must have quantity 1`);
+    }
+  }
+
+  if (promoType === 'duo') {
+    if (items.length !== 2) {
+      throw new ValidationError(`promo 'duo' requires exactly 2 items, got ${items.length}`);
+    }
+    items.forEach((item, index) => {
+      if (item.type === 'pizza') {
+        if (item.size !== 'personal') {
+          throw new ValidationError(`items[${index}]: promo 'duo' only allows personal-size pizzas`);
+        }
+        if (item.flavors.length !== 1 || item.flavors[0].portion !== 100) {
+          throw new ValidationError(`items[${index}]: promo 'duo' pizzas can't be split (mitad y mitad) - one flavor only`);
+        }
+        if (DUO_EXCLUDED_FLAVORS.has(item.flavors[0].flavor)) {
+          throw new ValidationError(`items[${index}]: flavor '${item.flavors[0].flavor}' is not included in promo 'duo'`);
+        }
+        return;
+      }
+      if (item.type === 'product' && item.category === 'lasagnas') {
+        if (item.product === 'mamma_mia') {
+          throw new ValidationError(`items[${index}]: lasaña Mamma Mia is not included in promo 'duo'`);
+        }
+        return;
+      }
+      if (item.type === 'product' && item.category === 'pastas') {
+        if (item.product === 'seafood') {
+          throw new ValidationError(`items[${index}]: pasta Marinera is not included in promo 'duo'`);
+        }
+        return;
+      }
+      if (item.type === 'product' && item.category === 'gratinados') {
+        if (item.pizzaFlavor && DUO_EXCLUDED_FLAVORS.has(item.pizzaFlavor)) {
+          throw new ValidationError(`items[${index}]: gratinado flavor '${item.pizzaFlavor}' is not included in promo 'duo'`);
+        }
+        return;
+      }
+      throw new ValidationError(`items[${index}]: promo 'duo' only allows a personal pizza, lasaña, pasta, or gratinado`);
+    });
+    return;
+  }
+
+  // pizza_xl
+  if (items.length !== 3) {
+    throw new ValidationError(`promo 'pizza_xl' requires exactly 3 items (XL pizza, gaseosa, panes al gratín), got ${items.length}`);
+  }
+  const pizza = items.find((i) => i.type === 'pizza');
+  if (!pizza || pizza.type !== 'pizza' || pizza.size !== 'xlarge') {
+    throw new ValidationError(`promo 'pizza_xl' requires one XL pizza`);
+  }
+  const soda = items.find((i) => i.type === 'product' && i.category === 'drinks' && i.product === 'soft_drink');
+  if (!soda) {
+    throw new ValidationError(`promo 'pizza_xl' requires one Gaseosa Personal`);
+  }
+  const bread = items.find((i) => i.type === 'product' && i.category === 'appetizers' && i.product === 'garlic_bread');
+  if (!bread) {
+    throw new ValidationError(`promo 'pizza_xl' requires one order of Panes al Gratín`);
+  }
+}
+
+/**
+ * Overrides resolveItems' normal menu pricing with the promo's flat price -
+ * the primary item (the pizza, or items[0] for 'duo') carries the full
+ * $37,000/$80,000, the rest are free, matching how the promo is marketed
+ * ("gratis gaseosa y panes al gratín"). The XL promo's soda is the one
+ * exception: choosing Coca-Cola or Quatro adds a flat surcharge on top.
+ * Mutates `resolvedItems` in place; returns the order's total.
+ */
+function applyPromoPricing(promoType: PromoType, items: OrderItemRequest[], resolvedItems: ResolvedItem[]): number {
+  if (promoType === 'duo') {
+    resolvedItems[0].unitPrice = DUO_PRICE;
+    resolvedItems[1].unitPrice = 0;
+    return DUO_PRICE;
+  }
+
+  let total = XL_PRICE;
+  items.forEach((item, index) => {
+    if (item.type === 'pizza') {
+      resolvedItems[index].unitPrice = XL_PRICE;
+    } else if (item.type === 'product' && item.category === 'drinks') {
+      const surcharge = item.option && XL_SODA_SURCHARGE_OPTIONS.has(item.option) ? XL_SODA_SURCHARGE : 0;
+      resolvedItems[index].unitPrice = surcharge;
+      total += surcharge;
+    } else {
+      resolvedItems[index].unitPrice = 0;
+    }
+  });
+  return total;
 }
 
 export function createOrder(input: unknown): Order {
@@ -322,7 +441,13 @@ export function createOrder(input: unknown): Order {
 
   const resolvedItems = resolveItems(orderRequest.items);
 
-  const total = resolvedItems.reduce((sum, it) => sum + it.unitPrice * it.quantity, 0);
+  let total: number;
+  if (orderRequest.promoType) {
+    validatePromoItems(orderRequest.promoType, orderRequest.items);
+    total = applyPromoPricing(orderRequest.promoType, orderRequest.items, resolvedItems);
+  } else {
+    total = resolvedItems.reduce((sum, it) => sum + it.unitPrice * it.quantity, 0);
+  }
 
   const orderId = db.transaction(() => {
     const result = insertOrder.run({
@@ -333,6 +458,7 @@ export function createOrder(input: unknown): Order {
       phone: orderRequest.customer?.phone ?? null,
       address: orderRequest.customer?.address ?? null,
       notes: orderRequest.notes ?? null,
+      promoType: orderRequest.promoType ?? null,
       total,
     });
     const newOrderId = Number(result.lastInsertRowid);
@@ -438,9 +564,10 @@ function rowToOrderPayment(row: OrderPaymentRow): OrderPayment {
     id: row.id,
     orderId: row.order_id,
     method: row.method,
-    amount: row.amount,
+    grossAmount: row.gross_amount,
     tipAmount: row.tip_amount,
     deliveryFee: row.delivery_fee,
+    netAmount: row.net_amount,
     discount: row.discount,
     createdAt: row.created_at,
   };
@@ -468,6 +595,8 @@ export function getOrderById(id: number): Order {
     tip: totals.tip,
     deliveryFee: totals.delivery_fee,
     discount: totals.discount,
+    grandTotal: row.total + totals.tip + totals.delivery_fee,
+    promoType: row.promo_type as PromoType | null,
     notes: row.notes,
     createdAt: row.created_at,
     completedAt: row.completed_at,
@@ -481,12 +610,35 @@ export function getOrderById(id: number): Order {
  * (same UTC-5 convention as End-of-Day's sales aggregation), regardless of
  * status. `orderType` is the "category" filter from the Order History page.
  */
-export function listOrders({ status, date, orderType }: { status?: string; date?: string; orderType?: string } = {}): Order[] {
+export interface ListOrdersFilter {
+  status?: string;
+  date?: string;
+  orderType?: string;
+  /** 1-indexed. Both page and pageSize must be set together to paginate; omitting both returns every match (unchanged legacy behavior). */
+  page?: number;
+  pageSize?: number;
+}
+
+export interface ListOrdersResult {
+  orders: Order[];
+  /** Total matches across all pages, not just this page's length - lets the caller render "12 of 340". */
+  total: number;
+}
+
+const MAX_PAGE_SIZE = 200;
+
+export function listOrders({ status, date, orderType, page, pageSize }: ListOrdersFilter = {}): ListOrdersResult {
   if (date != null && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     throw new ValidationError("date must be in 'YYYY-MM-DD' format");
   }
   if (orderType != null && !ORDER_TYPES.has(orderType as OrderType)) {
     throw new ValidationError(`orderType must be one of ${[...ORDER_TYPES].join(', ')}`);
+  }
+  if (page != null && !isPositiveInt(page)) {
+    throw new ValidationError('page must be a positive integer');
+  }
+  if (pageSize != null && (!isPositiveInt(pageSize) || pageSize > MAX_PAGE_SIZE)) {
+    throw new ValidationError(`pageSize must be a positive integer up to ${MAX_PAGE_SIZE}`);
   }
 
   const conditions: string[] = [];
@@ -505,12 +657,20 @@ export function listOrders({ status, date, orderType }: { status?: string; date?
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-  const rows = db.prepare<string[], { id: number }>(`SELECT id FROM orders ${where} ORDER BY id`).all(...params);
-  return rows.map((r) => getOrderById(r.id));
+  const total = db.prepare<string[], { count: number }>(`SELECT COUNT(*) as count FROM orders ${where}`).get(...params)!.count;
+
+  let query = `SELECT id FROM orders ${where} ORDER BY id`;
+  const queryParams = [...params];
+  if (page != null && pageSize != null) {
+    query += ' LIMIT ? OFFSET ?';
+    queryParams.push(String(pageSize), String((page - 1) * pageSize));
+  }
+  const rows = db.prepare<string[], { id: number }>(query).all(...queryParams);
+  return { orders: rows.map((r) => getOrderById(r.id)), total };
 }
 
-const insertOrderPayment = db.prepare<[number, PaymentMethod, number, number, number, number]>(
-  'INSERT INTO order_payments (order_id, method, amount, tip_amount, delivery_fee, discount) VALUES (?, ?, ?, ?, ?, ?)'
+const insertOrderPayment = db.prepare<[number, PaymentMethod, number, number, number, number, number]>(
+  'INSERT INTO order_payments (order_id, method, gross_amount, tip_amount, delivery_fee, net_amount, discount) VALUES (?, ?, ?, ?, ?, ?, ?)'
 );
 const markCompleted = db.prepare<[number]>(
   `UPDATE orders SET status = 'COMPLETED', completed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?`
@@ -579,47 +739,54 @@ export function addOrderItems(id: number, items: unknown): Order {
  * is just a one-entry array). Tip, delivery fee, and discount are declared
  * here for the first and only time - Order.tip/deliveryFee/discount are
  * always 0 before this point (see getOrderById) and derived from these rows
- * afterward. `amount` must sum to order.total plus the declared tip/delivery
- * fee totals - the GROSS total; discount is never subtracted from it, so the
- * full pre-discount price is always on record. The actual cash collected for
- * a split is `amount - discount`, derived when needed rather than stored.
+ * afterward. `grossAmount` must sum to order.grandTotal (order.total plus the
+ * declared tip/delivery fee totals); discount is never subtracted from it, so
+ * the full pre-discount price is always on record. `netAmount` (the
+ * products-only slice, computed here rather than accepted from the client) is
+ * what bounds `discount` - a discount applies to products, not tip/delivery
+ * fee. The actual cash collected for a split is `grossAmount - discount`,
+ * derived when needed rather than stored.
  */
 function resolvePayments(input: unknown, order: Order): PaymentSplit[] {
   if (!Array.isArray(input) || input.length === 0) {
-    throw new ValidationError('payments must be a non-empty array of { method, amount, tipAmount?, deliveryFee?, discount? }');
+    throw new ValidationError('payments must be a non-empty array of { method, grossAmount, tipAmount?, deliveryFee?, discount? }');
   }
 
   const splits = input.map((p: unknown, index: number) => {
     const method = (p as { method?: unknown })?.method;
-    const amount = (p as { amount?: unknown })?.amount;
+    const grossAmount = (p as { grossAmount?: unknown })?.grossAmount;
     const tipAmount = (p as { tipAmount?: unknown })?.tipAmount ?? 0;
     const deliveryFee = (p as { deliveryFee?: unknown })?.deliveryFee ?? 0;
     const discount = (p as { discount?: unknown })?.discount ?? 0;
     if (!PAYMENT_METHODS.has(method as PaymentMethod)) {
       throw new ValidationError(`payments[${index}].method must be one of ${[...PAYMENT_METHODS].join(', ')}`);
     }
-    if (!isPositiveInt(amount)) {
-      throw new ValidationError(`payments[${index}].amount must be a positive integer amount in COP`);
+    if (!isPositiveInt(grossAmount)) {
+      throw new ValidationError(`payments[${index}].grossAmount must be a positive integer amount in COP`);
     }
     if (!isNonNegativeInt(tipAmount)) {
       throw new ValidationError(`payments[${index}].tipAmount must be a non-negative integer amount in COP`);
     }
-    if (tipAmount > amount) {
-      throw new ValidationError(`payments[${index}].tipAmount cannot exceed payments[${index}].amount`);
+    if (tipAmount > grossAmount) {
+      throw new ValidationError(`payments[${index}].tipAmount cannot exceed payments[${index}].grossAmount`);
     }
     if (!isNonNegativeInt(deliveryFee)) {
       throw new ValidationError(`payments[${index}].deliveryFee must be a non-negative integer amount in COP`);
     }
-    if (deliveryFee > amount) {
-      throw new ValidationError(`payments[${index}].deliveryFee cannot exceed payments[${index}].amount`);
+    if (deliveryFee > grossAmount) {
+      throw new ValidationError(`payments[${index}].deliveryFee cannot exceed payments[${index}].grossAmount`);
+    }
+    const netAmount = grossAmount - tipAmount - deliveryFee;
+    if (netAmount < 0) {
+      throw new ValidationError(`payments[${index}].tipAmount + deliveryFee cannot exceed payments[${index}].grossAmount`);
     }
     if (!isNonNegativeInt(discount)) {
       throw new ValidationError(`payments[${index}].discount must be a non-negative integer amount in COP`);
     }
-    if (discount > amount) {
-      throw new ValidationError(`payments[${index}].discount cannot exceed payments[${index}].amount`);
+    if (discount > netAmount) {
+      throw new ValidationError(`payments[${index}].discount cannot exceed payments[${index}]'s product amount (grossAmount minus tip and delivery fee)`);
     }
-    return { method: method as PaymentMethod, amount, tipAmount, deliveryFee, discount };
+    return { method: method as PaymentMethod, grossAmount, tipAmount, deliveryFee, netAmount, discount };
   });
 
   const tipTotal = splits.reduce((s, p) => s + p.tipAmount, 0);
@@ -629,9 +796,9 @@ function resolvePayments(input: unknown, order: Order): PaymentSplit[] {
   }
 
   const owed = order.total + tipTotal + deliveryFeeTotal;
-  const sum = splits.reduce((s, p) => s + p.amount, 0);
+  const sum = splits.reduce((s, p) => s + p.grossAmount, 0);
   if (sum !== owed) {
-    throw new ValidationError(`payments[].amount must sum to ${owed} (order total + tip + delivery fee), got ${sum}`);
+    throw new ValidationError(`payments[].grossAmount must sum to ${owed} (order total + tip + delivery fee), got ${sum}`);
   }
 
   return splits;
@@ -652,17 +819,30 @@ export async function completeOrder(id: number, { payments }: { payments?: unkno
 
   const resolvedPayments = resolvePayments(payments, order);
 
+  // Payments and the COMPLETED flip must land atomically - previously these were
+  // two separate statements with bill printing (an external, failure-prone side
+  // effect - no printer/Chrome on this machine, say) in between. If printing
+  // threw, markCompleted never ran, but the payment rows had already been
+  // committed - so every retry recorded another duplicate payment against an
+  // order stuck ACTIVE forever. Printing is now attempted after both are
+  // durably committed together, and its failure no longer blocks completion.
   db.transaction(() => {
     for (const p of resolvedPayments) {
-      insertOrderPayment.run(id, p.method, p.amount, p.tipAmount, p.deliveryFee, p.discount);
+      insertOrderPayment.run(id, p.method, p.grossAmount, p.tipAmount, p.deliveryFee, p.netAmount, p.discount);
     }
+    markCompleted.run(id);
   })();
 
   const orderForPayment = getOrderById(id);
   const payment = processPayment(orderForPayment, resolvedPayments);
-  await printBill(orderForPayment, payment);
-
-  markCompleted.run(id);
+  try {
+    await printBill(orderForPayment, payment);
+  } catch (err) {
+    // The bill's content is already saved to print_jobs (see printBillHtml), so
+    // it's recoverable via POST /orders/:id/reprint once a printer is available -
+    // no reason a print failure should undo a already-settled payment.
+    console.error(`[billing] failed to print bill for order ${id} (payment recorded, order completed):`, (err as Error).message);
+  }
 
   if (order.orderType === 'dine_in') {
     refreshTableStatus(order.tableNumber as number);

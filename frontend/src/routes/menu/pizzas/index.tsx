@@ -1,6 +1,9 @@
+import { useEffect } from 'react';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useMenu } from '@/lib/queries';
 import { getPizzaCategory, orderablePizzaSizes } from '@/lib/pricing';
+import { useOrderStore } from '@/store/useOrderStore';
+import { PROMO_ALLOWED_SIZES } from '@/lib/promos';
 
 export const Route = createFileRoute('/menu/pizzas/')({
   component: PizzaSizePage,
@@ -9,13 +12,23 @@ export const Route = createFileRoute('/menu/pizzas/')({
 function PizzaSizePage() {
   const { data: menu, isLoading } = useMenu();
   const navigate = useNavigate();
+  const promoDraft = useOrderStore((s) => s.promoDraft);
+
+  const pizzas = menu ? getPizzaCategory(menu) : undefined;
+  const allSizes = pizzas ? orderablePizzaSizes(pizzas) : [];
+  const sizes = promoDraft ? allSizes.filter((s) => PROMO_ALLOWED_SIZES[promoDraft.type].has(s.id)) : allSizes;
+
+  // The promo only ever leaves exactly one size selectable - skip straight to
+  // the flavor picker instead of making the user pick a foregone conclusion.
+  const onlySizeId = sizes.length === 1 ? sizes[0].id : null;
+  useEffect(() => {
+    if (onlySizeId) {
+      navigate({ to: '/menu/pizzas/$size', params: { size: onlySizeId }, replace: true });
+    }
+  }, [navigate, onlySizeId]);
 
   if (isLoading || !menu) return <p className="text-sm text-text-secondary">Cargando...</p>;
-
-  const pizzas = getPizzaCategory(menu);
   if (!pizzas) return <p className="text-sm text-text-secondary">Pizzas no disponibles.</p>;
-
-  const sizes = orderablePizzaSizes(pizzas);
 
   return (
     <div>

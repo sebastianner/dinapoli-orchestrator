@@ -8,6 +8,14 @@ export function shiftDate(dateStr: string, days: number): string {
 
 const DAY_FORMATTER = new Intl.DateTimeFormat('es-CO', { day: '2-digit', month: 'long', year: 'numeric', timeZone: 'UTC' });
 const TIME_FORMATTER = new Intl.DateTimeFormat('es-CO', { hour: '2-digit', minute: '2-digit', hour12: true });
+const DATETIME_FORMATTER = new Intl.DateTimeFormat('es-CO', {
+  day: '2-digit',
+  month: 'long',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: true,
+});
 
 export function formatDateLong(dateStr: string): string {
   const [year, month, day] = dateStr.split('-').map(Number);
@@ -16,6 +24,11 @@ export function formatDateLong(dateStr: string): string {
 
 export function formatTime(isoString: string): string {
   return TIME_FORMATTER.format(new Date(isoString));
+}
+
+/** Full "26 de julio de 2026, 06:42 p.m." - unlike formatDateLong, takes a full ISO timestamp, not a bare business-day date. */
+export function formatDateTime(isoString: string): string {
+  return DATETIME_FORMATTER.format(new Date(isoString));
 }
 
 /** Human-readable "time ago" in Spanish, e.g. "hace 5 minutos". */

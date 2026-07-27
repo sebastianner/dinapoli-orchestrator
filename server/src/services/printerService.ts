@@ -1,13 +1,17 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { execFileSync } from 'node:child_process';
-import puppeteer, { type Browser } from 'puppeteer';
-import { PNG } from 'pngjs';
-import db from '../db/index.js';
-import { NotFoundError } from '../utils/errors.js';
-import type { Order, OrderItem, PaymentMethod } from '../types/dinapoly-types.js';
-import type { PrintJobKind, PrintJobRow } from '../types/db.js';
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
+import puppeteer, { type Browser } from "puppeteer";
+import { PNG } from "pngjs";
+import db from "../db/index.js";
+import { NotFoundError } from "../utils/errors.js";
+import type {
+  Order,
+  OrderItem,
+  PaymentMethod,
+} from "../types/dinapoly-types.js";
+import type { PrintJobKind, PrintJobRow } from "../types/db.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -26,13 +30,13 @@ const TICKET_TEXT_WIDTH = RECEIPT_WIDTH / 2;
 // tells CUPS to skip its filter chain (irrelevant here since the queue's PPD
 // doesn't match this printer anyway) and hand our ESC/POS bytes straight to
 // the backend.
-const CUPS_PRINTER_QUEUE = process.env.PRINTER_QUEUE ?? 'POS-80';
+const CUPS_PRINTER_QUEUE = process.env.PRINTER_QUEUE ?? "POS-80";
 
-const LOGO_PATH = path.resolve(__dirname, '../assets/dinapoli_pizza_logo.png');
+const LOGO_PATH = path.resolve(__dirname, "../assets/dinapoli_pizza_logo.png");
 /** Placeholder swapped for a base64 data: URI right before rasterizing, so the
  *  HTML we persist to print_jobs stays small instead of storing the logo bytes
  *  on every order. */
-export const LOGO_PLACEHOLDER = '{{LOGO_SRC}}';
+export const LOGO_PLACEHOLDER = "{{LOGO_SRC}}";
 
 const ESC = 0x1b;
 const GS = 0x1d;
@@ -61,23 +65,38 @@ const RASTER_BAND_ROWS = 200;
  * printer stream.
  */
 function sanitizeForPrint(text: string): string {
-  return text.replace(/[\x00-\x09\x0B-\x1F\x7F]/g, '');
+  return text.replace(/[\x00-\x09\x0B-\x1F\x7F]/g, "");
 }
 
 // Print output (ticket + bill) is Spanish but deliberately accent-free; only
 // the menu API keeps full accents. Spells out accented Spanish characters in
 // plain ASCII.
 const ASCII_FOLD: Record<string, string> = {
-  á: 'a', é: 'e', í: 'i', ó: 'o', ú: 'u', ñ: 'n', ü: 'u',
-  Á: 'A', É: 'E', Í: 'I', Ó: 'O', Ú: 'U', Ñ: 'N', Ü: 'U',
-  '¿': '', '¡': '',
+  á: "a",
+  é: "e",
+  í: "i",
+  ó: "o",
+  ú: "u",
+  ñ: "n",
+  ü: "u",
+  Á: "A",
+  É: "E",
+  Í: "I",
+  Ó: "O",
+  Ú: "U",
+  Ñ: "N",
+  Ü: "U",
+  "¿": "",
+  "¡": "",
 };
 export function toAsciiText(text: string): string {
   return text.replace(/[áéíóúñüÁÉÍÓÚÑÜ¿¡]/g, (ch) => ASCII_FOLD[ch]);
 }
 
 function writeToDevice(payload: Buffer): void {
-  execFileSync('lp', ['-d', CUPS_PRINTER_QUEUE, '-o', 'raw'], { input: payload });
+  execFileSync("lp", ["-d", CUPS_PRINTER_QUEUE, "-o", "raw"], {
+    input: payload,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -87,13 +106,17 @@ function writeToDevice(payload: Buffer): void {
 
 const upsertPrintJob = db.prepare<[number, PrintJobKind, string]>(
   `INSERT INTO print_jobs (order_id, kind, content) VALUES (?, ?, ?)
-   ON CONFLICT(order_id, kind) DO UPDATE SET content = excluded.content, created_at = excluded.created_at`
+   ON CONFLICT(order_id, kind) DO UPDATE SET content = excluded.content, created_at = excluded.created_at`,
 );
 const getPrintJob = db.prepare<[number, PrintJobKind], PrintJobRow>(
-  'SELECT * FROM print_jobs WHERE order_id = ? AND kind = ?'
+  "SELECT * FROM print_jobs WHERE order_id = ? AND kind = ?",
 );
 
-function savePrintJob(orderId: number, kind: PrintJobKind, content: string): void {
+function savePrintJob(
+  orderId: number,
+  kind: PrintJobKind,
+  content: string,
+): void {
   upsertPrintJob.run(orderId, kind, content);
 }
 
@@ -105,7 +128,7 @@ function buildTextPayload(text: string, copies: number): Buffer {
   const body = Buffer.concat([
     CMD_SELECT_CODEPAGE,
     CMD_TEXT_DOUBLE,
-    Buffer.from(sanitizeForPrint(text), 'latin1'),
+    Buffer.from(sanitizeForPrint(text), "latin1"),
     CMD_TEXT_NORMAL,
     CMD_FEED_4,
     CMD_CUT_PARTIAL,
@@ -113,9 +136,16 @@ function buildTextPayload(text: string, copies: number): Buffer {
   return Buffer.concat([CMD_INIT, ...Array(copies).fill(body)]);
 }
 
-function printText(orderId: number, kind: PrintJobKind, text: string, copies = 1): void {
+function printText(
+  orderId: number,
+  kind: PrintJobKind,
+  text: string,
+  copies = 1,
+): void {
   writeToDevice(buildTextPayload(text, copies));
-  console.log(`[printer:thermal-80mm] printed '${kind}' for order ${orderId} (${copies}x)`);
+  console.log(
+    `[printer:thermal-80mm] printed '${kind}' for order ${orderId} (${copies}x)`,
+  );
 }
 
 // Normal size (unlike the double-size kitchen ticket): this is a dense
@@ -125,7 +155,7 @@ function buildPlainTextPayload(text: string): Buffer {
   return Buffer.concat([
     CMD_INIT,
     CMD_SELECT_CODEPAGE,
-    Buffer.from(sanitizeForPrint(text), 'latin1'),
+    Buffer.from(sanitizeForPrint(text), "latin1"),
     CMD_FEED_4,
     CMD_CUT_PARTIAL,
   ]);
@@ -134,22 +164,22 @@ function buildPlainTextPayload(text: string): Buffer {
 /** Prints an arbitrary plain-text document not tied to a specific order (e.g. the End-of-Day closing receipt). */
 export function printPlainText(text: string): void {
   writeToDevice(buildPlainTextPayload(text));
-  console.log('[printer:thermal-80mm] printed plain-text document');
+  console.log("[printer:thermal-80mm] printed plain-text document");
 }
 
 export function formatMoney(cop: number): string {
-  return `$${cop.toLocaleString('es-CO')}`;
+  return `$${cop.toLocaleString("es-CO")}`;
 }
 
-const BOGOTA_TZ = 'America/Bogota';
-const bogotaDateTimeFormat = new Intl.DateTimeFormat('es-CO', {
+const BOGOTA_TZ = "America/Bogota";
+const bogotaDateTimeFormat = new Intl.DateTimeFormat("es-CO", {
   timeZone: BOGOTA_TZ,
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-  hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit',
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
   hour12: false,
 });
 
@@ -158,43 +188,62 @@ export function formatDateTimeCO(isoUtc: string): string {
   return bogotaDateTimeFormat.format(new Date(isoUtc));
 }
 
-export function centerText(text: string, width: number = RECEIPT_WIDTH): string {
+export function centerText(
+  text: string,
+  width: number = RECEIPT_WIDTH,
+): string {
   if (text.length >= width) return text.slice(0, width);
   const left = Math.floor((width - text.length) / 2);
-  return ' '.repeat(left) + text;
+  return " ".repeat(left) + text;
 }
 
 // Order data stores English keys (the stable API contract - see OrderItem in
 // dinapoly-types.ts); printed output shows the Spanish `name` text the same
 // DB columns the menu API serves (accents get stripped separately via
 // toAsciiText for the ticket, kept as-is for the bill and the menu API).
-const getCategoryName = db.prepare<[string], { name: string }>('SELECT name FROM categories WHERE key = ?');
+const getCategoryName = db.prepare<[string], { name: string }>(
+  "SELECT name FROM categories WHERE key = ?",
+);
 const getProductName = db.prepare<[string, string], { name: string }>(
-  `SELECT p.name FROM products p JOIN categories c ON c.id = p.category_id WHERE c.key = ? AND p.key = ?`
+  `SELECT p.name FROM products p JOIN categories c ON c.id = p.category_id WHERE c.key = ? AND p.key = ?`,
 );
 const getProductSizeName = db.prepare<[string, string], { name: string }>(
-  `SELECT ps.name FROM product_sizes ps JOIN products p ON p.id = ps.product_id WHERE p.key = ? AND ps.key = ?`
+  `SELECT ps.name FROM product_sizes ps JOIN products p ON p.id = ps.product_id WHERE p.key = ? AND ps.key = ?`,
 );
 const getProductOptionName = db.prepare<[string, string], { name: string }>(
-  `SELECT po.name FROM product_options po JOIN products p ON p.id = po.product_id WHERE p.key = ? AND po.key = ?`
+  `SELECT po.name FROM product_options po JOIN products p ON p.id = po.product_id WHERE p.key = ? AND po.key = ?`,
 );
-const getPizzaGroupName = db.prepare<[string], { name: string }>('SELECT name FROM pizza_groups WHERE key = ?');
-const getPizzaSizeName = db.prepare<[string], { name: string }>('SELECT name FROM pizza_sizes WHERE key = ?');
-const getPizzaFlavorName = db.prepare<[string], { name: string }>('SELECT name FROM pizza_flavors WHERE key = ?');
+const getPizzaGroupName = db.prepare<[string], { name: string }>(
+  "SELECT name FROM pizza_groups WHERE key = ?",
+);
+const getPizzaSizeName = db.prepare<[string], { name: string }>(
+  "SELECT name FROM pizza_sizes WHERE key = ?",
+);
+const getPizzaFlavorName = db.prepare<[string], { name: string }>(
+  "SELECT name FROM pizza_flavors WHERE key = ?",
+);
 
-const ORDER_TYPE_ES: Record<Order['orderType'], string> = {
-  dine_in: 'En mesa',
-  takeaway: 'Para llevar',
-  delivery: 'Domicilio',
+const ORDER_TYPE_ES: Record<Order["orderType"], string> = {
+  dine_in: "En mesa",
+  takeaway: "Para llevar",
+  delivery: "Domicilio",
 };
 const PAYMENT_METHOD_ES: Record<PaymentMethod, string> = {
-  cash: 'Efectivo',
-  card: 'Tarjeta',
-  transfer: 'Transferencia',
+  cash: "Efectivo",
+  card: "Tarjeta",
+  transfer: "Transferencia",
+};
+const PROMO_LABEL_ES: Record<NonNullable<Order["promoType"]>, string> = {
+  duo: "PROMO DUO ($37.000)",
+  pizza_xl: "PROMO PIZZA XL ($80.000)",
 };
 
-export function describeOrderType(orderType: Order['orderType']): string {
+export function describeOrderType(orderType: Order["orderType"]): string {
   return ORDER_TYPE_ES[orderType];
+}
+
+export function describePromoType(promoType: NonNullable<Order["promoType"]>): string {
+  return PROMO_LABEL_ES[promoType];
 }
 
 export function describePaymentMethod(method: PaymentMethod): string {
@@ -203,9 +252,9 @@ export function describePaymentMethod(method: PaymentMethod): string {
 
 /** Percent -> the simplified fraction it represents, e.g. 25 -> "1/4". Empty for a whole (100%) flavor. */
 function formatPortionFraction(portion: number): string {
-  if (portion >= 100) return '';
+  if (portion >= 100) return "";
   // 100/3 isn't an integer, so equal thirds are stored as 34/33/33 - still just "1/3" to a reader.
-  if (portion === 33 || portion === 34) return '1/3';
+  if (portion === 33 || portion === 34) return "1/3";
   const divisor = gcd(portion, 100);
   return `${portion / divisor}/${100 / divisor}`;
 }
@@ -216,19 +265,33 @@ function gcd(a: number, b: number): number {
 
 export function describeItem(item: OrderItem): string {
   if (item.pizzaRef) {
-    const groupName = getPizzaGroupName.get(item.pizzaRef.group)?.name ?? item.pizzaRef.group;
-    const sizeName = getPizzaSizeName.get(item.pizzaRef.size)?.name ?? item.pizzaRef.size;
-    const flavorNames = item.pizzaRef.flavors.map((f) => getPizzaFlavorName.get(f.flavor)?.name ?? f.flavor);
-    return `Pizza ${groupName} ${sizeName} (${flavorNames.join(', ')})`;
+    const groupName =
+      getPizzaGroupName.get(item.pizzaRef.group)?.name ?? item.pizzaRef.group;
+    const sizeName =
+      getPizzaSizeName.get(item.pizzaRef.size)?.name ?? item.pizzaRef.size;
+    const flavorNames = item.pizzaRef.flavors.map(
+      (f) => getPizzaFlavorName.get(f.flavor)?.name ?? f.flavor,
+    );
+    return `Pizza ${groupName} ${sizeName} (${flavorNames.join(", ")})`;
   }
   const ref = item.menuItemRef!;
   const categoryName = getCategoryName.get(ref.category)?.name ?? ref.category;
-  const productName = getProductName.get(ref.category, ref.product)?.name ?? ref.product;
+  const productName =
+    getProductName.get(ref.category, ref.product)?.name ?? ref.product;
   const bits = [productName];
-  if (ref.size) bits.push(`(${getProductSizeName.get(ref.product, ref.size)?.name ?? ref.size})`);
-  if (ref.option) bits.push(`- ${getProductOptionName.get(ref.product, ref.option)?.name ?? ref.option}`);
-  if (ref.pizzaFlavor) bits.push(`- sabor: ${getPizzaFlavorName.get(ref.pizzaFlavor)?.name ?? ref.pizzaFlavor}`);
-  return `${categoryName} - ${bits.join(' ')}`;
+  if (ref.size)
+    bits.push(
+      `(${getProductSizeName.get(ref.product, ref.size)?.name ?? ref.size})`,
+    );
+  if (ref.option)
+    bits.push(
+      `- ${getProductOptionName.get(ref.product, ref.option)?.name ?? ref.option}`,
+    );
+  if (ref.pizzaFlavor)
+    bits.push(
+      `- sabor: ${getPizzaFlavorName.get(ref.pizzaFlavor)?.name ?? ref.pizzaFlavor}`,
+    );
+  return `${categoryName} - ${bits.join(" ")}`;
 }
 
 /**
@@ -239,8 +302,8 @@ export function describeItem(item: OrderItem): string {
  */
 function wordWrap(text: string, width: number): string[] {
   const lines: string[] = [];
-  let current = '';
-  for (const word of text.split(' ')) {
+  let current = "";
+  for (const word of text.split(" ")) {
     const candidate = current ? `${current} ${word}` : word;
     if (candidate.length <= width) {
       current = candidate;
@@ -253,7 +316,8 @@ function wordWrap(text: string, width: number): string[] {
   return lines.flatMap((line) => {
     if (line.length <= width) return [line];
     const chunks: string[] = [];
-    for (let i = 0; i < line.length; i += width) chunks.push(line.slice(i, i + width));
+    for (let i = 0; i < line.length; i += width)
+      chunks.push(line.slice(i, i + width));
     return chunks;
   });
 }
@@ -267,14 +331,19 @@ function wordWrap(text: string, width: number): string[] {
  */
 function describeItemTicketLines(item: OrderItem, width: number): string[] {
   if (item.pizzaRef) {
-    const groupName = getPizzaGroupName.get(item.pizzaRef.group)?.name ?? item.pizzaRef.group;
-    const sizeName = getPizzaSizeName.get(item.pizzaRef.size)?.name ?? item.pizzaRef.size;
+    const groupName =
+      getPizzaGroupName.get(item.pizzaRef.group)?.name ?? item.pizzaRef.group;
+    const sizeName =
+      getPizzaSizeName.get(item.pizzaRef.size)?.name ?? item.pizzaRef.size;
     const flavorNames = item.pizzaRef.flavors.map((f) => {
       const name = getPizzaFlavorName.get(f.flavor)?.name ?? f.flavor;
       const fraction = formatPortionFraction(f.portion);
       return fraction ? `${name} (${fraction})` : name;
     });
-    return [...wordWrap(`Pizza ${groupName} ${sizeName}`, width), ...wordWrap(flavorNames.join(', '), width)];
+    return [
+      ...wordWrap(`Pizza ${groupName} ${sizeName}`, width),
+      ...wordWrap(flavorNames.join(", "), width),
+    ];
   }
   return wordWrap(describeItem(item), width);
 }
@@ -286,32 +355,35 @@ export function renderKitchenTicket(order: Order): string {
   // Wraps "Label: value" as a whole so long values (customer names,
   // addresses, notes) break at word boundaries instead of the printer
   // cutting mid-word at the fixed column count.
-  const pushLabeled = (label: string, value: string) => lines.push(...wordWrap(`${label}: ${value}`, width));
+  const pushLabeled = (label: string, value: string) =>
+    lines.push(...wordWrap(`${label}: ${value}`, width));
 
-  lines.push(centerText('DINAPOLI PIZZA', width));
-  lines.push(centerText('COMANDA', width));
+  lines.push(centerText("DINAPOLI PIZZA", width));
+  lines.push(centerText("COMANDA", width));
   lines.push(`Orden #${order.id}`);
   lines.push(`${describeOrderType(order.orderType)}`);
+  if (order.promoType) lines.push(centerText(describePromoType(order.promoType), width));
   if (order.tableNumber) lines.push(`Mesa: ${order.tableNumber}`);
-  if (order.customerName) pushLabeled('Cliente', order.customerName);
-  if (order.phone) pushLabeled('Tel', order.phone);
-  if (order.address) pushLabeled('Dir', order.address);
-  pushLabeled('Fecha', formatDateTimeCO(order.createdAt));
-  lines.push('-'.repeat(width));
+  if (order.customerName) pushLabeled("Cliente", order.customerName);
+  if (order.phone) pushLabeled("Tel", order.phone);
+  if (order.address) pushLabeled("Dir", order.address);
+  pushLabeled("Fecha", formatDateTimeCO(order.createdAt));
+  lines.push("-".repeat(width));
   for (const item of order.items) {
     const [firstLine, ...restLines] = describeItemTicketLines(item, width - 3);
     lines.push(`${item.quantity}x ${firstLine}`);
     for (const line of restLines) lines.push(`   ${line}`);
     if (item.notes) {
-      for (const line of wordWrap(`nota: ${item.notes}`, width - 3)) lines.push(`   ${line}`);
+      for (const line of wordWrap(`nota: ${item.notes}`, width - 3))
+        lines.push(`   ${line}`);
     }
   }
   if (order.notes) {
-    lines.push('-'.repeat(width));
-    pushLabeled('Notas', order.notes);
+    lines.push("-".repeat(width));
+    pushLabeled("Notas", order.notes);
   }
-  lines.push('='.repeat(width));
-  return toAsciiText(lines.join('\n'));
+  lines.push("=".repeat(width));
+  return toAsciiText(lines.join("\n"));
 }
 
 // Two physical copies of the same ticket: one stays in the kitchen, one goes
@@ -320,8 +392,8 @@ const KITCHEN_TICKET_COPIES = 2;
 
 export function printKitchenTicket(order: Order): void {
   const text = renderKitchenTicket(order);
-  savePrintJob(order.id, 'kitchen_ticket', text);
-  printText(order.id, 'kitchen_ticket', text, KITCHEN_TICKET_COPIES);
+  savePrintJob(order.id, "kitchen_ticket", text);
+  // printText(order.id, 'kitchen_ticket', text, KITCHEN_TICKET_COPIES);
 }
 
 /**
@@ -333,34 +405,44 @@ export function printKitchenTicket(order: Order): void {
  * notification, and retry safety on printer failure comes from
  * order_items.printed_at / the order bouncing back through PENDING instead.
  */
-export function renderKitchenTicketAddendum(order: Order, newItems: OrderItem[]): string {
+export function renderKitchenTicketAddendum(
+  order: Order,
+  newItems: OrderItem[],
+): string {
   const width = TICKET_TEXT_WIDTH;
   const lines: string[] = [];
-  const pushLabeled = (label: string, value: string) => lines.push(...wordWrap(`${label}: ${value}`, width));
+  const pushLabeled = (label: string, value: string) =>
+    lines.push(...wordWrap(`${label}: ${value}`, width));
 
-  lines.push(centerText('DINAPOLI PIZZA', width));
-  lines.push(centerText('ADICION A COMANDA', width));
+  lines.push(centerText("DINAPOLI PIZZA", width));
+  lines.push(centerText("ADICION A COMANDA", width));
   lines.push(`Orden #${order.id}`);
   lines.push(`${describeOrderType(order.orderType)}`);
   if (order.tableNumber) lines.push(`Mesa: ${order.tableNumber}`);
-  if (order.customerName) pushLabeled('Cliente', order.customerName);
-  lines.push('-'.repeat(width));
+  if (order.customerName) pushLabeled("Cliente", order.customerName);
+  lines.push("-".repeat(width));
   for (const item of newItems) {
     const [firstLine, ...restLines] = describeItemTicketLines(item, width - 3);
     lines.push(`${item.quantity}x ${firstLine}`);
     for (const line of restLines) lines.push(`   ${line}`);
     if (item.notes) {
-      for (const line of wordWrap(`nota: ${item.notes}`, width - 3)) lines.push(`   ${line}`);
+      for (const line of wordWrap(`nota: ${item.notes}`, width - 3))
+        lines.push(`   ${line}`);
     }
   }
-  lines.push('='.repeat(width));
-  return toAsciiText(lines.join('\n'));
+  lines.push("=".repeat(width));
+  return toAsciiText(lines.join("\n"));
 }
 
-export function printKitchenTicketAddendum(order: Order, newItems: OrderItem[]): void {
+export function printKitchenTicketAddendum(
+  order: Order,
+  newItems: OrderItem[],
+): void {
   const text = renderKitchenTicketAddendum(order, newItems);
   writeToDevice(buildTextPayload(text, KITCHEN_TICKET_COPIES));
-  console.log(`[printer:thermal-80mm] printed kitchen ticket addendum for order ${order.id} (${KITCHEN_TICKET_COPIES}x)`);
+  console.log(
+    `[printer:thermal-80mm] printed kitchen ticket addendum for order ${order.id} (${KITCHEN_TICKET_COPIES}x)`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -370,7 +452,10 @@ export function printKitchenTicketAddendum(order: Order, newItems: OrderItem[]):
 let browserPromise: Promise<Browser> | null = null;
 function getBrowser(): Promise<Browser> {
   if (!browserPromise) {
-    browserPromise = puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
+    browserPromise = puppeteer.launch({
+      headless: true,
+      args: ["--no-sandbox"],
+    });
   }
   return browserPromise;
 }
@@ -378,7 +463,7 @@ function getBrowser(): Promise<Browser> {
 let logoDataUri: string | null = null;
 function getLogoDataUri(): string {
   if (!logoDataUri) {
-    logoDataUri = `data:image/png;base64,${fs.readFileSync(LOGO_PATH).toString('base64')}`;
+    logoDataUri = `data:image/png;base64,${fs.readFileSync(LOGO_PATH).toString("base64")}`;
   }
   return logoDataUri;
 }
@@ -408,8 +493,12 @@ async function renderHtmlToPng(html: string): Promise<Buffer> {
   const browser = await getBrowser();
   const page = await browser.newPage();
   try {
-    await page.setViewport({ width: RECEIPT_WIDTH_PX, height: MAX_RECEIPT_HEIGHT_PX, deviceScaleFactor: 1 });
-    await page.setContent(resolvedHtml, { waitUntil: 'load' });
+    await page.setViewport({
+      width: RECEIPT_WIDTH_PX,
+      height: MAX_RECEIPT_HEIGHT_PX,
+      deviceScaleFactor: 1,
+    });
+    await page.setContent(resolvedHtml, { waitUntil: "load" });
     // `waitUntil: 'load'` alone isn't a strong enough guarantee that the
     // embedded base64 logo has finished decoding - without this, the layout
     // shift from a late decode can hit Chromium's tile-stitching bug and
@@ -419,13 +508,18 @@ async function renderHtmlToPng(html: string): Promise<Buffer> {
       return Promise.all(Array.from(doc.images).map((img) => img.decode()));
     });
     const contentHeight = await page.evaluate(
-      () => (globalThis as unknown as BrowserGlobal).document.body.scrollHeight
+      () => (globalThis as unknown as BrowserGlobal).document.body.scrollHeight,
     );
     return Buffer.from(
       await page.screenshot({
-        type: 'png',
-        clip: { x: 0, y: 0, width: RECEIPT_WIDTH_PX, height: Math.min(contentHeight, MAX_RECEIPT_HEIGHT_PX) },
-      })
+        type: "png",
+        clip: {
+          x: 0,
+          y: 0,
+          width: RECEIPT_WIDTH_PX,
+          height: Math.min(contentHeight, MAX_RECEIPT_HEIGHT_PX),
+        },
+      }),
     );
   } finally {
     await page.close();
@@ -433,7 +527,11 @@ async function renderHtmlToPng(html: string): Promise<Buffer> {
 }
 
 /** Floyd-Steinberg dither to 1-bit-per-pixel, MSB-first, packed rows (white background composite). */
-function ditherToBits(png: PNG): { height: number; bytesPerRow: number; bits: Uint8Array } {
+function ditherToBits(png: PNG): {
+  height: number;
+  bytesPerRow: number;
+  bits: Uint8Array;
+} {
   const { width, height, data } = png;
   const gray = new Float32Array(width * height);
   for (let i = 0; i < width * height; i++) {
@@ -485,7 +583,11 @@ function buildRasterPayload(png: PNG): Buffer {
       bandHeight & 0xff,
       (bandHeight >> 8) & 0xff,
     ]);
-    const band = Buffer.from(bits.buffer, bits.byteOffset + y0 * bytesPerRow, bandHeight * bytesPerRow);
+    const band = Buffer.from(
+      bits.buffer,
+      bits.byteOffset + y0 * bytesPerRow,
+      bandHeight * bytesPerRow,
+    );
     chunks.push(header, Buffer.from(band));
   }
 
@@ -493,28 +595,42 @@ function buildRasterPayload(png: PNG): Buffer {
   return Buffer.concat(chunks);
 }
 
-async function printHtmlAsImage(orderId: number, kind: PrintJobKind, html: string): Promise<void> {
+async function printHtmlAsImage(
+  orderId: number,
+  kind: PrintJobKind,
+  html: string,
+): Promise<void> {
   const pngBuffer = await renderHtmlToPng(html);
   const png = PNG.sync.read(pngBuffer);
   writeToDevice(buildRasterPayload(png));
-  console.log(`[printer:thermal-80mm] printed '${kind}' for order ${orderId} (raster ${png.width}x${png.height})`);
+  console.log(
+    `[printer:thermal-80mm] printed '${kind}' for order ${orderId} (raster ${png.width}x${png.height})`,
+  );
 }
 
-export async function printBillHtml(orderId: number, html: string): Promise<void> {
-  savePrintJob(orderId, 'bill', html);
-  await printHtmlAsImage(orderId, 'bill', html);
+export async function printBillHtml(
+  orderId: number,
+  html: string,
+): Promise<void> {
+  savePrintJob(orderId, "bill", html);
+  await printHtmlAsImage(orderId, "bill", html);
 }
 
 // ---------------------------------------------------------------------------
 // Reprinting
 // ---------------------------------------------------------------------------
 
-export async function reprintJob(orderId: number, kind: PrintJobKind): Promise<void> {
+export async function reprintJob(
+  orderId: number,
+  kind: PrintJobKind,
+): Promise<void> {
   const row = getPrintJob.get(orderId, kind);
   if (!row) {
-    throw new NotFoundError(`no saved '${kind}' to reprint for order ${orderId}`);
+    throw new NotFoundError(
+      `no saved '${kind}' to reprint for order ${orderId}`,
+    );
   }
-  if (kind === 'kitchen_ticket') {
+  if (kind === "kitchen_ticket") {
     printText(orderId, kind, row.content, KITCHEN_TICKET_COPIES);
   } else {
     await printHtmlAsImage(orderId, kind, row.content);

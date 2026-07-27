@@ -119,6 +119,9 @@ export interface Employee {
 // always resolved server-side from the menu.
 // ============================================================
 
+/** 'duo': 2 products (personal pizza/lasagna/pasta/gratin) for a flat $37,000. 'pizza_xl': XL pizza + free soda + free bread for $80,000. See resolvePromoItems. */
+export type PromoType = "duo" | "pizza_xl";
+
 export interface OrderRequest {
   orderType: OrderType;
   /** Optional. When present, must be an active employee's id. */
@@ -128,6 +131,8 @@ export interface OrderRequest {
   /** Required for 'takeaway' (name) and 'delivery' (name, phone, address). */
   customer?: CustomerInfo;
   notes?: string;
+  /** Optional. When set, `items` must exactly match that promo's required composition - see resolvePromoItems. */
+  promoType?: PromoType;
   items: OrderItemRequest[];
 }
 
@@ -190,7 +195,12 @@ export interface Order {
   customerName: string | null;
   phone: string | null;
   address: string | null;
-  /** Integer COP. Computed server-side, sum of items only (excludes tip). */
+  /**
+   * Integer COP. Computed server-side, sum of items only - excludes
+   * tip/deliveryFee/discount. Deliberately NOT the "everything included"
+   * figure (see grandTotal for that) so it can never be confused with
+   * OrderPayment.grossAmount, which IS tip/deliveryFee-inclusive.
+   */
   total: number;
   /**
    * Integer COP. Always 0 until the order is COMPLETED - there's nowhere to
@@ -204,9 +214,18 @@ export interface Order {
   /**
    * Integer COP. Same lifecycle as `tip`, set via `payments[].discount` at
    * completion. Reduces what the customer actually pays, but `total`/item
-   * prices are never decreased by it - see OrderPayment.amount for why.
+   * prices are never decreased by it - see OrderPayment.grossAmount for why.
    */
   discount: number;
+  /**
+   * Integer COP. `total + tip + deliveryFee` - the one canonical name for
+   * "everything the customer owes/paid, before discount". Computed, not
+   * stored; exists so callers don't each re-derive it under a different ad
+   * hoc name (gross/owed/net all showed up for this exact figure before).
+   */
+  grandTotal: number;
+  /** Null for the vast majority of orders. Set once at creation, never changed - see PromoType. */
+  promoType: PromoType | null;
   notes: string | null;
   createdAt: string; // ISO / SQLite datetime
   completedAt: string | null;
@@ -214,8 +233,8 @@ export interface Order {
   /**
    * How the order was actually settled. Empty until completion; POST
    * /api/orders/:id/complete writes one row per method used (a plain
-   * single-method payment is just one entry). Amounts always sum to
-   * `total + tip + deliveryFee`.
+   * single-method payment is just one entry). grossAmounts always sum to
+   * `grandTotal`.
    */
   payments: OrderPayment[];
 }
@@ -226,17 +245,29 @@ export interface OrderPayment {
   method: PaymentMethod;
   /**
    * Integer COP. Total charged via this method, tip and delivery fee
-   * included - always the GROSS amount, before this split's `discount`. It's
-   * never reduced to reflect a discount, so the original pre-discount price
-   * stays on record; the actual cash collected is `amount - discount`,
-   * derived whenever needed rather than stored.
+   * included - always the GROSS amount, before this split's `discount`. Named
+   * distinctly from Order.total (items only) so the two can never be
+   * confused. Never reduced to reflect a discount, so the original
+   * pre-discount price stays on record; the actual cash collected is
+   * `grossAmount - discount`, derived whenever needed rather than stored.
    */
-  amount: number;
-  /** Integer COP. The slice of `amount` that's tip rather than sales; 0..amount. */
+  grossAmount: number;
+  /** Integer COP. The slice of `grossAmount` that's tip rather than sales; 0..grossAmount. */
   tipAmount: number;
-  /** Integer COP. The slice of `amount` that's delivery fee rather than sales; 0..amount. */
+  /** Integer COP. The slice of `grossAmount` that's delivery fee rather than sales; 0..grossAmount. */
   deliveryFee: number;
-  /** Integer COP. The slice of `amount` this split's discount accounts for; 0..amount. */
+  /**
+   * Integer COP. `grossAmount - tipAmount - deliveryFee` - the products-only
+   * slice of this split, computed server-side (never client-supplied).
+   * SUM(netAmount) across an order's payments always equals order.total
+   * exactly. Discount is deliberately NOT subtracted here (see `discount`).
+   */
+  netAmount: number;
+  /**
+   * Integer COP. The slice of `netAmount` this split's discount accounts for;
+   * 0..netAmount - discounts apply to products, not tip/delivery fee, so
+   * it's bounded by netAmount rather than the looser grossAmount.
+   */
   discount: number;
   createdAt: string;
 }
@@ -325,8 +356,12 @@ export interface ClosingReport {
   cashSales: number;
   cardSales: number;
   transferSales: number;
-  /** COP. Grand total sales: deliverySales + dineInTakeawaySales. */
+  /** COP. Grand total sales: deliverySales + dineInTakeawaySales. Tips excluded. */
   totalSales: number;
+  /** COP. Total tips collected across all payment methods (not part of totalSales). */
+  tips: number;
+  /** COP. Total discounts given across all payment methods (not subtracted from totalSales - see OrderPayment.grossAmount). */
+  discounts: number;
   /** COP. Total cash_expenses recorded against this business day. */
   totalExpenses: number;
   createdAt: string;

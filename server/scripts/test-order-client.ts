@@ -1,7 +1,7 @@
 import WebSocket from "ws";
 import type { OrderRequest } from "../src/types/dinapoly-types.js";
 
-const url = process.env.WS_URL ?? "ws://localhost:3000/ws/orders";
+const url = process.env.WS_URL ?? "ws://localhost:3001/ws/orders";
 const ws = new WebSocket(url);
 
 const order: OrderRequest = {

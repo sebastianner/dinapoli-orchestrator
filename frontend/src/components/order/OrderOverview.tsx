@@ -11,9 +11,9 @@ import { formatCOP } from '@/lib/format';
 import { addOrderItems } from '@/lib/api';
 import { orderSocketClient } from '@/lib/orderSocket';
 import { PaymentModal } from '@/components/order/PaymentModal';
-import { allPizzaFlavors, formatPortionFraction, getPizzaCategory, getProduct } from '@/lib/pricing';
+import { groupOrderItems } from '@/lib/pricing';
 import { useOrderNotificationStore } from '@/store/useOrderNotificationStore';
-import type { Menu, Order, OrderItem, PizzaCategory } from '@/types/api';
+import type { Order } from '@/types/api';
 
 type TipMode = 'none' | 'ten' | 'twenty' | 'custom';
 
@@ -36,6 +36,7 @@ export function OrderOverview() {
   const setPendingTip = useOrderStore((s) => s.setPendingTip);
   const setPendingDeliveryFee = useOrderStore((s) => s.setPendingDeliveryFee);
   const setPendingDiscount = useOrderStore((s) => s.setPendingDiscount);
+  const activePromoType = useOrderStore((s) => s.activePromoType);
 
   const employee = useSessionStore((s) => s.employee);
   const pushToast = useToastStore((s) => s.push);
@@ -99,6 +100,7 @@ export function OrderOverview() {
         tableNumber: newOrderInfo.tableNumber,
         customer: newOrderInfo.customer,
         employeeId: employee?.id,
+        promoType: activePromoType ?? undefined,
         items: cart.map((item) => item.request),
       });
       upsertActiveOrder(order);
@@ -152,7 +154,7 @@ export function OrderOverview() {
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-3">
-        {groupCommittedItems(menu, existingOrder?.items ?? []).map((group) => (
+        {groupOrderItems(menu, existingOrder?.items ?? []).map((group) => (
           <div key={group.key} className="flex items-center justify-between gap-2 border-b border-border py-2 text-sm">
             <div className="min-w-0">
               <p className="truncate text-text-primary">
@@ -311,68 +313,6 @@ function orderTitle(orderType: string | undefined, tableNumber: number | null | 
   if (orderType === 'delivery') return 'Domicilio';
   if (orderType === 'takeaway') return 'Para llevar';
   return 'Orden';
-}
-
-function pizzaSizeName(pizzas: PizzaCategory, sizeId: string): string {
-  for (const group of pizzas.groups) {
-    const size = group.sizes.find((s) => s.id === sizeId);
-    if (size) return size.name;
-  }
-  return sizeId;
-}
-
-/** Order items only carry menu ids (e.g. 'margherita', 'large') - resolve them to their Spanish menu names for display. */
-function describeCommittedItem(menu: Menu | undefined, item: OrderItem): string {
-  const pizzas = menu ? getPizzaCategory(menu) : undefined;
-  const flavorName = (flavorId: string) => (pizzas ? (allPizzaFlavors(pizzas).find((f) => f.id === flavorId)?.name ?? flavorId) : flavorId);
-
-  if (item.pizzaRef) {
-    const sizeName = pizzas ? pizzaSizeName(pizzas, item.pizzaRef.size) : item.pizzaRef.size;
-    const flavorNames = item.pizzaRef.flavors.map(({ flavor, portion }) => {
-      const name = flavorName(flavor);
-      const fraction = formatPortionFraction(portion);
-      return fraction ? `${name} (${fraction})` : name;
-    });
-    return `Pizza ${sizeName} - ${flavorNames.join(', ')}`;
-  }
-
-  const ref = item.menuItemRef;
-  if (!ref) return 'Producto';
-  const product = menu ? getProduct(menu, ref.category, ref.product) : undefined;
-  const bits = [product?.name ?? ref.product];
-  if (ref.size) bits.push(product?.sizes?.find((s) => s.id === ref.size)?.name ?? ref.size);
-  if (ref.option) bits.push(product?.options?.find((o) => o.id === ref.option)?.name ?? ref.option);
-  if (ref.pizzaFlavor) bits.push(flavorName(ref.pizzaFlavor));
-  return bits.join(' - ');
-}
-
-interface GroupedCommittedItem {
-  key: string;
-  description: string;
-  notes: string | null;
-  unitPrice: number;
-  quantity: number;
-}
-
-/** Collapses repeated additions of the same item (same ref + notes + price) into one row with a summed quantity. */
-function groupCommittedItems(menu: Menu | undefined, items: OrderItem[]): GroupedCommittedItem[] {
-  const groups = new Map<string, GroupedCommittedItem>();
-  for (const item of items) {
-    const key = JSON.stringify([item.pizzaRef, item.menuItemRef, item.notes, item.unitPrice]);
-    const existing = groups.get(key);
-    if (existing) {
-      existing.quantity += item.quantity;
-    } else {
-      groups.set(key, {
-        key,
-        description: describeCommittedItem(menu, item),
-        notes: item.notes,
-        unitPrice: item.unitPrice,
-        quantity: item.quantity,
-      });
-    }
-  }
-  return [...groups.values()];
 }
 
 interface GroupedCartItem {

@@ -17,6 +17,7 @@ import {
 import { formatCOP } from '@/lib/format';
 import { useOrderStore } from '@/store/useOrderStore';
 import { useToastStore } from '@/store/useToastStore';
+import { DUO_EXCLUDED_FLAVORS, promoProgressText } from '@/lib/promos';
 import type { PizzaSizeId } from '@/types/api';
 
 export const Route = createFileRoute('/menu/pizzas/$size')({
@@ -48,6 +49,8 @@ function PizzaFlavorPage() {
   const currentOrderId = useOrderStore((s) => s.currentOrderId);
   const newOrderInfo = useOrderStore((s) => s.newOrderInfo);
   const addCartItem = useOrderStore((s) => s.addCartItem);
+  const promoDraft = useOrderStore((s) => s.promoDraft);
+  const addPromoItem = useOrderStore((s) => s.addPromoItem);
   const pushToast = useToastStore((s) => s.push);
 
   if (isLoading || !menu) return <p className="text-sm text-text-secondary">Cargando...</p>;
@@ -58,11 +61,14 @@ function PizzaFlavorPage() {
   const size = orderablePizzaSizes(pizzas).find((s) => s.id === sizeId);
   if (!size) return <p className="text-sm text-text-secondary">Tamaño no encontrado.</p>;
 
+  const isDuoPromo = promoDraft?.type === 'duo';
   const flavors = allPizzaFlavors(pizzas);
-  const maxFlavors = maxFlavorsFor(pizzas, sizeId);
-  const price = pizzaUnitPrice(pizzas, sizeId, selectedFlavors);
+  // The promo's own rule ("no puede ser mitad y mitad") caps a duo pizza at a
+  // single flavor, regardless of how many the size would normally allow.
+  const maxFlavors = isDuoPromo ? 1 : maxFlavorsFor(pizzas, sizeId);
+  const price = promoDraft ? 0 : pizzaUnitPrice(pizzas, sizeId, selectedFlavors);
   const hasOrderContext = currentOrderId != null || newOrderInfo != null;
-  const availablePatterns = splitPatternsFor(selectedFlavors.length);
+  const availablePatterns = isDuoPromo ? [] : splitPatternsFor(selectedFlavors.length);
   const portions = computeFlavorPortions(selectedFlavors, pattern, halfFlavorId ?? undefined);
 
   const toggleFlavor = (flavorId: string) => {
@@ -98,10 +104,10 @@ function PizzaFlavorPage() {
       return fraction ? `${name} (${fraction})` : name;
     });
 
-    addCartItem({
+    const item = {
       clientId: crypto.randomUUID(),
       request: {
-        type: 'pizza',
+        type: 'pizza' as const,
         size: sizeId as PizzaSizeId,
         flavors: portions,
         quantity: 1,
@@ -110,8 +116,16 @@ function PizzaFlavorPage() {
       label: `Pizza ${size.name} - ${flavorNames.join(', ')}`,
       unitPrice: price,
       quantity: 1,
-    });
+    };
 
+    if (promoDraft) {
+      addPromoItem(item);
+      pushToast(promoProgressText(promoDraft.type, promoDraft.items.length + 1));
+      navigate({ to: '/menu' });
+      return;
+    }
+
+    addCartItem(item);
     pushToast('Pizza agregada');
     navigate({ to: '/menu/pizzas' });
   };
@@ -133,14 +147,21 @@ function PizzaFlavorPage() {
               {group.flavors.map((flavor) => {
                 const isSelected = selectedFlavors.includes(flavor.id);
                 const portion = portions.find((p) => p.flavor === flavor.id)?.portion;
+                const isExcluded = isDuoPromo && DUO_EXCLUDED_FLAVORS.has(flavor.id);
                 return (
                   <button
                     key={flavor.id}
                     type="button"
+                    disabled={isExcluded}
+                    title={isExcluded ? 'No incluido en la promoción Dúo' : undefined}
                     onClick={() => toggleFlavor(flavor.id)}
                     className={classNames(
                       'relative rounded-xl border-2 p-3 text-left transition-colors duration-fast',
-                      isSelected ? 'border-brand-500 bg-brand-500/10' : 'border-border bg-surface hover:border-brand-300',
+                      isExcluded
+                        ? 'cursor-not-allowed border-border bg-surface opacity-40'
+                        : isSelected
+                          ? 'border-brand-500 bg-brand-500/10'
+                          : 'border-border bg-surface hover:border-brand-300',
                     )}
                   >
                     {isSelected && selectedFlavors.length > 1 && portion != null && (
@@ -221,7 +242,7 @@ function PizzaFlavorPage() {
       )}
 
       <div className="mt-6 flex items-center gap-3">
-        <span className="text-lg font-semibold text-brand-700">{formatCOP(price)}</span>
+        <span className="text-lg font-semibold text-brand-700">{promoDraft ? 'Incluida en la promoción' : formatCOP(price)}</span>
         <button
           type="button"
           onClick={handleAdd}

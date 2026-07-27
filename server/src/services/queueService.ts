@@ -1,7 +1,10 @@
-import db from '../db/index.js';
-import { getOrderById } from './orderService.js';
-import { printKitchenTicket, printKitchenTicketAddendum } from './printerService.js';
-import type { OrderStatus } from '../types/dinapoly-types.js';
+import db from "../db/index.js";
+import { getOrderById } from "./orderService.js";
+import {
+  printKitchenTicket,
+  printKitchenTicketAddendum,
+} from "./printerService.js";
+import type { OrderStatus } from "../types/dinapoly-types.js";
 
 const POLL_INTERVAL_MS = 2000;
 
@@ -13,15 +16,20 @@ const POLL_INTERVAL_MS = 2000;
 // way a fresh PENDING row would be. Items added to an already-ACTIVE order (see
 // orderService.addOrderItems) bounce it back to PENDING, landing it back in
 // this same scan.
-const getPendingOrPrinting = db.prepare<[], { id: number; status: OrderStatus }>(
-  `SELECT id, status FROM orders WHERE status IN ('PENDING', 'PRINTING') ORDER BY id`
+const getPendingOrPrinting = db.prepare<
+  [],
+  { id: number; status: OrderStatus }
+>(
+  `SELECT id, status FROM orders WHERE status IN ('PENDING', 'PRINTING') ORDER BY id`,
 );
 const markPrinting = db.prepare<[number]>(
-  `UPDATE orders SET status = 'PRINTING', print_attempts = print_attempts + 1 WHERE id = ?`
+  `UPDATE orders SET status = 'PRINTING', print_attempts = print_attempts + 1 WHERE id = ?`,
 );
-const markActive = db.prepare<[number]>(`UPDATE orders SET status = 'ACTIVE' WHERE id = ?`);
+const markActive = db.prepare<[number]>(
+  `UPDATE orders SET status = 'ACTIVE' WHERE id = ?`,
+);
 const markItemsPrinted = db.prepare<[number]>(
-  `UPDATE order_items SET printed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE order_id = ? AND printed_at IS NULL`
+  `UPDATE order_items SET printed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE order_id = ? AND printed_at IS NULL`,
 );
 
 let isTicking = false;
@@ -48,7 +56,10 @@ function processOrder(id: number): void {
   } catch (err) {
     // Leave status as PRINTING; the next tick (or the next boot, after a
     // blackout) will pick it up and try again.
-    console.error(`[queue] failed to print order ${id}, will retry:`, (err as Error).message);
+    console.error(
+      `[queue] failed to print order ${id}, will retry:`,
+      (err as Error).message,
+    );
   }
 }
 

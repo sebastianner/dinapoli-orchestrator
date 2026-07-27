@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import type { CustomerInfo, Order, OrderItemRequest, OrderType } from '@/types/api';
+import type { CustomerInfo, Order, OrderItemRequest, OrderType, PromoType } from '@/types/api';
+import { applyPromoPricingPreview, freeBreadRequest, PROMO_ITEM_COUNTS } from '@/lib/promos';
 
 /** A menu item staged in the Order Overview, not yet sent to the server. */
 export interface CartItem {
@@ -12,6 +13,12 @@ export interface CartItem {
    * server always recomputes the authoritative price on submission (see resolveItems). */
   unitPrice: number;
   quantity: number;
+}
+
+/** Items collected so far toward an in-progress promo, staged separately from `cart` until complete (see startPromo/addPromoItem). */
+export interface PromoDraft {
+  type: PromoType;
+  items: CartItem[];
 }
 
 /** Metadata for an order that doesn't exist on the server yet. */
@@ -45,6 +52,11 @@ interface OrderState {
   pendingDeliveryFee: number;
   pendingDiscount: number;
 
+  /** Set while the user is actively picking items for a promo (see the Promos page). Cleared automatically once the required item count is reached and finalized into `cart`. */
+  promoDraft: PromoDraft | null;
+  /** Set once a promo's items have been finalized into `cart` - carried through to the server on submit (see OrderRequest.promoType) so it can validate/flat-price the order. Reset whenever the open order changes, same as pendingTip etc. */
+  activePromoType: PromoType | null;
+
   startDraft: (input: NewOrderInfo) => void;
   openExistingOrder: (orderId: number) => void;
   /** Like openExistingOrder, but for a draft that just got submitted and became this same order - keeps pendingTip/DeliveryFee/Discount instead of resetting them. */
@@ -57,6 +69,11 @@ interface OrderState {
   setPendingTip: (tip: number) => void;
   setPendingDeliveryFee: (deliveryFee: number) => void;
   setPendingDiscount: (discount: number) => void;
+  /** Starts a promo draft; 'pizza_xl' auto-adds its free bread since there's no choice to make for it. */
+  startPromo: (type: PromoType) => void;
+  /** Adds one item toward the active promo draft; once it reaches the promo's required count, prices it (preview only) and finalizes it into `cart` automatically. No-op if no promo is active. */
+  addPromoItem: (item: CartItem) => void;
+  cancelPromo: () => void;
 }
 
 export const useOrderStore = create<OrderState>((set) => ({
@@ -75,11 +92,23 @@ export const useOrderStore = create<OrderState>((set) => ({
   pendingTip: 0,
   pendingDeliveryFee: 0,
   pendingDiscount: 0,
+  promoDraft: null,
+  activePromoType: null,
 
-  startDraft: (info) => set({ currentOrderId: null, newOrderInfo: info, cart: [], pendingTip: 0, pendingDeliveryFee: 0, pendingDiscount: 0 }),
+  startDraft: (info) =>
+    set({ currentOrderId: null, newOrderInfo: info, cart: [], pendingTip: 0, pendingDeliveryFee: 0, pendingDiscount: 0, promoDraft: null, activePromoType: null }),
   openExistingOrder: (orderId) =>
-    set({ currentOrderId: orderId, newOrderInfo: null, cart: [], pendingTip: 0, pendingDeliveryFee: 0, pendingDiscount: 0 }),
-  promoteDraftToOrder: (orderId) => set({ currentOrderId: orderId, newOrderInfo: null, cart: [] }),
+    set({
+      currentOrderId: orderId,
+      newOrderInfo: null,
+      cart: [],
+      pendingTip: 0,
+      pendingDeliveryFee: 0,
+      pendingDiscount: 0,
+      promoDraft: null,
+      activePromoType: null,
+    }),
+  promoteDraftToOrder: (orderId) => set({ currentOrderId: orderId, newOrderInfo: null, cart: [], activePromoType: null }),
   addCartItem: (item) => set((state) => ({ cart: [...state.cart, item] })),
   removeCartItem: (clientId) => set((state) => ({ cart: state.cart.filter((i) => i.clientId !== clientId) })),
   removeCartItems: (clientIds) =>
@@ -88,8 +117,31 @@ export const useOrderStore = create<OrderState>((set) => ({
       return { cart: state.cart.filter((i) => !ids.has(i.clientId)) };
     }),
   clearCart: () => set({ cart: [] }),
-  clearCurrentOrder: () => set({ currentOrderId: null, newOrderInfo: null, cart: [], pendingTip: 0, pendingDeliveryFee: 0, pendingDiscount: 0 }),
+  clearCurrentOrder: () =>
+    set({ currentOrderId: null, newOrderInfo: null, cart: [], pendingTip: 0, pendingDeliveryFee: 0, pendingDiscount: 0, promoDraft: null, activePromoType: null }),
   setPendingTip: (tip) => set({ pendingTip: tip }),
   setPendingDeliveryFee: (deliveryFee) => set({ pendingDeliveryFee: deliveryFee }),
   setPendingDiscount: (discount) => set({ pendingDiscount: discount }),
+
+  startPromo: (type) =>
+    set({
+      promoDraft: {
+        type,
+        items:
+          type === 'pizza_xl'
+            ? [{ clientId: crypto.randomUUID(), request: freeBreadRequest(), label: 'Panes al Gratín (promo, gratis)', unitPrice: 0, quantity: 1 }]
+            : [],
+      },
+    }),
+  addPromoItem: (item) =>
+    set((state) => {
+      if (!state.promoDraft) return state;
+      const items = [...state.promoDraft.items, item];
+      if (items.length < PROMO_ITEM_COUNTS[state.promoDraft.type]) {
+        return { promoDraft: { ...state.promoDraft, items } };
+      }
+      const priced = applyPromoPricingPreview(state.promoDraft.type, items);
+      return { promoDraft: null, activePromoType: state.promoDraft.type, cart: [...state.cart, ...priced] };
+    }),
+  cancelPromo: () => set({ promoDraft: null }),
 }));

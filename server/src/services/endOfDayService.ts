@@ -16,6 +16,8 @@ function rowToClosingReport(row: ClosingReportRow): ClosingReport {
     cardSales: row.card_sales,
     transferSales: row.transfer_sales,
     totalSales: row.total_sales,
+    tips: row.tips,
+    discounts: row.discounts,
     totalExpenses: row.total_expenses,
     createdAt: row.created_at,
   };
@@ -29,21 +31,23 @@ interface SalesAggregate {
   cardSales: number;
   transferSales: number;
   totalSales: number;
+  tips: number;
+  discounts: number;
 }
 
 // completed_at is stored in UTC; Bogota has no DST (fixed UTC-5 year round),
 // so a static offset reliably matches the same business day computed in JS
 // via todayDateStrBogota(). Tip and delivery fee/discount only ever exist as
 // the per-method breakdown in order_payments (see schema comment), so an
-// order's sales figure is derived by summing (amount - tip_amount - discount)
+// order's sales figure is derived by summing (gross_amount - tip_amount - discount)
 // across its payment rows - this excludes tips and discounts from sales
 // while keeping delivery fees in, exactly, with no proportional guessing.
 const getCompletedOrdersForDate = db.prepare<[string], { id: number; order_type: string }>(
   `SELECT id, order_type FROM orders WHERE status = 'COMPLETED' AND date(completed_at, '-5 hours') = ?`
 );
 
-const getPaymentsForOrder = db.prepare<[number], { method: string; amount: number; tip_amount: number; discount: number }>(
-  'SELECT method, amount, tip_amount, discount FROM order_payments WHERE order_id = ? ORDER BY id'
+const getPaymentsForOrder = db.prepare<[number], { method: string; gross_amount: number; tip_amount: number; discount: number }>(
+  'SELECT method, gross_amount, tip_amount, discount FROM order_payments WHERE order_id = ? ORDER BY id'
 );
 
 function aggregateSales(date: string): SalesAggregate {
@@ -56,6 +60,8 @@ function aggregateSales(date: string): SalesAggregate {
     cardSales: 0,
     transferSales: 0,
     totalSales: 0,
+    tips: 0,
+    discounts: 0,
   };
 
   function addMethodSales(method: string, amount: number): void {
@@ -67,9 +73,11 @@ function aggregateSales(date: string): SalesAggregate {
   for (const row of rows) {
     let salesAmount = 0;
     for (const p of getPaymentsForOrder.all(row.id)) {
-      const net = p.amount - p.tip_amount - p.discount;
+      const net = p.gross_amount - p.tip_amount - p.discount;
       addMethodSales(p.method, net);
       salesAmount += net;
+      agg.tips += p.tip_amount;
+      agg.discounts += p.discount;
     }
     agg.totalSales += salesAmount;
     if (row.order_type === 'delivery') agg.deliverySales += salesAmount;
@@ -114,6 +122,8 @@ function renderClosingReceipt(date: string, sales: SalesAggregate, totalExpenses
   lines.push(moneyRow('Transferencia', sales.transferSales, width));
   lines.push('='.repeat(width));
   lines.push(moneyRow('TOTAL VENTAS', sales.totalSales, width));
+  lines.push(moneyRow('Propinas', sales.tips, width));
+  lines.push(moneyRow('Descuentos', sales.discounts, width));
   lines.push(moneyRow('Gastos del dia', totalExpenses, width));
   lines.push('='.repeat(width));
 
@@ -121,11 +131,11 @@ function renderClosingReceipt(date: string, sales: SalesAggregate, totalExpenses
 }
 
 const insertClosingReport = db.prepare<
-  [string, number, number, number, number, number, number, number, number, string]
+  [string, number, number, number, number, number, number, number, number, number, number, string]
 >(
   `INSERT INTO closing_reports
-     (date, order_count, delivery_sales, dine_in_takeaway_sales, cash_sales, card_sales, transfer_sales, total_sales, total_expenses, content)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     (date, order_count, delivery_sales, dine_in_takeaway_sales, cash_sales, card_sales, transfer_sales, total_sales, tips, discounts, total_expenses, content)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 );
 const getClosingReportRow = db.prepare<[number], ClosingReportRow>('SELECT * FROM closing_reports WHERE id = ?');
 const listClosingReportRows = db.prepare<[], ClosingReportRow>('SELECT * FROM closing_reports ORDER BY id DESC');
@@ -153,11 +163,20 @@ export function closeDay(): ClosingReport {
     sales.cardSales,
     sales.transferSales,
     sales.totalSales,
+    sales.tips,
+    sales.discounts,
     totalExpenses,
     content
   );
 
-  printPlainText(content);
+  try {
+    printPlainText(content);
+  } catch (err) {
+    // The report is already durably saved above (content included) - a failure
+    // to print (no printer/CUPS on this machine, say) shouldn't undo it or stop
+    // the caller from getting the report back; reprint once a printer's available.
+    console.error(`[end-of-day] failed to print closing report for ${date} (report saved regardless):`, (err as Error).message);
+  }
 
   return rowToClosingReport(getClosingReportRow.get(Number(lastInsertRowid))!);
 }

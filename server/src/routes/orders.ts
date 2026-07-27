@@ -17,7 +17,13 @@ router.get('/', (req, res) => {
   const status = typeof req.query.status === 'string' ? req.query.status : undefined;
   const date = typeof req.query.date === 'string' ? req.query.date : undefined;
   const orderType = typeof req.query.orderType === 'string' ? req.query.orderType : undefined;
-  res.json(listOrders({ status, date, orderType }));
+  const page = typeof req.query.page === 'string' ? Number(req.query.page) : undefined;
+  const pageSize = typeof req.query.pageSize === 'string' ? Number(req.query.pageSize) : undefined;
+  // page/pageSize are opt-in - omit both to get every match in one shot (unchanged
+  // for existing callers like the active-orders panel and the closing-report chart).
+  const { orders, total } = listOrders({ status, date, orderType, page, pageSize });
+  res.set('X-Total-Count', String(total));
+  res.json(orders);
 });
 
 router.get('/:id', (req, res) => {

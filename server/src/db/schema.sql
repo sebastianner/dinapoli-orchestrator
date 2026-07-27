@@ -98,6 +98,10 @@ CREATE TABLE IF NOT EXISTS orders (
   phone          TEXT,
   address        TEXT,
   notes          TEXT,
+  -- Nullable - most orders aren't a promo. Set once at creation, never changed.
+  promo_type     TEXT CHECK (promo_type IS NULL OR promo_type IN ('duo', 'pizza_xl')),
+  -- Items only - excludes tip/deliveryFee/discount (those live in order_payments,
+  -- see grandTotal for the "everything included" figure this deliberately isn't).
   total          INTEGER NOT NULL DEFAULT 0,
   created_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   completed_at   TEXT,
@@ -158,14 +162,26 @@ CREATE TABLE IF NOT EXISTS order_item_flavors (
 -- exclude tips and discounts (while keeping delivery fees, where relevant)
 -- from sales per payment method exactly instead of guessing via a
 -- proportional split.
+-- gross_amount is the FULL amount charged via this method - items + tip + delivery
+-- fee, before this split's own discount - unlike orders.total, which is items only.
+-- Named "gross" specifically so it can never be confused with orders.total at a
+-- glance; see Order.grandTotal (= total + tip + deliveryFee) for the order-level
+-- equivalent of this same "everything included" concept. net_amount is the
+-- products-only slice of gross_amount (tip/delivery fee excluded, discount
+-- deliberately NOT subtracted here either - see discount's own comment below) -
+-- SUM(net_amount) across an order's splits always equals orders.total exactly,
+-- server-computed at insert time, never client-supplied.
 CREATE TABLE IF NOT EXISTS order_payments (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   order_id     INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
   method       TEXT NOT NULL CHECK (method IN ('cash', 'card', 'transfer')),
-  amount       INTEGER NOT NULL CHECK (amount > 0),
-  tip_amount   INTEGER NOT NULL DEFAULT 0 CHECK (tip_amount >= 0 AND tip_amount <= amount),
-  delivery_fee INTEGER NOT NULL DEFAULT 0 CHECK (delivery_fee >= 0 AND delivery_fee <= amount),
-  discount     INTEGER NOT NULL DEFAULT 0 CHECK (discount >= 0 AND discount <= amount),
+  gross_amount INTEGER NOT NULL CHECK (gross_amount > 0),
+  tip_amount   INTEGER NOT NULL DEFAULT 0 CHECK (tip_amount >= 0 AND tip_amount <= gross_amount),
+  delivery_fee INTEGER NOT NULL DEFAULT 0 CHECK (delivery_fee >= 0 AND delivery_fee <= gross_amount),
+  net_amount   INTEGER NOT NULL CHECK (net_amount >= 0),
+  -- Discounts are applied to products, not tip/delivery fee - so this is bounded
+  -- by net_amount (the products slice), not the looser gross_amount.
+  discount     INTEGER NOT NULL DEFAULT 0 CHECK (discount >= 0 AND discount <= net_amount),
   created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
@@ -227,6 +243,8 @@ CREATE TABLE IF NOT EXISTS closing_reports (
   card_sales             INTEGER NOT NULL,
   transfer_sales         INTEGER NOT NULL,
   total_sales            INTEGER NOT NULL,
+  tips                   INTEGER NOT NULL DEFAULT 0,
+  discounts              INTEGER NOT NULL DEFAULT 0,
   total_expenses         INTEGER NOT NULL,
   content                TEXT NOT NULL,
   created_at             TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))

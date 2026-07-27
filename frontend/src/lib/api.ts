@@ -22,7 +22,7 @@ class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function fetchJson(path: string, init?: RequestInit): Promise<{ res: Response; body: unknown }> {
   const res = await fetch(`/api${path}`, {
     ...init,
     headers: {
@@ -44,6 +44,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(res.status, message);
   }
 
+  return { res, body };
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const { body } = await fetchJson(path, init);
   return body as T;
 }
 
@@ -84,6 +89,25 @@ export const fetchOrders = (filter: FetchOrdersFilter = {}) => {
   if (filter.orderType) params.set('orderType', filter.orderType);
   const query = params.toString();
   return get<Order[]>(`/orders${query ? `?${query}` : ''}`);
+};
+
+export interface OrdersPage {
+  orders: Order[];
+  /** Total matches across every page, not just this page's length. */
+  total: number;
+}
+
+/** Same filters as fetchOrders, but LIMIT/OFFSET-ed server-side; total count comes back via the X-Total-Count header. */
+export const fetchOrdersPage = async (filter: FetchOrdersFilter, page: number, pageSize: number): Promise<OrdersPage> => {
+  const params = new URLSearchParams();
+  if (filter.status) params.set('status', filter.status);
+  if (filter.date) params.set('date', filter.date);
+  if (filter.orderType) params.set('orderType', filter.orderType);
+  params.set('page', String(page));
+  params.set('pageSize', String(pageSize));
+  const { res, body } = await fetchJson(`/orders?${params.toString()}`);
+  const orders = body as Order[];
+  return { orders, total: Number(res.headers.get('X-Total-Count') ?? orders.length) };
 };
 export const fetchOrder = (id: number) => get<Order>(`/orders/${id}`);
 export const addOrderItems = (id: number, items: unknown[]) => post<Order>(`/orders/${id}/items`, { items });

@@ -11,7 +11,7 @@ interface ModalProps {
   className?: string;
 }
 
-export function Modal({ open, onClose, title, children, className }: ModalProps) {
+export function Modal({ open, onClose, title, children, className = 'max-w-md' }: ModalProps) {
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -31,7 +31,7 @@ export function Modal({ open, onClose, title, children, className }: ModalProps)
         aria-modal="true"
         aria-label={title}
         className={classNames(
-          'anim-scale-in relative w-full max-w-md rounded-2xl border border-border bg-surface-raised p-6 shadow-xl',
+          'anim-scale-in relative w-full rounded-2xl border border-border bg-surface-raised p-6 shadow-xl',
           className,
         )}
       >

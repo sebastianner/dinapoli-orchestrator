@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { Printer } from 'lucide-react';
+import { Printer, Info } from 'lucide-react';
 import { useClosingReport, useOrdersByFilter } from '@/lib/queries';
 import { reprintClosingReport } from '@/lib/api';
 import { formatCOP } from '@/lib/format';
@@ -11,10 +11,17 @@ export const Route = createFileRoute('/dashboard/closing-reports/$id')({
   component: ClosingReportPage,
 });
 
-function StatCard({ label, value, tone }: { label: string; value: string; tone?: 'danger' }) {
+function StatCard({ label, value, tone, tooltip }: { label: string; value: string; tone?: 'danger'; tooltip?: string }) {
   return (
     <div className="rounded-2xl border border-border bg-surface p-4">
-      <p className="text-sm text-text-secondary">{label}</p>
+      <p className="flex items-center gap-1 text-sm text-text-secondary">
+        {label}
+        {tooltip && (
+          <span title={tooltip} className="cursor-help">
+            <Info size={13} className="shrink-0" />
+          </span>
+        )}
+      </p>
       <p className={`mt-1 text-xl font-bold ${tone === 'danger' ? 'text-danger' : 'text-brand-700'}`}>{value}</p>
     </div>
   );
@@ -52,13 +59,19 @@ function ClosingReportPage() {
       </div>
 
       <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-        <StatCard label="Ventas totales" value={formatCOP(report.totalSales)} />
+        <StatCard
+          label="Ventas totales"
+          value={formatCOP(report.totalSales)}
+          tooltip="Este valor no incluye propinas ni descuentos - se muestran aparte."
+        />
         <StatCard label="Órdenes" value={String(report.orderCount)} />
         <StatCard label="Domicilio" value={formatCOP(report.deliverySales)} />
         <StatCard label="Mesa / para llevar" value={formatCOP(report.dineInTakeawaySales)} />
         <StatCard label="Efectivo" value={formatCOP(report.cashSales)} />
         <StatCard label="Tarjeta" value={formatCOP(report.cardSales)} />
         <StatCard label="Transferencia" value={formatCOP(report.transferSales)} />
+        <StatCard label="Propinas" value={formatCOP(report.tips)} />
+        <StatCard label="Descuentos" value={formatCOP(report.discounts)} tone="danger" />
         <StatCard label="Gastos totales" value={formatCOP(report.totalExpenses)} tone="danger" />
       </div>
 

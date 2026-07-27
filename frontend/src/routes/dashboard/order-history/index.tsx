@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { useCurrentCashFlow, useOrdersByFilter, useClosingReports } from '@/lib/queries';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { useCurrentCashFlow, useOrdersByFilter, useOrdersPage, useClosingReports } from '@/lib/queries';
 import { closeDay } from '@/lib/api';
 import { shiftDate, formatDateLong } from '@/lib/date';
 import { Calendar } from '@/components/common/Calendar';
@@ -9,7 +10,7 @@ import { useToastStore } from '@/store/useToastStore';
 import type { OrderType } from '@/types/api';
 import classNames from 'classnames';
 
-export const Route = createFileRoute('/dashboard/order-history')({
+export const Route = createFileRoute('/dashboard/order-history/')({
   component: OrderHistoryPage,
 });
 
@@ -19,6 +20,8 @@ const categories: { value: OrderType | 'all'; label: string }[] = [
   { value: 'takeaway', label: 'Para llevar' },
   { value: 'delivery', label: 'Domicilio' },
 ];
+
+const PAGE_SIZE = 10;
 
 function OrderHistoryPage() {
   const { data: current } = useCurrentCashFlow();
@@ -32,11 +35,19 @@ function OrderHistoryContent({ today }: { today: string }) {
   const [selectedDate, setSelectedDate] = useState(today);
   const [category, setCategory] = useState<OrderType | 'all'>('all');
   const [generating, setGenerating] = useState(false);
+  const [page, setPage] = useState(1);
 
-  const { data: orders = [], isLoading } = useOrdersByFilter({
-    date: selectedDate,
-    orderType: category === 'all' ? undefined : category,
-  });
+  const filter = { date: selectedDate, orderType: category === 'all' ? undefined : category };
+  const { data: ordersPage, isLoading } = useOrdersPage(filter, page, PAGE_SIZE);
+  const orders = ordersPage?.orders ?? [];
+  const total = ordersPage?.total ?? 0;
+  const totalPages = Math.max(Math.ceil(total / PAGE_SIZE), 1);
+
+  // Changing the date or category invalidates whatever page we were on.
+  useEffect(() => {
+    setPage(1);
+  }, [selectedDate, category]);
+
   // Unfiltered, just to gate "Generar cierre del día" - the category filter above
   // shouldn't make the button disappear/disable just because e.g. "Domicilio" is
   // empty while the day still has dine_in orders.
@@ -140,6 +151,37 @@ function OrderHistoryContent({ today }: { today: string }) {
               <OrderHistoryCard key={order.id} order={order} />
             ))}
           </div>
+
+          {!isLoading && total > 0 && (
+            <div className="mt-4 flex items-center justify-between">
+              <p className="text-sm text-text-secondary">
+                {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} de {total}
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(p - 1, 1))}
+                  disabled={page <= 1}
+                  aria-label="Página anterior"
+                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-border text-text-secondary transition-colors duration-fast hover:border-brand-400 hover:text-brand-600 disabled:opacity-40"
+                >
+                  <ChevronLeft size={16} />
+                </button>
+                <span className="text-sm text-text-secondary">
+                  Página {page} de {totalPages}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
+                  disabled={page >= totalPages}
+                  aria-label="Página siguiente"
+                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-border text-text-secondary transition-colors duration-fast hover:border-brand-400 hover:text-brand-600 disabled:opacity-40"
+                >
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

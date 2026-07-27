@@ -1,9 +1,10 @@
 import { createFileRoute, Link, Outlet } from '@tanstack/react-router';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Sparkles, X } from 'lucide-react';
 import { useMenu } from '@/lib/queries';
 import { useOrderStore } from '@/store/useOrderStore';
 import { CategorySidebar } from '@/components/menu/CategorySidebar';
 import { OrderOverview } from '@/components/order/OrderOverview';
+import { promoProgressText } from '@/lib/promos';
 
 export const Route = createFileRoute('/menu')({
   component: MenuLayout,
@@ -13,6 +14,8 @@ function MenuLayout() {
   const { data: menu, isLoading } = useMenu();
   const currentOrderId = useOrderStore((s) => s.currentOrderId);
   const newOrderInfo = useOrderStore((s) => s.newOrderInfo);
+  const promoDraft = useOrderStore((s) => s.promoDraft);
+  const cancelPromo = useOrderStore((s) => s.cancelPromo);
   const hasOrderContext = currentOrderId != null || newOrderInfo != null;
 
   return (
@@ -31,6 +34,21 @@ function MenuLayout() {
             >
               Ir a mesas
             </Link>
+          </div>
+        )}
+
+        {promoDraft && (
+          <div className="flex items-center justify-between gap-4 border-b border-brand-400/30 bg-brand-500/10 px-6 py-3">
+            <span className="flex items-center gap-2 text-sm font-medium text-brand-700">
+              <Sparkles size={16} /> {promoProgressText(promoDraft.type, promoDraft.items.length)}
+            </span>
+            <button
+              type="button"
+              onClick={cancelPromo}
+              className="flex shrink-0 items-center gap-1 rounded-full border border-brand-400 px-3 py-1 text-xs font-semibold text-brand-700 transition-colors duration-fast hover:bg-brand-500/10"
+            >
+              <X size={13} /> Cancelar promo
+            </button>
           </div>
         )}
 
