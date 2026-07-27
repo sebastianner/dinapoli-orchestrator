@@ -4,6 +4,7 @@ import type {
   CashRegisterSettings,
   ClosingReport,
   Employee,
+  EmployeeRole,
   Menu,
   Order,
   OrderStatus,
@@ -22,7 +23,28 @@ class ApiError extends Error {
   }
 }
 
-async function fetchJson(path: string, init?: RequestInit): Promise<{ res: Response; body: unknown }> {
+/** Set once by useSessionStore so a session-ending 401 clears it, without api.ts importing the store back (would be circular). */
+let sessionExpiredHandler: (() => void) | null = null;
+export function setSessionExpiredHandler(handler: () => void): void {
+  sessionExpiredHandler = handler;
+}
+
+let refreshInFlight: Promise<boolean> | null = null;
+
+/** Coalesces concurrent 401s into a single refresh call instead of one per failed request. */
+function attemptRefresh(): Promise<boolean> {
+  if (!refreshInFlight) {
+    refreshInFlight = fetch('/api/auth/refresh', { method: 'POST' })
+      .then((res) => res.ok)
+      .catch(() => false)
+      .finally(() => {
+        refreshInFlight = null;
+      });
+  }
+  return refreshInFlight;
+}
+
+async function fetchJson(path: string, init?: RequestInit, isRetry = false): Promise<{ res: Response; body: unknown }> {
   const res = await fetch(`/api${path}`, {
     ...init,
     headers: {
@@ -30,6 +52,17 @@ async function fetchJson(path: string, init?: RequestInit): Promise<{ res: Respo
       ...init?.headers,
     },
   });
+
+  // Transparent refresh-token retry: the access token cookie expired or is
+  // about to, so silently mint a new one from the refresh token and replay
+  // this request once - this is what lets a shift-long session skip
+  // re-login entirely. /auth/* calls never trigger this themselves, or a
+  // failed login/refresh would recurse into another refresh attempt.
+  if (res.status === 401 && !isRetry && !path.startsWith('/auth/')) {
+    const refreshed = await attemptRefresh();
+    if (refreshed) return fetchJson(path, init, true);
+    sessionExpiredHandler?.();
+  }
 
   let body: unknown;
   try {
@@ -61,13 +94,30 @@ const del = <T>(path: string) => request<T>(path, { method: 'DELETE' });
 
 export const fetchMenu = () => get<Menu>('/menu');
 
+// ---------- Auth ----------
+
+export interface SessionResponse {
+  employee: Employee;
+}
+
+/** password is only checked (and only accepted) for admin employees - staff log in by id alone. */
+export const login = (employeeId: number, password?: string) => post<SessionResponse>('/auth/login', { employeeId, password });
+export const refreshSession = () => post<SessionResponse>('/auth/refresh');
+export const logoutSession = () => post<{ status: string }>('/auth/logout');
+export const fetchCurrentSession = () => get<SessionResponse>('/auth/me');
+
 // ---------- Employees ----------
 
 export const fetchActiveEmployees = () => get<Employee[]>('/employees/active');
 export const fetchInactiveEmployees = () => get<Employee[]>('/employees/inactive');
-export const createEmployee = (name: string, pictureUrl?: string) => post<Employee>('/employees', { name, pictureUrl });
+/** Admin only. `password` is required when `role` is 'admin', ignored/rejected otherwise. */
+export const createEmployee = (name: string, pictureUrl?: string, role?: EmployeeRole, password?: string) =>
+  post<Employee>('/employees', { name, pictureUrl, role, password });
 export const deactivateEmployee = (id: number) => del<Employee>(`/employees/${id}`);
 export const activateEmployee = (id: number) => post<Employee>(`/employees/${id}/activate`);
+/** Admin only. Promoting to admin (or rotating an admin's password) requires `password`; demoting to staff drops any stored password. */
+export const setEmployeeRole = (id: number, role: EmployeeRole, password?: string) =>
+  put<Employee>(`/employees/${id}/role`, { role, password });
 
 // ---------- Tables ----------
 
@@ -114,6 +164,8 @@ export const addOrderItems = (id: number, items: unknown[]) => post<Order>(`/ord
 export const completeOrder = (id: number, payments?: PaymentSplitRequest[]) => post<Order>(`/orders/${id}/complete`, { payments });
 export const reprintOrderDocument = (id: number, kind: 'kitchen_ticket' | 'bill') =>
   post<{ status: string; orderId: number; kind: string }>(`/orders/${id}/reprint`, { kind });
+/** Admin only, irreversible - deletes the order and everything derived from it (items, payments, print jobs). */
+export const deleteOrder = (id: number) => del<{ status: string; orderId: number }>(`/orders/${id}`);
 
 // ---------- Cash flow ----------
 

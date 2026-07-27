@@ -1,6 +1,6 @@
 import classNames from 'classnames';
 import { Link } from '@tanstack/react-router';
-import { Printer, Receipt } from 'lucide-react';
+import { Printer, Receipt, Trash2 } from 'lucide-react';
 import type { Order, OrderStatus } from '@/types/api';
 import { formatCOP } from '@/lib/format';
 import { formatTime } from '@/lib/date';
@@ -29,9 +29,12 @@ function orderSubtitle(order: Order): string {
 
 interface OrderHistoryCardProps {
   order: Order;
+  /** Admin-only "remove mode" toggle (see order-history/index.tsx) - reveals the delete button below. */
+  removeMode?: boolean;
+  onDelete?: (order: Order) => void;
 }
 
-export function OrderHistoryCard({ order }: OrderHistoryCardProps) {
+export function OrderHistoryCard({ order, removeMode, onDelete }: OrderHistoryCardProps) {
   const pushToast = useToastStore((s) => s.push);
 
   const handleReprint = async (kind: 'kitchen_ticket' | 'bill') => {
@@ -96,6 +99,19 @@ export function OrderHistoryCard({ order }: OrderHistoryCardProps) {
           >
             <Receipt size={15} />
           </button>
+          {removeMode && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                onDelete?.(order);
+              }}
+              title="Eliminar orden"
+              className="flex h-9 w-9 items-center justify-center rounded-lg border border-danger/40 text-danger hover:bg-danger/10"
+            >
+              <Trash2 size={15} />
+            </button>
+          )}
         </div>
       </div>
     </Link>

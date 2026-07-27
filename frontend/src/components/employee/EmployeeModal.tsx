@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { mutate } from 'swr';
+import classNames from 'classnames';
 import { Modal } from '@/components/common/Modal';
-import type { Employee } from '@/types/api';
+import type { Employee, EmployeeRole } from '@/types/api';
 import { createEmployee } from '@/lib/api';
 import { avatarSrc, dicebearUrl, randomSeed } from '@/lib/avatar';
 import { useAvatarOverrideStore } from '@/store/useAvatarOverrideStore';
@@ -15,10 +16,13 @@ interface EmployeeModalProps {
   employee?: Employee;
 }
 
+/** Create mode is only reachable from the admin panel (/dashboard/employees) - creating employees is admin-only. */
 export function EmployeeModal({ open, onClose, employee }: EmployeeModalProps) {
   const isEdit = employee != null;
   const [name, setName] = useState(employee?.name ?? '');
   const [seed, setSeed] = useState(() => randomSeed());
+  const [role, setRole] = useState<EmployeeRole>('staff');
+  const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const setOverride = useAvatarOverrideStore((s) => s.setOverride);
@@ -29,6 +33,8 @@ export function EmployeeModal({ open, onClose, employee }: EmployeeModalProps) {
   const handleClose = () => {
     setName(employee?.name ?? '');
     setSeed(randomSeed());
+    setRole('staff');
+    setPassword('');
     setError(null);
     onClose();
   };
@@ -48,10 +54,14 @@ export function EmployeeModal({ open, onClose, employee }: EmployeeModalProps) {
       setError('El nombre es obligatorio');
       return;
     }
+    if (role === 'admin' && password.length < 6) {
+      setError('Los administradores necesitan una contraseña de al menos 6 caracteres');
+      return;
+    }
 
     setSubmitting(true);
     try {
-      await createEmployee(name.trim(), dicebearUrl(seed));
+      await createEmployee(name.trim(), dicebearUrl(seed), role, role === 'admin' ? password : undefined);
       await mutate('/employees/active');
       pushToast('Empleado creado');
       handleClose();
@@ -80,14 +90,42 @@ export function EmployeeModal({ open, onClose, employee }: EmployeeModalProps) {
         {isEdit ? (
           <p className="text-sm text-text-secondary">{employee.name}</p>
         ) : (
-          <input
-            autoFocus
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Nombre del empleado"
-            className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary outline-none focus:border-brand-400"
-          />
+          <>
+            <input
+              autoFocus
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Nombre del empleado"
+              className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary outline-none focus:border-brand-400"
+            />
+
+            <div className="flex w-full gap-1 rounded-full border border-border bg-surface p-1">
+              {(['staff', 'admin'] as const).map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => setRole(option)}
+                  className={classNames(
+                    'flex-1 rounded-full px-3 py-1.5 text-sm font-medium transition-colors duration-fast',
+                    role === option ? 'bg-brand-500 text-white' : 'text-text-secondary hover:text-brand-600',
+                  )}
+                >
+                  {option === 'admin' ? 'Administrador' : 'Empleado'}
+                </button>
+              ))}
+            </div>
+
+            {role === 'admin' && (
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Contraseña (mín. 6 caracteres)"
+                className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary outline-none focus:border-brand-400"
+              />
+            )}
+          </>
         )}
 
         {error && <p className="text-sm text-danger">{error}</p>}

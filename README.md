@@ -115,17 +115,55 @@ to type `better-sqlite3` prepared statements live in `src/types/db.ts`.
   that's tip rather than sales and must sum exactly to `order.tip` — this is
   what lets a tip charged to only one method (e.g. added to the card while
   cash covers the rest) be excluded from *that* method's sales precisely
-  instead of guessed via a proportional split (see End-of-Day below). Billing
-  renders the HTML bill — subtotal, delivery fee (when non-zero), tip (when
-  non-zero), grand total, and one payment line per method — and hands it to
-  the printer's rasterization pipeline.
-- **Employees** (`src/services/employeeService.js`): identification only, no
-  auth — a `name`, an optional `pictureUrl`, and `isActive` (default `true`).
-  There's no edit endpoint, only add and soft-delete: `DELETE
-  /api/employees/:id` sets `isActive: false` rather than removing the row, so
-  historical orders keep a valid `employeeId`; `POST /api/employees/:id/activate`
-  reverses that. Assigning an employee to an order is optional, but when
-  provided it must be active (see WebSocket intake above).
+  instead of guessed via a proportional split (see End-of-Day below). Each
+  persisted row also carries a server-computed `netAmount` (`grossAmount -
+  tipAmount - deliveryFee` — never client-supplied), the products-only slice
+  of that split; `SUM(netAmount)` across an order's payments always equals
+  `order.total` exactly. `discount` (0 by default) is bounded by `netAmount`
+  rather than `grossAmount`, since discounts apply to products, not tip or
+  delivery fee. Billing renders the HTML bill — subtotal, delivery fee (when
+  non-zero), tip (when non-zero), grand total, and one payment line per
+  method — and hands it to the printer's rasterization pipeline.
+- **Employees** (`src/services/employeeService.js`): a `name`, an optional
+  `pictureUrl`, `isActive` (default `true`), and a `role` (`'staff'` or
+  `'admin'`, default `'staff'`) - see Auth below for what the role gates.
+  There's no generic edit endpoint, only add, soft-delete, and role changes:
+  `DELETE /api/employees/:id` sets `isActive: false` rather than removing the
+  row, so historical orders keep a valid `employeeId`; `POST
+  /api/employees/:id/activate` reverses that; `PUT /api/employees/:id/role`
+  promotes/demotes. Assigning an employee to an order is optional, but when
+  provided it must be active (see WebSocket intake above). Creating an
+  employee and all three of the above are admin-only (see Auth).
+- **Auth** (`src/services/authService.js`, `src/middleware/auth.js`): cookie-based
+  JWT sessions. `POST /api/auth/login` takes `{ employeeId, password? }` -
+  `'staff'` employees log in by `employeeId` alone (picking their name/avatar
+  in the UI, same flow as before); `'admin'` employees must also supply the
+  matching `password` (verified against `employees.password_hash`, a bcrypt
+  hash - see `src/utils/password.js` - never a reversible encryption of the
+  plaintext, so a DB leak doesn't hand over usable passwords). On success the
+  server sets two httpOnly cookies: `access_token`, a JWT (`{ employeeId,
+  role }`) valid 24h, sent on every request; and `refresh_token`, an opaque
+  random value valid 30 days and scoped to `/api/auth` only, whose sha256 is
+  the only thing ever persisted (`refresh_tokens.token_hash` - same
+  never-store-the-usable-secret reasoning as passwords). `POST
+  /api/auth/refresh` exchanges a valid, unrevoked `refresh_token` for a new
+  access token *and* a new refresh token (rotation: the old one is revoked in
+  the same call, so each one is single-use) - the frontend calls this
+  transparently and retries once whenever a request comes back `401` (see
+  `frontend/src/lib/api.ts`), which is what lets a shift-long session skip
+  re-login entirely. `POST /api/auth/logout` revokes the current refresh
+  token and clears both cookies. `GET /api/auth/me` returns the employee for
+  the current `access_token`, used to hydrate the frontend session on boot.
+  `requireAuth` (verifies the JWT) and `requireAdmin` (re-checks the
+  employee's *current* role against the DB rather than trusting the token's
+  claim, so a mid-session demotion takes effect immediately instead of
+  waiting up to 24h) gate: creating/deactivating/reactivating/re-roling
+  employees, and deleting orders (see below). Nothing else in the API is
+  gated - WebSocket order intake and every other HTTP route are unchanged,
+  matching the narrower scope of what actually needed a role check. Since
+  `POST /api/employees` is now admin-only, there's a bootstrap escape hatch
+  for the very first admin: `npm run admin:create -- "<name>" "<password>"`
+  (runs directly against the DB, no server needed).
 - **Tables**: `restaurant_tables.status` is derived automatically — busy while a
   table has any non-`COMPLETED` order, freed the moment its last open order is
   completed. New orders for a busy table are still accepted.
@@ -166,6 +204,15 @@ to type `better-sqlite3` prepared statements live in `src/types/db.ts`.
 
 ## API
 
+- `POST /api/auth/login` — `{ "employeeId": number, "password"?: string }`.
+  `password` is required (and checked) only for `'admin'` employees; sets the
+  `access_token`/`refresh_token` cookies on success.
+- `POST /api/auth/refresh` — reads the `refresh_token` cookie, rotates it,
+  and re-sets both cookies. No body.
+- `POST /api/auth/logout` — revokes the current refresh token and clears both
+  cookies. No body.
+- `GET /api/auth/me` — the employee for the current `access_token` cookie.
+  401s if missing/expired/invalid.
 - `GET /api/menu` — full menu, shaped exactly like `menu_simple_english_keys_v2.json`.
 - `GET /api/orders?status=ACTIVE&date=YYYY-MM-DD&orderType=dine_in` — list orders, optionally filtered by status, business day (Bogotá, UTC-5), and/or order type.
 - `GET /api/orders/:id` — one order.
@@ -187,6 +234,13 @@ to type `better-sqlite3` prepared statements live in `src/types/db.ts`.
 - `POST /api/orders/:id/reprint` — re-sends a previously saved kitchen ticket or
   bill to the printer. Body: `{ "kind": "kitchen_ticket" | "bill" }`. 404s if
   nothing has been printed/saved for that order+kind yet.
+- `DELETE /api/orders/:id` — **admin only, irreversible.** Deletes the order
+  and everything derived from it (`order_items`, `order_item_flavors`,
+  `order_payments`, `print_jobs`) via the existing `ON DELETE CASCADE`
+  foreign keys - no soft-delete, no undo. The frontend only exposes this
+  behind an explicit two-step confirmation (a "remove mode" toggle, then a
+  per-order confirm dialog, see `dashboard/order-history`), but the server
+  enforces the admin check independently.
 - `PUT /api/orders/:id/tip` — sets (or overwrites) the order's tip. Allowed at
   any order status. Body: `{ "tip": number }` (non-negative integer COP).
 - `PUT /api/orders/:id/delivery-fee` — sets (or overwrites) the order's delivery
@@ -195,11 +249,17 @@ to type `better-sqlite3` prepared statements live in `src/types/db.ts`.
   (non-negative integer COP).
 - `GET /api/tables` — table numbers and free/busy status.
 - `GET /api/employees/active` / `GET /api/employees/inactive` — employees,
-  split by `isActive`.
-- `POST /api/employees` — adds a new (active) employee. Body:
-  `{ "name": string, "pictureUrl"?: string }`.
-- `DELETE /api/employees/:id` — soft-deletes: sets `isActive: false`.
-- `POST /api/employees/:id/activate` — reverses a soft delete.
+  split by `isActive`. Public (needed by the pre-login employee picker); never
+  includes `password_hash`.
+- `POST /api/employees` — **admin only.** Adds a new (active) employee. Body:
+  `{ "name": string, "pictureUrl"?: string, "role"?: "staff"|"admin", "password"?: string }`.
+  `role` defaults to `"staff"`. `password` is required when `role` is
+  `"admin"` (min 6 characters) and rejected otherwise.
+- `DELETE /api/employees/:id` — **admin only.** Soft-deletes: sets `isActive: false`.
+- `POST /api/employees/:id/activate` — **admin only.** Reverses a soft delete.
+- `PUT /api/employees/:id/role` — **admin only.** Body: `{ "role": "staff"|"admin", "password"?: string }`.
+  Promoting to `"admin"` (or rotating an existing admin's password) requires
+  `password`; demoting to `"staff"` always clears the stored password hash.
 - `GET /api/cash-flow/current` — the active register period (opens the first
   one from the configured default if none exists yet).
 - `GET /api/cash-flow` — every register period ever recorded, newest first.
@@ -238,5 +298,12 @@ group membership are needed since CUPS handles device access itself.
 
 ## Known gaps for a production version
 
-- No auth on the HTTP API or WebSocket.
+- Auth (see Auth above) only gates employee management and order deletion -
+  every other HTTP route and the WebSocket order intake are still open, by
+  design (matches what's actually been asked for so far, not a full access-
+  control system).
+- No CSRF token on top of the cookie session - relying on `SameSite=Lax`
+  (cross-site `fetch`/XHR POSTs don't carry the cookie) as the baseline
+  defense instead, since none of this app's requests are cross-site to begin
+  with.
 - Payment processing is a stub (logs + records the transaction); no real gateway.

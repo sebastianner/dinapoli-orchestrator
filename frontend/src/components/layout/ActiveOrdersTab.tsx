@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from '@tanstack/react-router';
 import { Bike, ChevronDown, ChevronUp, ClipboardList, ShoppingBag } from 'lucide-react';
 import classNames from 'classnames';
@@ -9,6 +9,7 @@ export function ActiveOrdersTab() {
   const { pathname } = useLocation();
   const [open, setOpen] = useState(false);
   const [, forceTick] = useState(0);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const activeOrders = useOrderStore((s) => s.activeOrders);
   const openExistingOrder = useOrderStore((s) => s.openExistingOrder);
@@ -21,6 +22,17 @@ export function ActiveOrdersTab() {
     const id = setInterval(() => forceTick((t) => t + 1), 30_000);
     return () => clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [open]);
 
   if (pathname.startsWith('/dashboard')) return null;
 
@@ -37,6 +49,7 @@ export function ActiveOrdersTab() {
 
   return (
     <div
+      ref={containerRef}
       className={classNames(
         'fixed bottom-[30px] z-40 flex flex-col items-end gap-2 transition-[right] duration-base',
         orderOverviewVisible ? 'right-[392px]' : 'right-16',

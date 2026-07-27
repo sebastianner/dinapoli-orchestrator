@@ -1,13 +1,20 @@
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, redirect } from '@tanstack/react-router';
 import { Printer, Info } from 'lucide-react';
 import { useClosingReport, useOrdersByFilter } from '@/lib/queries';
 import { reprintClosingReport } from '@/lib/api';
 import { formatCOP } from '@/lib/format';
 import { formatDateLong } from '@/lib/date';
 import { HourlySalesChart } from '@/components/dashboard/HourlySalesChart';
+import { useSessionStore } from '@/store/useSessionStore';
 import { useToastStore } from '@/store/useToastStore';
 
 export const Route = createFileRoute('/dashboard/closing-reports/$id')({
+  beforeLoad: () => {
+    // Same admin-only restriction as the closing reports list - see routes/endOfDay.ts.
+    if (useSessionStore.getState().employee?.role !== 'admin') {
+      throw redirect({ to: '/dashboard/order-history' });
+    }
+  },
   component: ClosingReportPage,
 });
 

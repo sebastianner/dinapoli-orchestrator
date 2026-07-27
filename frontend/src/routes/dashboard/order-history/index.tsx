@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
 import { useCurrentCashFlow, useOrdersByFilter, useOrdersPage, useClosingReports } from '@/lib/queries';
 import { closeDay } from '@/lib/api';
 import { shiftDate, formatDateLong } from '@/lib/date';
 import { Calendar } from '@/components/common/Calendar';
 import { OrderHistoryCard } from '@/components/order/OrderHistoryCard';
+import { DeleteOrderModal } from '@/components/order/DeleteOrderModal';
+import { useSessionStore } from '@/store/useSessionStore';
 import { useToastStore } from '@/store/useToastStore';
-import type { OrderType } from '@/types/api';
+import type { Order, OrderType } from '@/types/api';
 import classNames from 'classnames';
 
 export const Route = createFileRoute('/dashboard/order-history/')({
@@ -36,9 +38,11 @@ function OrderHistoryContent({ today }: { today: string }) {
   const [category, setCategory] = useState<OrderType | 'all'>('all');
   const [generating, setGenerating] = useState(false);
   const [page, setPage] = useState(1);
+  const [removeMode, setRemoveMode] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Order | null>(null);
 
   const filter = { date: selectedDate, orderType: category === 'all' ? undefined : category };
-  const { data: ordersPage, isLoading } = useOrdersPage(filter, page, PAGE_SIZE);
+  const { data: ordersPage, isLoading, mutate: refetchOrders } = useOrdersPage(filter, page, PAGE_SIZE);
   const orders = ordersPage?.orders ?? [];
   const total = ordersPage?.total ?? 0;
   const totalPages = Math.max(Math.ceil(total / PAGE_SIZE), 1);
@@ -51,10 +55,20 @@ function OrderHistoryContent({ today }: { today: string }) {
   // Unfiltered, just to gate "Generar cierre del día" - the category filter above
   // shouldn't make the button disappear/disable just because e.g. "Domicilio" is
   // empty while the day still has dine_in orders.
-  const { data: ordersToday = [] } = useOrdersByFilter({ date: selectedDate });
-  const { data: closingReports = [] } = useClosingReports();
+  const { data: ordersToday = [], mutate: refetchOrdersToday } = useOrdersByFilter({ date: selectedDate });
   const pushToast = useToastStore((s) => s.push);
   const navigate = useNavigate();
+  const isAdmin = useSessionStore((s) => s.employee?.role === 'admin');
+  // Closing reports are admin-only to review too (see routes/endOfDay.ts) -
+  // skip the request entirely for non-admins instead of hitting a 401.
+  const { data: closingReports = [] } = useClosingReports(isAdmin);
+
+  const handleOrderDeleted = () => {
+    setDeleteTarget(null);
+    pushToast('Orden eliminada');
+    refetchOrders();
+    refetchOrdersToday();
+  };
 
   const isToday = selectedDate === today;
   const reportForDate = useMemo(
@@ -63,6 +77,7 @@ function OrderHistoryContent({ today }: { today: string }) {
   );
 
   const handleGenerateReport = async () => {
+    if (!isAdmin) return;
     setGenerating(true);
     try {
       const report = await closeDay();
@@ -77,7 +92,21 @@ function OrderHistoryContent({ today }: { today: string }) {
 
   return (
     <div className="p-6">
-      <h1 className="mb-4 text-xl font-semibold text-text-primary">Historial de órdenes</h1>
+      <div className="mb-4 flex items-center justify-between">
+        <h1 className="text-xl font-semibold text-text-primary">Historial de órdenes</h1>
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={() => setRemoveMode((v) => !v)}
+            className={classNames(
+              'flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors duration-fast',
+              removeMode ? 'border-danger bg-danger/10 text-danger' : 'border-border text-text-secondary hover:border-danger hover:text-danger',
+            )}
+          >
+            <Trash2 size={14} /> {removeMode ? 'Terminar' : 'Eliminar órdenes'}
+          </button>
+        )}
+      </div>
 
       <div className="flex flex-wrap items-start gap-6">
         <div className="flex flex-col gap-3">
@@ -125,8 +154,8 @@ function OrderHistoryContent({ today }: { today: string }) {
               <button
                 type="button"
                 onClick={handleGenerateReport}
-                disabled={generating || ordersToday.length === 0}
-                title={ordersToday.length === 0 ? 'No hay órdenes hoy todavía' : undefined}
+                disabled={generating || ordersToday.length === 0 || !isAdmin}
+                title={!isAdmin ? 'Solo los administradores pueden generar el cierre del día' : ordersToday.length === 0 ? 'No hay órdenes hoy todavía' : undefined}
                 className="rounded-full bg-success px-4 py-2 text-sm font-semibold text-white transition-opacity duration-fast hover:opacity-90 disabled:opacity-60"
               >
                 {generating ? 'Generando...' : 'Generar cierre del día'}
@@ -148,7 +177,7 @@ function OrderHistoryContent({ today }: { today: string }) {
             {isLoading && <p className="text-sm text-text-secondary">Cargando órdenes...</p>}
             {!isLoading && orders.length === 0 && <p className="text-sm text-text-secondary">No hay órdenes para este día.</p>}
             {orders.map((order) => (
-              <OrderHistoryCard key={order.id} order={order} />
+              <OrderHistoryCard key={order.id} order={order} removeMode={isAdmin && removeMode} onDelete={setDeleteTarget} />
             ))}
           </div>
 
@@ -184,6 +213,8 @@ function OrderHistoryContent({ today }: { today: string }) {
           )}
         </div>
       </div>
+
+      <DeleteOrderModal order={deleteTarget} onClose={() => setDeleteTarget(null)} onDeleted={handleOrderDeleted} />
     </div>
   );
 }

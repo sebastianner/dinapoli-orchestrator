@@ -6,14 +6,34 @@ CREATE TABLE IF NOT EXISTS restaurant_tables (
   status TEXT NOT NULL DEFAULT 'free' CHECK (status IN ('free', 'busy'))
 );
 
--- Identification only: no auth, no login, just a name to attribute an order
--- to. Soft-deleted via is_active rather than removed, so past orders keep a
--- valid employee_id and historical reports stay accurate.
+-- Soft-deleted via is_active rather than removed, so past orders keep a
+-- valid employee_id and historical reports stay accurate. Only 'admin' rows
+-- ever carry a password_hash - 'staff' log in by picking their name, no
+-- password (see authService.login). password_hash is a bcrypt hash, never
+-- the plaintext password - see utils/password.ts.
 CREATE TABLE IF NOT EXISTS employees (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  name          TEXT NOT NULL,
+  picture_url   TEXT,
+  is_active     INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+  role          TEXT NOT NULL DEFAULT 'staff' CHECK (role IN ('staff', 'admin')),
+  password_hash TEXT
+);
+
+-- One row per issued refresh token, so a token can be revoked/rotated
+-- individually (e.g. on logout or reuse) without invalidating every other
+-- session for that employee. token_hash is a sha256 of the raw token that's
+-- actually set as the refresh_token cookie - only the hash is ever stored,
+-- same "never store the usable secret" reasoning as password_hash above.
+-- Rows are never deleted, only marked revoked_at, so a stolen/reused token
+-- can be told apart from one that simply never existed.
+CREATE TABLE IF NOT EXISTS refresh_tokens (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  name        TEXT NOT NULL,
-  picture_url TEXT,
-  is_active   INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1))
+  employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  token_hash  TEXT NOT NULL UNIQUE,
+  expires_at  TEXT NOT NULL,
+  revoked_at  TEXT,
+  created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
 CREATE TABLE IF NOT EXISTS categories (

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { closeDay, listClosingReports, getClosingReport, reprintClosingReport } from '../services/endOfDayService.js';
 import { ValidationError } from '../utils/errors.js';
+import { requireAuth, requireAdmin } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -12,19 +13,21 @@ function parseReportId(param: string): number {
   return id;
 }
 
-router.post('/close', (_req, res) => {
+// End-of-day closing reports expose the whole day's sales/tips/discounts
+// breakdown - generating and reviewing them is admin-only, both routes.
+router.post('/close', requireAuth, requireAdmin, (_req, res) => {
   res.json(closeDay());
 });
 
-router.get('/', (_req, res) => {
+router.get('/', requireAuth, requireAdmin, (_req, res) => {
   res.json(listClosingReports());
 });
 
-router.get('/:id', (req, res) => {
+router.get('/:id', requireAuth, requireAdmin, (req, res) => {
   res.json(getClosingReport(parseReportId(req.params.id)));
 });
 
-router.post('/:id/reprint', (req, res) => {
+router.post('/:id/reprint', requireAuth, requireAdmin, (req, res) => {
   const id = parseReportId(req.params.id);
   reprintClosingReport(id);
   res.json({ status: 'reprinted', id });

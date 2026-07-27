@@ -6,8 +6,9 @@ import { ActiveOrdersTab } from '@/components/layout/ActiveOrdersTab';
 import { ToastViewport } from '@/components/common/ToastViewport';
 import { OrderNotification } from '@/components/common/OrderNotification';
 import { useMenu, useActiveEmployees, useTables } from '@/lib/queries';
-import { fetchOrders } from '@/lib/api';
+import { fetchOrders, fetchCurrentSession } from '@/lib/api';
 import { useOrderStore } from '@/store/useOrderStore';
+import { useSessionStore } from '@/store/useSessionStore';
 
 function RootLayout() {
   // Warm the SWR cache for rarely-changing data as soon as the app boots, so
@@ -21,6 +22,18 @@ function RootLayout() {
   useEffect(() => {
     fetchOrders({ status: 'ACTIVE' }).then(setActiveOrders).catch(console.error);
   }, [setActiveOrders]);
+
+  // The cached employee (see useSessionStore) is only a paint guess - the
+  // httpOnly cookie session is the real source of truth, so re-derive it
+  // from the server on every boot. fetchJson's transparent refresh-retry
+  // (lib/api.ts) already covers a merely-expired access token; this only
+  // ends up clearing the session if there's truly nothing valid left.
+  const setSessionEmployee = useSessionStore((s) => s.setEmployee);
+  useEffect(() => {
+    fetchCurrentSession()
+      .then((r) => setSessionEmployee(r.employee))
+      .catch(() => setSessionEmployee(null));
+  }, [setSessionEmployee]);
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-bg text-text-primary">

@@ -5,8 +5,10 @@ import {
   listInactiveEmployees,
   deactivateEmployee,
   activateEmployee,
+  setEmployeeRole,
 } from '../services/employeeService.js';
 import { ValidationError } from '../utils/errors.js';
+import { requireAuth, requireAdmin } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -18,6 +20,9 @@ function parseEmployeeId(param: string): number {
   return id;
 }
 
+// Public: the select-employee/login screen needs these before anyone is
+// authenticated. No sensitive data leaves here - password_hash is never
+// part of the Employee shape returned to clients.
 router.get('/active', (req, res) => {
   res.json(listActiveEmployees());
 });
@@ -26,15 +31,16 @@ router.get('/inactive', (req, res) => {
   res.json(listInactiveEmployees());
 });
 
-router.post('/', (req, res, next) => {
+// Everything below manages employee accounts - admin only.
+router.post('/', requireAuth, requireAdmin, async (req, res, next) => {
   try {
-    res.json(addEmployee(req.body?.name, req.body?.pictureUrl));
+    res.json(await addEmployee(req.body?.name, req.body?.pictureUrl, req.body?.role, req.body?.password));
   } catch (err) {
     next(err);
   }
 });
 
-router.delete('/:id', (req, res, next) => {
+router.delete('/:id', requireAuth, requireAdmin, (req, res, next) => {
   try {
     res.json(deactivateEmployee(parseEmployeeId(req.params.id)));
   } catch (err) {
@@ -42,9 +48,17 @@ router.delete('/:id', (req, res, next) => {
   }
 });
 
-router.post('/:id/activate', (req, res, next) => {
+router.post('/:id/activate', requireAuth, requireAdmin, (req, res, next) => {
   try {
     res.json(activateEmployee(parseEmployeeId(req.params.id)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/:id/role', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    res.json(await setEmployeeRole(parseEmployeeId(req.params.id), req.body?.role, req.body?.password));
   } catch (err) {
     next(err);
   }

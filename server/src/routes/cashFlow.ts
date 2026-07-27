@@ -9,6 +9,7 @@ import {
   listExpensesForCashFlow,
 } from '../services/cashFlowService.js';
 import { ValidationError } from '../utils/errors.js';
+import { requireAuth, requireAdmin } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -36,11 +37,13 @@ router.put('/current/amount', (req, res) => {
   res.json(updateCurrentCash(req.body?.amount));
 });
 
-router.get('/settings', (req, res) => {
+// The default opening cash is admin-only, both to view and to change - a
+// wrong value here silently seeds every future register period.
+router.get('/settings', requireAuth, requireAdmin, (req, res) => {
   res.json(getSettings());
 });
 
-router.put('/settings', (req, res) => {
+router.put('/settings', requireAuth, requireAdmin, (req, res) => {
   res.json(updateDefaultOpeningCash(req.body?.defaultOpeningCash));
 });
 

@@ -7,6 +7,7 @@ import { addCashExpense, updateCurrentCash } from '@/lib/api';
 import { formatCOP } from '@/lib/format';
 import { Calendar } from '@/components/common/Calendar';
 import { CashSettingsModal } from '@/components/dashboard/CashSettingsModal';
+import { useSessionStore } from '@/store/useSessionStore';
 import { useToastStore } from '@/store/useToastStore';
 import type { CashFlowDay } from '@/types/api';
 
@@ -23,7 +24,10 @@ function CajaPage() {
 }
 
 function CajaContent({ current }: { current: CashFlowDay }) {
-  const { data: settings } = useCashFlowSettings();
+  const isAdmin = useSessionStore((s) => s.employee?.role === 'admin');
+  // Default opening cash is admin-only to see or change (see routes/cashFlow.ts) -
+  // skip the request entirely for non-admins instead of hitting a 401.
+  const { data: settings } = useCashFlowSettings(isAdmin);
   const { data: history = [] } = useCashFlowHistory();
   const pushToast = useToastStore((s) => s.push);
 
@@ -108,13 +112,15 @@ function CajaContent({ current }: { current: CashFlowDay }) {
           <span className="text-2xl font-bold text-danger">{formatCOP(current.expenses)}</span>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setSettingsOpen(true)}
-          className="flex items-center gap-2 self-start rounded-2xl border border-border bg-surface px-4 py-3 text-sm font-medium text-text-secondary transition-colors duration-fast hover:border-brand-400 hover:text-brand-600"
-        >
-          <Settings size={16} /> Efectivo inicial por defecto ({settings ? formatCOP(settings.defaultOpeningCash) : '—'})
-        </button>
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+            className="flex items-center gap-2 self-start rounded-2xl border border-border bg-surface px-4 py-3 text-sm font-medium text-text-secondary transition-colors duration-fast hover:border-brand-400 hover:text-brand-600"
+          >
+            <Settings size={16} /> Efectivo inicial por defecto ({settings ? formatCOP(settings.defaultOpeningCash) : '—'})
+          </button>
+        )}
       </div>
 
       <div className="flex flex-wrap items-start gap-6">

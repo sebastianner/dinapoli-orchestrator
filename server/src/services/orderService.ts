@@ -605,6 +605,20 @@ export function getOrderById(id: number): Order {
   };
 }
 
+const deleteOrderRow = db.prepare<[number]>('DELETE FROM orders WHERE id = ?');
+
+/**
+ * Permanently removes an order and everything derived from it - order_items,
+ * order_item_flavors, order_payments, print_jobs - via the existing
+ * ON DELETE CASCADE foreign keys (see schema.sql), all in one statement.
+ * Irreversible: there is no soft-delete/undo, unlike employees.isActive.
+ * Callers (routes/orders.ts) restrict this to admins.
+ */
+export function deleteOrder(id: number): void {
+  const { changes } = deleteOrderRow.run(id);
+  if (changes === 0) throw new NotFoundError(`order ${id} not found`);
+}
+
 /**
  * `date` matches orders whose `created_at` falls on that Bogotá business day
  * (same UTC-5 convention as End-of-Day's sales aggregation), regardless of

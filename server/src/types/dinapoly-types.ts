@@ -101,16 +101,22 @@ export interface ProductSize {
 
 // ============================================================
 // EMPLOYEES
-// Identification only, no auth: enough to attribute an order to
-// whoever placed it. Removal is a soft delete (isActive: false)
-// so past orders keep a valid employeeId.
+// Enough to attribute an order to whoever placed it, plus a role that
+// gates admin-only actions (managing employees, deleting orders). Removal
+// is a soft delete (isActive: false) so past orders keep a valid
+// employeeId. 'admin' rows authenticate with a password (see authService,
+// utils/password.ts); 'staff' rows log in by picking their name, no
+// password - never exposed here (password_hash stays server-side only).
 // ============================================================
+
+export type EmployeeRole = 'staff' | 'admin';
 
 export interface Employee {
   id: number;
   name: string;
   pictureUrl: string | null;
   isActive: boolean;
+  role: EmployeeRole;
 }
 
 // ============================================================

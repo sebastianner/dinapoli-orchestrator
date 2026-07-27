@@ -77,6 +77,17 @@ export interface EmployeeRow {
   name: string;
   picture_url: string | null;
   is_active: 0 | 1;
+  role: 'staff' | 'admin';
+  password_hash: string | null;
+}
+
+export interface RefreshTokenRow {
+  id: number;
+  employee_id: number;
+  token_hash: string;
+  expires_at: string;
+  revoked_at: string | null;
+  created_at: string;
 }
 
 export type OrderTypeDb = 'dine_in' | 'takeaway' | 'delivery';

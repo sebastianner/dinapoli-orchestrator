@@ -1,9 +1,17 @@
-import { createFileRoute, Link } from '@tanstack/react-router';
+import { createFileRoute, redirect, Link } from '@tanstack/react-router';
 import { useClosingReports } from '@/lib/queries';
 import { formatCOP } from '@/lib/format';
 import { formatDateLong } from '@/lib/date';
+import { useSessionStore } from '@/store/useSessionStore';
 
 export const Route = createFileRoute('/dashboard/closing-reports/')({
+  beforeLoad: () => {
+    // Closing reports expose the whole day's sales breakdown - reviewing
+    // them is admin-only (see routes/endOfDay.ts).
+    if (useSessionStore.getState().employee?.role !== 'admin') {
+      throw redirect({ to: '/dashboard/order-history' });
+    }
+  },
   component: ClosingReportsPage,
 });
 

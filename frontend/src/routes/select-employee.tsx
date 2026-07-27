@@ -1,13 +1,12 @@
 import { useState } from 'react';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { mutate } from 'swr';
 import classNames from 'classnames';
-import { Plus, RotateCcw } from 'lucide-react';
 import { useActiveEmployees, useInactiveEmployees } from '@/lib/queries';
-import { activateEmployee, deactivateEmployee } from '@/lib/api';
+import { login } from '@/lib/api';
 import { avatarSrc } from '@/lib/avatar';
 import { EmployeeCard } from '@/components/employee/EmployeeCard';
 import { EmployeeModal } from '@/components/employee/EmployeeModal';
+import { AdminLoginModal } from '@/components/employee/AdminLoginModal';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useToastStore } from '@/store/useToastStore';
 import type { Employee } from '@/types/api';
@@ -16,44 +15,37 @@ export const Route = createFileRoute('/select-employee')({
   component: SelectEmployeePage,
 });
 
-type ModalState = { mode: 'create' } | { mode: 'edit'; employee: Employee } | null;
-
 function SelectEmployeePage() {
   const [tab, setTab] = useState<'active' | 'inactive'>('active');
-  const [modal, setModal] = useState<ModalState>(null);
+  const [adminLoginTarget, setAdminLoginTarget] = useState<Employee | null>(null);
+  const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
 
   const { data: activeEmployees = [], isLoading: loadingActive } = useActiveEmployees();
   const { data: inactiveEmployees = [], isLoading: loadingInactive } = useInactiveEmployees();
 
   const setSessionEmployee = useSessionStore((s) => s.setEmployee);
-  const sessionEmployee = useSessionStore((s) => s.employee);
   const pushToast = useToastStore((s) => s.push);
   const navigate = useNavigate();
 
-  const handleSelect = (employee: Employee) => {
+  const handleLoggedIn = (employee: Employee) => {
     setSessionEmployee(employee);
+    setAdminLoginTarget(null);
     pushToast(`Bienvenido, ${employee.name}`);
     navigate({ to: '/tables' });
   };
 
-  const handleDeactivate = async (employee: Employee) => {
-    try {
-      await deactivateEmployee(employee.id);
-      await Promise.all([mutate('/employees/active'), mutate('/employees/inactive')]);
-      if (sessionEmployee?.id === employee.id) setSessionEmployee(null);
-      pushToast(`${employee.name} fue desactivado`, 'warning');
-    } catch (err) {
-      pushToast(err instanceof Error ? err.message : 'No se pudo desactivar', 'error');
+  const handleSelect = async (employee: Employee) => {
+    // Admins authenticate with a password; staff log in by picking their
+    // name alone (see authService.login).
+    if (employee.role === 'admin') {
+      setAdminLoginTarget(employee);
+      return;
     }
-  };
-
-  const handleReactivate = async (employee: Employee) => {
     try {
-      await activateEmployee(employee.id);
-      await Promise.all([mutate('/employees/active'), mutate('/employees/inactive')]);
-      pushToast(`${employee.name} fue reactivado`);
+      const { employee: loggedIn } = await login(employee.id);
+      handleLoggedIn(loggedIn);
     } catch (err) {
-      pushToast(err instanceof Error ? err.message : 'No se pudo reactivar', 'error');
+      pushToast(err instanceof Error ? err.message : 'No se pudo iniciar sesión', 'error');
     }
   };
 
@@ -87,23 +79,13 @@ function SelectEmployeePage() {
       </div>
 
       {tab === 'active' ? (
-        <ActiveTab
-          employees={activeEmployees}
-          loading={loadingActive}
-          onSelect={handleSelect}
-          onEdit={(employee) => setModal({ mode: 'edit', employee })}
-          onDeactivate={handleDeactivate}
-          onCreate={() => setModal({ mode: 'create' })}
-        />
+        <ActiveTab employees={activeEmployees} loading={loadingActive} onSelect={handleSelect} onEdit={setEditingEmployee} />
       ) : (
-        <InactiveTab employees={inactiveEmployees} loading={loadingInactive} onReactivate={handleReactivate} />
+        <InactiveTab employees={inactiveEmployees} loading={loadingInactive} />
       )}
 
-      <EmployeeModal
-        open={modal != null}
-        employee={modal?.mode === 'edit' ? modal.employee : undefined}
-        onClose={() => setModal(null)}
-      />
+      <AdminLoginModal employee={adminLoginTarget} onClose={() => setAdminLoginTarget(null)} onSuccess={handleLoggedIn} />
+      <EmployeeModal open={editingEmployee != null} employee={editingEmployee ?? undefined} onClose={() => setEditingEmployee(null)} />
     </div>
   );
 }
@@ -113,51 +95,22 @@ interface ActiveTabProps {
   loading: boolean;
   onSelect: (employee: Employee) => void;
   onEdit: (employee: Employee) => void;
-  onDeactivate: (employee: Employee) => void;
-  onCreate: () => void;
 }
 
-function ActiveTab({ employees, loading, onSelect, onEdit, onDeactivate, onCreate }: ActiveTabProps) {
+function ActiveTab({ employees, loading, onSelect, onEdit }: ActiveTabProps) {
   if (loading) return <p className="text-sm text-text-secondary">Cargando empleados...</p>;
 
   if (employees.length === 0) {
-    return (
-      <div className="flex flex-col items-center gap-3 py-16">
-        <p className="text-sm text-text-secondary">Todavía no hay empleados registrados.</p>
-        <button
-          type="button"
-          onClick={onCreate}
-          className="rounded-full bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white transition-colors duration-fast hover:bg-brand-600"
-        >
-          Crear empleado
-        </button>
-      </div>
-    );
+    // Creating employees is admin-only now (see /dashboard/employees) - this
+    // page is purely a login picker.
+    return <p className="py-16 text-center text-sm text-text-secondary">Todavía no hay empleados registrados.</p>;
   }
 
   return (
     <div className="flex flex-wrap gap-6">
       {employees.map((employee) => (
-        <EmployeeCard
-          key={employee.id}
-          employee={employee}
-          onSelect={() => onSelect(employee)}
-          onEdit={() => onEdit(employee)}
-          onDeactivate={() => onDeactivate(employee)}
-        />
+        <EmployeeCard key={employee.id} employee={employee} onSelect={() => onSelect(employee)} onEdit={() => onEdit(employee)} />
       ))}
-
-      <button
-        type="button"
-        onClick={onCreate}
-        aria-label="Crear empleado"
-        className="flex w-32 flex-col items-center gap-2 pt-0"
-      >
-        <span className="flex h-24 w-24 items-center justify-center rounded-full border-2 border-dashed border-border text-text-secondary transition-colors duration-fast hover:border-brand-400 hover:text-brand-600">
-          <Plus size={28} />
-        </span>
-        <span className="text-sm font-medium text-text-secondary">Crear empleado</span>
-      </button>
     </div>
   );
 }
@@ -165,10 +118,9 @@ function ActiveTab({ employees, loading, onSelect, onEdit, onDeactivate, onCreat
 interface InactiveTabProps {
   employees: Employee[];
   loading: boolean;
-  onReactivate: (employee: Employee) => void;
 }
 
-function InactiveTab({ employees, loading, onReactivate }: InactiveTabProps) {
+function InactiveTab({ employees, loading }: InactiveTabProps) {
   if (loading) return <p className="text-sm text-text-secondary">Cargando empleados...</p>;
 
   if (employees.length === 0) {
@@ -183,13 +135,6 @@ function InactiveTab({ employees, loading, onReactivate }: InactiveTabProps) {
             <img src={avatarSrc(employee)} alt={employee.name} className="h-full w-full" />
           </div>
           <span className="max-w-full truncate text-sm font-medium text-text-secondary">{employee.name}</span>
-          <button
-            type="button"
-            onClick={() => onReactivate(employee)}
-            className="flex items-center gap-1 rounded-full border border-border px-3 py-1 text-xs font-medium text-text-secondary transition-colors duration-fast hover:border-brand-400 hover:text-brand-600"
-          >
-            <RotateCcw size={12} /> Reactivar
-          </button>
         </div>
       ))}
     </div>

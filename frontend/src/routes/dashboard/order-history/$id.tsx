@@ -64,12 +64,20 @@ function StatusTimeline({ order }: { order: Order }) {
                 style={{ width: 'calc(100% - 14px)', right: 'calc(50% + 7px)' }}
               />
             )}
-            <div
-              className={classNames(
-                'relative z-10 h-[14px] w-[14px] rounded-full border-2',
-                i <= currentIndex ? 'border-success bg-success' : 'border-border bg-surface',
+            <div className="relative z-10 flex h-[14px] w-[14px] items-center justify-center">
+              {step.status === 'ACTIVE' && order.status === 'ACTIVE' && (
+                <>
+                  <span className="anim-pulse-ring absolute h-full w-full rounded-full bg-success" />
+                  <span className="anim-pulse-ring absolute h-full w-full rounded-full bg-success" style={{ animationDelay: '0.8s' }} />
+                </>
               )}
-            />
+              <div
+                className={classNames(
+                  'h-[14px] w-[14px] rounded-full border-2',
+                  i <= currentIndex ? 'border-success bg-success' : 'border-border bg-surface',
+                )}
+              />
+            </div>
             <span className={classNames('text-sm font-medium', i <= currentIndex ? 'text-text-primary' : 'text-text-secondary')}>{step.label}</span>
             <span className="h-4 text-xs text-text-secondary">
               {i === 0 && formatTime(order.createdAt)}

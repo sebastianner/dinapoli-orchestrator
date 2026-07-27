@@ -93,11 +93,15 @@ export function isPizzaCategory(c: MenuCategory): c is PizzaCategory {
 
 // ---------- Employees ----------
 
+/** 'admin' employees log in with a password; 'staff' log in by picking their name, no password. */
+export type EmployeeRole = 'staff' | 'admin';
+
 export interface Employee {
   id: number;
   name: string;
   pictureUrl: string | null;
   isActive: boolean;
+  role: EmployeeRole;
 }
 
 // ---------- Tables ----------

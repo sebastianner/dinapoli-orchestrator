@@ -60,18 +60,20 @@ export function useCashFlowHistory() {
   return useSWR('/cash-flow', fetchCashFlowHistory);
 }
 
-export function useCashFlowSettings() {
-  return useSWR('/cash-flow/settings', fetchCashFlowSettings);
+/** Admin only on the backend (see routes/cashFlow.ts) - pass enabled: false for non-admins to skip the request entirely instead of hitting a 401. */
+export function useCashFlowSettings(enabled = true) {
+  return useSWR(enabled ? '/cash-flow/settings' : null, fetchCashFlowSettings);
 }
 
 export function useCashFlowExpenses(cashFlowId: number | null) {
   return useSWR(cashFlowId != null ? `/cash-flow/${cashFlowId}/expenses` : null, () => fetchCashFlowExpenses(cashFlowId as number));
 }
 
-export function useClosingReports() {
-  return useSWR('/end-of-day', fetchClosingReports);
+/** Admin only on the backend (see routes/endOfDay.ts) - pass enabled: false for non-admins to skip the request entirely instead of hitting a 401. */
+export function useClosingReports(enabled = true) {
+  return useSWR(enabled ? '/end-of-day' : null, fetchClosingReports);
 }
 
-export function useClosingReport(id: number | null) {
-  return useSWR(id != null ? `/end-of-day/${id}` : null, () => fetchClosingReport(id as number));
+export function useClosingReport(id: number | null, enabled = true) {
+  return useSWR(enabled && id != null ? `/end-of-day/${id}` : null, () => fetchClosingReport(id as number));
 }

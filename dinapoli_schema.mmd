@@ -1,6 +1,7 @@
 erDiagram
   RESTAURANT_TABLES ||--o{ ORDERS : seats
   EMPLOYEES |o--o{ ORDERS : "placed by"
+  EMPLOYEES ||--o{ REFRESH_TOKENS : "authenticates via"
 
   CATEGORIES ||--o{ PRODUCTS : contains
   PRODUCTS ||--o{ PRODUCT_SIZES : "priced as"
@@ -36,6 +37,17 @@ erDiagram
     text name
     text picture_url "nullable"
     int is_active "default 1. soft delete - false instead of removing the row"
+    text role "'staff' or 'admin', default 'staff'"
+    text password_hash "nullable. bcrypt hash - only 'admin' rows ever carry one, see authService.login"
+  }
+
+  REFRESH_TOKENS {
+    int id PK
+    int employee_id FK
+    text token_hash "sha256 of the raw refresh token cookie - only the hash is ever stored"
+    text expires_at
+    text revoked_at "nullable. set on logout or rotation (refresh is single-use)"
+    text created_at
   }
 
   CATEGORIES {
@@ -142,7 +154,8 @@ erDiagram
     int gross_amount "GROSS total charged via this method, integer COP - tip and delivery fee included, discount NOT subtracted. Named distinctly from ORDERS.total (items only) so the two can't be confused"
     int tip_amount "default 0. slice of gross_amount that's tip, not sales. 0 to gross_amount"
     int delivery_fee "default 0. slice of gross_amount that's delivery fee, not sales. 0 to gross_amount"
-    int discount "default 0. slice of gross_amount this split's discount accounts for. 0 to gross_amount. actual cash collected is gross_amount - discount, derived when needed"
+    int net_amount "products-only slice of gross_amount - tip/delivery fee excluded, discount NOT subtracted either. SUM(net_amount) across an order's splits always equals ORDERS.total exactly, server-computed at insert time"
+    int discount "default 0. slice of net_amount (not gross_amount - discounts apply to products, not tip/delivery fee) this split's discount accounts for. 0 to net_amount. actual cash collected is gross_amount - discount, derived when needed"
     text created_at "written once, at completion - the ONLY place tip/delivery fee/discount are ever recorded; ORDERS.tip/deliveryFee/discount (API-level, not a column) are always 0 before this and derived by summing these rows afterward"
   }
 

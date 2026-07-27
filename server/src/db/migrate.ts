@@ -49,6 +49,8 @@ function migrate(): void {
   ensureColumn('closing_reports', 'tips', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn('closing_reports', 'discounts', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn('orders', 'promo_type', "TEXT CHECK (promo_type IS NULL OR promo_type IN ('duo', 'pizza_xl'))");
+  ensureColumn('employees', 'role', "TEXT NOT NULL DEFAULT 'staff' CHECK (role IN ('staff', 'admin'))");
+  ensureColumn('employees', 'password_hash', 'TEXT');
   // Was just "amount" - renamed to make it unmistakable that this is the GROSS
   // total (items + tip + delivery fee) charged via this method, unlike
   // orders.total (items only). SQLite 3.25+ rewrites the CHECK constraints

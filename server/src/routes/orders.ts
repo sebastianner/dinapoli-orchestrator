@@ -1,7 +1,8 @@
 import { Router } from 'express';
-import { getOrderById, listOrders, completeOrder, reprintOrderDocument, addOrderItems } from '../services/orderService.js';
+import { getOrderById, listOrders, completeOrder, reprintOrderDocument, addOrderItems, deleteOrder } from '../services/orderService.js';
 import { notifyPrintQueue } from '../services/queueService.js';
 import { ValidationError } from '../utils/errors.js';
+import { requireAuth, requireAdmin } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -44,6 +45,17 @@ router.post('/:id/items', (req, res, next) => {
     const order = addOrderItems(parseOrderId(req.params.id), req.body?.items);
     notifyPrintQueue();
     res.json(order);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Irreversible - admin only. The frontend gates this behind an explicit
+// confirmation dialog (see order-history), but the server enforces it too.
+router.delete('/:id', requireAuth, requireAdmin, (req, res, next) => {
+  try {
+    deleteOrder(parseOrderId(req.params.id));
+    res.json({ status: 'deleted', orderId: parseOrderId(req.params.id) });
   } catch (err) {
     next(err);
   }

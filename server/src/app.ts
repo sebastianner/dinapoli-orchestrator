@@ -1,16 +1,20 @@
 import express, { type ErrorRequestHandler } from 'express';
+import cookieParser from 'cookie-parser';
 import menuRouter from './routes/menu.js';
 import ordersRouter from './routes/orders.js';
 import tablesRouter from './routes/tables.js';
 import cashFlowRouter from './routes/cashFlow.js';
 import endOfDayRouter from './routes/endOfDay.js';
 import employeesRouter from './routes/employees.js';
+import authRouter from './routes/auth.js';
 
 export function createApp() {
   const app = express();
   app.use(express.json());
+  app.use(cookieParser());
 
   app.get('/health', (req, res) => res.json({ status: 'ok' }));
+  app.use('/api/auth', authRouter);
   app.use('/api/menu', menuRouter);
   app.use('/api/orders', ordersRouter);
   app.use('/api/tables', tablesRouter);
