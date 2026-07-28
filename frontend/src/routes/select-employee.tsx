@@ -145,7 +145,7 @@ function ActiveTab({ employees, loading, onSelect, onEdit, onCreate }: ActiveTab
   if (loading) return <p className="text-sm text-text-secondary">Cargando empleados...</p>;
 
   if (employees.length === 0 && !onCreate) {
-    // Creating employees is admin-only now (see /dashboard/employees) - this
+    // Creating employees is admin-only now (see /ajustes/employees) - this
     // page is purely a login picker.
     return <p className="py-16 text-center text-sm text-text-secondary">Todavía no hay empleados registrados.</p>;
   }

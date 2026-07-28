@@ -9,7 +9,7 @@ interface TableTileProps {
   /** The table's active order, when busy - shown as elapsed time/total/item count. Omitted (even for a busy table) when the status flag is stale and no matching order is loaded, falling back to the plain "Ocupada" label. */
   order?: Order;
   onClick: () => void;
-  /** Admin-only shortcut to /dashboard/table-assignments for this table's order (see Todo.MD "Edit table number"). Omitted -> no edit affordance, e.g. non-admins or a free table with nothing to reassign. */
+  /** Admin-only shortcut to /ajustes/table-assignments for this table's order (see Todo.MD "Edit table number"). Omitted -> no edit affordance, e.g. non-admins or a free table with nothing to reassign. */
   onEditTable?: () => void;
 }
 

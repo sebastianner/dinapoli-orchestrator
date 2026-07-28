@@ -12,7 +12,7 @@ interface CityModalProps {
   city?: City;
 }
 
-/** Admin only (see routes/locations.ts) - reachable only from the /dashboard/locations panel. */
+/** Admin only (see routes/locations.ts) - reachable only from the /ajustes/locations panel. */
 export function CityModal({ open, onClose, city }: CityModalProps) {
   const isEdit = city != null;
   const [name, setName] = useState(city?.name ?? '');

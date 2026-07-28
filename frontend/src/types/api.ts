@@ -83,7 +83,7 @@ export interface ProductSearchResult extends Product {
   categoryId: ProductCategoryId;
 }
 
-/** The full row behind a menu Product, for /dashboard/menu-settings - unlike Product (only ever the currently-available subset), this carries the numeric id updates/deletes target and isAvailable regardless of value. */
+/** The full row behind a menu Product, for /ajustes/menu-settings - unlike Product (only ever the currently-available subset), this carries the numeric id updates/deletes target and isAvailable regardless of value. */
 export interface AdminProduct {
   id: number;
   categoryId: ProductCategoryId;
@@ -113,7 +113,7 @@ export function isPizzaCategory(c: MenuCategory): c is PizzaCategory {
   return c.id === 'pizzas';
 }
 
-// ---------- Pizza admin (/dashboard/menu-settings, /api/pizza-admin) ----------
+// ---------- Pizza admin (/ajustes/menu-settings, /api/pizza-admin) ----------
 
 export interface AdminPizzaGroupSize {
   id: PizzaSizeId;
@@ -250,7 +250,7 @@ export function isPizzaItem(i: OrderItemRequest): i is PizzaItemRequest {
 /** 'duo': 2 products (personal pizza/lasagna/pasta/gratin) for a flat price. 'pizza_xl': XL pizza + free soda + free bread for a flat price. Prices are admin-editable - see PromoSettings. */
 export type PromoType = 'duo' | 'pizza_xl';
 
-/** Admin-editable flat pricing for a promo (see /dashboard/promos). */
+/** Admin-editable flat pricing for a promo (see /ajustes/promos). */
 export interface PromoSettings {
   promoType: PromoType;
   price: number;

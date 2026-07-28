@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import {
   LayoutDashboard,
+  Settings,
   LayoutGrid,
   Wallet,
   UserRound,
@@ -21,6 +22,7 @@ const links = [
 
 export function Sidebar() {
   const employee = useSessionStore((s) => s.employee);
+  const isAdmin = employee?.role === "admin";
   const overrideSeed = useAvatarOverrideStore((s) => (employee ? s.overrides[employee.id] : undefined));
 
   return (
@@ -38,6 +40,18 @@ export function Sidebar() {
             </span>
           </Link>
         ))}
+
+        {isAdmin && (
+          <Link
+            to="/ajustes"
+            className="group flex w-16 flex-col items-center gap-1 rounded-xl px-2 py-3 text-text-secondary transition-colors duration-fast hover:bg-brand-500/10 hover:text-brand-600 data-[status=active]:bg-brand-500/10 data-[status=active]:text-brand-600 sm:w-20"
+          >
+            <Settings size={22} strokeWidth={1.75} />
+            <span className="text-center text-[11px] font-medium leading-tight">
+              Ajustes
+            </span>
+          </Link>
+        )}
       </nav>
 
       <Link

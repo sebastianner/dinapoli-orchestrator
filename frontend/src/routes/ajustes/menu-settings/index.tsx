@@ -1,11 +1,10 @@
 import { useMemo, useState } from 'react';
-import { createFileRoute, redirect } from '@tanstack/react-router';
+import { createFileRoute } from '@tanstack/react-router';
 import { mutate } from 'swr';
 import classNames from 'classnames';
 import { ChevronRight, Pizza, Plus, Trash2 } from 'lucide-react';
 import { useAdminProducts, useMenu } from '@/lib/queries';
 import { updateAdminProduct } from '@/lib/api';
-import { useSessionStore } from '@/store/useSessionStore';
 import { useToastStore } from '@/store/useToastStore';
 import { formatCOP } from '@/lib/format';
 import { isPizzaCategory } from '@/types/api';
@@ -15,13 +14,8 @@ import { EditProductModal } from '@/components/menu/EditProductModal';
 import { PizzaSettingsPanel } from '@/components/menu/PizzaSettingsPanel';
 import type { AdminProduct, ProductCategoryId } from '@/types/api';
 
-export const Route = createFileRoute('/dashboard/menu-settings/')({
-  beforeLoad: () => {
-    // Same footing as every other operational-config page here (promos, locations) - admin only.
-    if (useSessionStore.getState().employee?.role !== 'admin') {
-      throw redirect({ to: '/dashboard/order-history' });
-    }
-  },
+export const Route = createFileRoute('/ajustes/menu-settings/')({
+  // Admin-only - enforced by the parent /ajustes layout's beforeLoad.
   component: MenuSettingsPage,
 });
 

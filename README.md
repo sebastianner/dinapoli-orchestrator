@@ -99,7 +99,7 @@ to type `better-sqlite3` prepared statements live in `src/types/db.ts`.
     is public (every order-placing screen needs it for display);
     `PUT /api/promos/:type` (`{ price, sodaSurcharge? }`, `sodaSurcharge` only
     accepted for `pizza_xl`) is admin-only, exposed in the frontend at
-    `/dashboard/promos` behind a two-step edit-then-confirm modal.
+    `/ajustes/promos` behind a two-step edit-then-confirm modal.
 - **Persistent queue** (`src/services/queueService.js`): the queue *is* the
   `orders.status` column — no separate queue store. A poll loop (every 2s, plus
   an immediate pass on boot and right after a new order or item addition
@@ -204,6 +204,15 @@ to type `better-sqlite3` prepared statements live in `src/types/db.ts`.
   `POST /api/employees` is now admin-only, there's a bootstrap escape hatch
   for the very first admin: `npm run admin:create -- "<name>" "<password>"`
   (runs directly against the DB, no server needed).
+- **Ajustes** (`frontend/src/routes/ajustes`): employees, cities/
+  neighborhoods, promos, table assignments, and menu settings all live here,
+  gated client-side in one place by the layout route's own `beforeLoad`
+  (each page used to carry its own copy of the same check) instead of
+  per-page. The sidebar's "Ajustes" icon only renders for admins. Order
+  history and closing reports stay under the separate `/dashboard`
+  (sidebar icon "Resumen", visible to everyone) since order history is open
+  to every employee - closing reports keeps its own admin-only `beforeLoad`
+  there instead, same as before `/ajustes` existed.
 - **Customers & locations** (`src/services/customerService.js`,
   `src/services/locationService.js`): a customer (`name`, optional
   `phone`/`email`) can have zero or more saved addresses; `orders` no longer
@@ -226,7 +235,7 @@ to type `better-sqlite3` prepared statements live in `src/types/db.ts`.
   `Neighborhood` belongs to a `City`; both are seeded with a starting
   Cali/neighborhoods set (`db/seed.js`) - the only city seeded, which makes
   it the default in the delivery address form - and manageable afterward via
-  the admin-only `/dashboard/locations` page.
+  the admin-only `/ajustes/locations` page.
   Creating/updating a customer or their addresses needs no auth at all (this
   is staff entering a walk-in/calling customer's details, not a public
   account system) - only `DELETE /api/customers/:id` is admin-gated, and
@@ -286,7 +295,7 @@ to type `better-sqlite3` prepared statements live in `src/types/db.ts`.
   has to be seeded directly. Deleting fails with a 409 if the product has
   existing order history (same `isForeignKeyViolation` pattern as
   `customerService.deleteCustomer`) - mark it unavailable instead.
-  `/dashboard/menu-settings` lists every product grouped by category, with
+  `/ajustes/menu-settings` lists every product grouped by category, with
   two responsive row treatments switched by the `lg` breakpoint rather than
   one layout trying to serve both: below `lg` (mobile and tablet), rows are
   read-only (status dot/name/price) and tapping one opens `EditProductModal`
@@ -309,7 +318,7 @@ to type `better-sqlite3` prepared statements live in `src/types/db.ts`.
   delete for groups/flavors in this pass - both can be referenced by order
   history, same "mark unavailable instead" reasoning as products (not
   applicable yet since flavors have no `isAvailable` toggle exposed here
-  either - out of scope for this pass). `/dashboard/menu-settings` gained a
+  either - out of scope for this pass). `/ajustes/menu-settings` gained a
   left-hand rail (`PizzaSettingsPanel.tsx`) listing every product category
   plus a single "Pizzas" entry - on mobile/tablet it's a horizontal
   scrollable chip strip, on desktop a vertical list, so it never has to
@@ -339,14 +348,14 @@ to type `better-sqlite3` prepared statements live in `src/types/db.ts`.
     .validateOrderRequest`, `updateOrderTable`). A sanity ceiling (40) is
     enforced in the service, not the DB, purely to stop the admin panel from
     growing the floor plan into something nonsensical by mistake.
-    `/dashboard/table-assignments` exposes this as a `+`/`-` stepper with a
+    `/ajustes/table-assignments` exposes this as a `+`/`-` stepper with a
     confirmation dialog before saving (steps the single-step endpoint above
     that many times in sequence for a multi-table change).
   - **Reassigning an order's table** (`orderService.updateOrderTable`, admin-
     only `PUT /api/orders/:id/table`): corrects a dine-in order's table after
     the fact - frees the old table (`refreshTableStatus`, recomputed rather
     than assumed - it might have another open order) and marks the new one
-    busy. Same `/dashboard/table-assignments` page, plus an admin-only
+    busy. Same `/ajustes/table-assignments` page, plus an admin-only
     shortcut on a busy dine-in table's tile (`/tables`, both the grid and
     floor-plan views) that deep-links straight to that order's edit modal via
     a `?orderId=` search param.
@@ -434,7 +443,7 @@ to type `better-sqlite3` prepared statements live in `src/types/db.ts`.
   `order_payments`, `print_jobs`) via the existing `ON DELETE CASCADE`
   foreign keys - no soft-delete, no undo. The frontend only exposes this
   behind an explicit two-step confirmation (a "remove mode" toggle, then a
-  per-order confirm dialog, see `dashboard/order-history`), but the server
+  per-order confirm dialog, see `ajustes/order-history`), but the server
   enforces the admin check independently.
 - `PUT /api/orders/:id/tip` — sets (or overwrites) the order's tip. Allowed at
   any order status. Body: `{ "tip": number }` (non-negative integer COP).
@@ -450,7 +459,7 @@ to type `better-sqlite3` prepared statements live in `src/types/db.ts`.
   Adds/removes exactly one table (always the highest number). `decrease` 409s
   if that table currently has an open order.
 - `GET /api/products` — **admin only.** Every product regardless of
-  `is_available`, for `/dashboard/menu-settings` (see Menu settings above).
+  `is_available`, for `/ajustes/menu-settings` (see Menu settings above).
 - `POST /api/products` — **admin only.** `{ "categoryId": string, "name": string, "description"?: string, "price": number, "isAvailable"?: boolean }`.
   Flat-priced products only.
 - `PUT /api/products/:id` — **admin only.** Same body, all fields optional.

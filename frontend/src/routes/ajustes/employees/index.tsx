@@ -1,26 +1,17 @@
 import { useState } from 'react';
-import { createFileRoute, redirect } from '@tanstack/react-router';
+import { createFileRoute } from '@tanstack/react-router';
 import { mutate } from 'swr';
 import { Pencil, Plus, RotateCcw, UserX } from 'lucide-react';
 import { useActiveEmployees, useInactiveEmployees } from '@/lib/queries';
 import { activateEmployee, deactivateEmployee } from '@/lib/api';
 import { avatarSrc } from '@/lib/avatar';
-import { useSessionStore } from '@/store/useSessionStore';
 import { useToastStore } from '@/store/useToastStore';
 import { EmployeeModal } from '@/components/employee/EmployeeModal';
 import { EmployeeRoleModal } from '@/components/employee/EmployeeRoleModal';
 import type { Employee } from '@/types/api';
 
-export const Route = createFileRoute('/dashboard/employees/')({
-  beforeLoad: () => {
-    // Managing employees is admin-only (see routes/employees.ts) - bounce
-    // anyone else back before the page even loads. The session store is
-    // hydrated from the cookie session in __root.tsx, so this reflects the
-    // real backend-enforced role, not a client-only guess.
-    if (useSessionStore.getState().employee?.role !== 'admin') {
-      throw redirect({ to: '/dashboard/order-history' });
-    }
-  },
+export const Route = createFileRoute('/ajustes/employees/')({
+  // Admin-only - enforced by the parent /ajustes layout's beforeLoad.
   component: EmployeesAdminPage,
 });
 

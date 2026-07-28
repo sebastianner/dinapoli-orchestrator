@@ -5,20 +5,12 @@ export const Route = createFileRoute('/dashboard')({
   component: DashboardLayout,
 });
 
+// Open to every employee - unlike /ajustes (admin-only). Closing reports
+// expose the whole day's sales breakdown, so that one tab/page stays
+// admin-gated on its own (same as before /ajustes existed).
 const tabs = [{ to: '/dashboard/order-history', label: 'Historial de órdenes' }] as const;
 
-// All admin-only: closing reports expose the day's full sales/tips/discounts
-// breakdown, employee management is self-explanatory, and cities/
-// neighborhoods are operational config (see routes/endOfDay.ts,
-// routes/employees.ts, routes/locations.ts).
-const adminTabs = [
-  { to: '/dashboard/closing-reports', label: 'Cierres del día' },
-  { to: '/dashboard/employees', label: 'Empleados' },
-  { to: '/dashboard/locations', label: 'Ciudades y barrios' },
-  { to: '/dashboard/promos', label: 'Promociones' },
-  { to: '/dashboard/table-assignments', label: 'Editar mesas' },
-  { to: '/dashboard/menu-settings', label: 'Ajustes de menú' },
-] as const;
+const adminTabs = [{ to: '/dashboard/closing-reports', label: 'Cierres del día' }] as const;
 
 function DashboardLayout() {
   const isAdmin = useSessionStore((s) => s.employee?.role === 'admin');

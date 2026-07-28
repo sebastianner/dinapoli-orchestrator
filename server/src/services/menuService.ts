@@ -187,7 +187,7 @@ export function searchProducts(query: unknown): ProductSearchResult[] {
 }
 
 // ---------------------------------------------------------------------------
-// Admin settings (/dashboard/menu-settings) - unlike everything above, these
+// Admin settings (/ajustes/menu-settings) - unlike everything above, these
 // see every product regardless of is_available, and expose the numeric id
 // updates/deletes target.
 // ---------------------------------------------------------------------------

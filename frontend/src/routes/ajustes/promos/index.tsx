@@ -1,21 +1,14 @@
 import { useState } from 'react';
-import { createFileRoute, redirect } from '@tanstack/react-router';
+import { createFileRoute } from '@tanstack/react-router';
 import { Pencil, Sparkles } from 'lucide-react';
 import { usePromoSettings } from '@/lib/queries';
-import { useSessionStore } from '@/store/useSessionStore';
 import { formatCOP } from '@/lib/format';
 import { PROMO_LABELS } from '@/lib/promos';
 import { PromoSettingsModal } from '@/components/promo/PromoSettingsModal';
 import type { PromoSettings } from '@/types/api';
 
-export const Route = createFileRoute('/dashboard/promos/')({
-  beforeLoad: () => {
-    // Promo pricing is operational config, same footing as cash-flow settings
-    // and delivery zones (see routes/promos.ts) - admin only.
-    if (useSessionStore.getState().employee?.role !== 'admin') {
-      throw redirect({ to: '/dashboard/order-history' });
-    }
-  },
+export const Route = createFileRoute('/ajustes/promos/')({
+  // Admin-only - enforced by the parent /ajustes layout's beforeLoad.
   component: PromosAdminPage,
 });
 

@@ -4,7 +4,7 @@ import type { OrderItemRequest, PizzaSizeId, ProductCategoryId, PromoSettings, P
 // Mirrors server/src/services/orderService.ts's validatePromoItems/applyPromoPricing -
 // this is a client-side PREVIEW only (cart display), the server always
 // recomputes and enforces the authoritative price/eligibility on submission.
-// Prices themselves are admin-editable (see /dashboard/promos,
+// Prices themselves are admin-editable (see /ajustes/promos,
 // usePromoSettings) rather than hardcoded here - every function below that
 // needs a price takes the current PromoSettings as a parameter.
 

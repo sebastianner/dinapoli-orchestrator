@@ -16,7 +16,7 @@ interface EmployeeModalProps {
   employee?: Employee;
 }
 
-/** Create mode is only reachable from the admin panel (/dashboard/employees) - creating employees is admin-only. */
+/** Create mode is only reachable from the admin panel (/ajustes/employees) - creating employees is admin-only. */
 export function EmployeeModal({ open, onClose, employee }: EmployeeModalProps) {
   const isEdit = employee != null;
   const [name, setName] = useState(employee?.name ?? '');

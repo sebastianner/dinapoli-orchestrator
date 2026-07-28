@@ -5,7 +5,7 @@ import { requireAuth, requireAdmin } from '../middleware/auth.js';
 const router = Router();
 
 // Every route here is admin-only - this is the menu settings dashboard
-// (/dashboard/menu-settings), not the public menu (see routes/menu.ts).
+// (/ajustes/menu-settings), not the public menu (see routes/menu.ts).
 router.use(requireAuth, requireAdmin);
 
 router.get('/', (req, res) => {

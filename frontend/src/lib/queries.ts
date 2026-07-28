@@ -39,12 +39,12 @@ export function useProductSearch(query: string) {
   return useSWR(trimmed.length > 0 ? `/menu/search?q=${trimmed}` : null, () => searchProducts(trimmed));
 }
 
-/** Admin only (see routes/products.ts) - every product regardless of availability, for /dashboard/menu-settings. */
+/** Admin only (see routes/products.ts) - every product regardless of availability, for /ajustes/menu-settings. */
 export function useAdminProducts() {
   return useSWR('/products', fetchAdminProducts);
 }
 
-/** Admin only (see routes/pizzaAdmin.ts) - pizza groups/sizes/flavors for /dashboard/menu-settings. */
+/** Admin only (see routes/pizzaAdmin.ts) - pizza groups/sizes/flavors for /ajustes/menu-settings. */
 export function usePizzaAdminData() {
   return useSWR('/pizza-admin', fetchPizzaAdminData);
 }

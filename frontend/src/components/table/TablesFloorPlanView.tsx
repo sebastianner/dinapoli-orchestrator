@@ -9,7 +9,7 @@ interface TablesFloorPlanViewProps {
   tables: RestaurantTableSummary[];
   activeOrders: Order[];
   onTableClick: (table: RestaurantTableSummary) => void;
-  /** Admin-only shortcut to /dashboard/table-assignments for a table's order (see Todo.MD "Edit table number"). Omitted -> no edit affordance shown. Hidden while dragging (editMode) so it doesn't fight the drag gesture. */
+  /** Admin-only shortcut to /ajustes/table-assignments for a table's order (see Todo.MD "Edit table number"). Omitted -> no edit affordance shown. Hidden while dragging (editMode) so it doesn't fight the drag gesture. */
   onEditTable?: (order: Order) => void;
   onDeliveryClick: () => void;
   onTakeawayClick: () => void;

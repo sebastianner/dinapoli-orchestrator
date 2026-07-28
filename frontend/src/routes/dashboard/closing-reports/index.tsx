@@ -6,8 +6,9 @@ import { useSessionStore } from '@/store/useSessionStore';
 
 export const Route = createFileRoute('/dashboard/closing-reports/')({
   beforeLoad: () => {
-    // Closing reports expose the whole day's sales breakdown - reviewing
-    // them is admin-only (see routes/endOfDay.ts).
+    // /dashboard itself is open to every employee (see route.tsx) - closing
+    // reports expose the whole day's sales breakdown, so this one page keeps
+    // its own admin-only check (see routes/endOfDay.ts).
     if (useSessionStore.getState().employee?.role !== 'admin') {
       throw redirect({ to: '/dashboard/order-history' });
     }

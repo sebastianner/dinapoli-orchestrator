@@ -34,7 +34,7 @@ export function ActiveOrdersTab() {
     return () => document.removeEventListener('pointerdown', onPointerDown);
   }, [open]);
 
-  if (pathname.startsWith('/dashboard')) return null;
+  if (pathname.startsWith('/dashboard') || pathname.startsWith('/ajustes')) return null;
 
   const orders = activeOrders.filter((o) => o.orderType !== 'dine_in');
   // Same collision check as ToastViewport: shift clear of the Order Overview

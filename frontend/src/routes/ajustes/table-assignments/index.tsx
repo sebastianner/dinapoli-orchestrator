@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { createFileRoute, redirect } from '@tanstack/react-router';
+import { createFileRoute } from '@tanstack/react-router';
 import classNames from 'classnames';
 import { Pencil } from 'lucide-react';
 import { useOrdersByFilter, useTables } from '@/lib/queries';
-import { useSessionStore } from '@/store/useSessionStore';
 import { formatCOP } from '@/lib/format';
 import { formatTime } from '@/lib/date';
 import { TableNumberEditModal } from '@/components/order/TableNumberEditModal';
@@ -15,17 +14,11 @@ interface TableAssignmentsSearch {
   orderId?: number;
 }
 
-export const Route = createFileRoute('/dashboard/table-assignments/')({
+export const Route = createFileRoute('/ajustes/table-assignments/')({
   validateSearch: (search: Record<string, unknown>): TableAssignmentsSearch => ({
     orderId: typeof search.orderId === 'string' || typeof search.orderId === 'number' ? Number(search.orderId) : undefined,
   }),
-  beforeLoad: () => {
-    // Reassigning a table is the same footing as every other operational-config
-    // page here (promos, locations) - admin only.
-    if (useSessionStore.getState().employee?.role !== 'admin') {
-      throw redirect({ to: '/dashboard/order-history' });
-    }
-  },
+  // Admin-only - enforced by the parent /ajustes layout's beforeLoad.
   component: TableAssignmentsPage,
 });
 

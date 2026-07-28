@@ -1,25 +1,18 @@
 import { useState } from 'react';
-import { createFileRoute, redirect } from '@tanstack/react-router';
+import { createFileRoute } from '@tanstack/react-router';
 import { mutate } from 'swr';
 import { Pencil, Plus, Trash2 } from 'lucide-react';
 import classNames from 'classnames';
 import { useCities, useNeighborhoods } from '@/lib/queries';
 import { deleteCity, deleteNeighborhood } from '@/lib/api';
-import { useSessionStore } from '@/store/useSessionStore';
 import { useToastStore } from '@/store/useToastStore';
 import { formatCOP } from '@/lib/format';
 import { CityModal } from '@/components/location/CityModal';
 import { NeighborhoodModal } from '@/components/location/NeighborhoodModal';
 import type { City, Neighborhood } from '@/types/api';
 
-export const Route = createFileRoute('/dashboard/locations/')({
-  beforeLoad: () => {
-    // Delivery zones/fees are operational config, same footing as cash-flow
-    // settings (see routes/locations.ts) - admin only.
-    if (useSessionStore.getState().employee?.role !== 'admin') {
-      throw redirect({ to: '/dashboard/order-history' });
-    }
-  },
+export const Route = createFileRoute('/ajustes/locations/')({
+  // Admin-only - enforced by the parent /ajustes layout's beforeLoad.
   component: LocationsAdminPage,
 });
 

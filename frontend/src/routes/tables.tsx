@@ -66,10 +66,10 @@ function TablesPage() {
     navigate({ to: '/menu' });
   };
 
-  // Shortcut to /dashboard/table-assignments for admins (see Todo.MD "Edit table
+  // Shortcut to /ajustes/table-assignments for admins (see Todo.MD "Edit table
   // number") - opens straight to that order's edit modal instead of the full list.
   const handleEditTable = (order: Order) => {
-    navigate({ to: '/dashboard/table-assignments', search: { orderId: order.id } });
+    navigate({ to: '/ajustes/table-assignments', search: { orderId: order.id } });
   };
 
   const handleCustomerSubmit = (
