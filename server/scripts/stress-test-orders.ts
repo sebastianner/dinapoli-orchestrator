@@ -50,6 +50,20 @@ interface Pool {
     products: { id: string; sizes: string[]; options: string[]; requiresPizzaFlavor: boolean }[];
   }[];
   employeeIds: number[];
+  /** takeaway orders just need a customerId - see randomOrder. */
+  takeawayCustomerIds: number[];
+  /** delivery orders additionally need one of that customer's own addresses. */
+  deliveryCustomers: { customerId: number; addressId: number }[];
+}
+
+async function createTestCustomer(name: string): Promise<number> {
+  const res = await fetch(`${HTTP_BASE}/api/customers`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, phone: randPhone() }),
+  });
+  if (!res.ok) throw new Error(`POST /api/customers failed: ${res.status}`);
+  return ((await res.json()) as { id: number }).id;
 }
 
 async function loadPool(): Promise<Pool> {
@@ -82,12 +96,46 @@ async function loadPool(): Promise<Pool> {
     }
   }
 
-  let employeeIds: number[] = [];
+  // Orders now require a real employeeId (see orderService.validateOrderRequest)
+  // - fail fast if none exist rather than sending orders that'll all 400.
+  const empRes = await fetch(`${HTTP_BASE}/api/employees/active`);
+  const employeeIds: number[] = empRes.ok ? (await empRes.json()).map((e: { id: number }) => e.id) : [];
+  if (employeeIds.length === 0) {
+    throw new Error('No active employees found - create one first (e.g. npm run admin:create -- "<name>" "<password>").');
+  }
+
+  // takeaway/delivery orders now reference a real customerId (see
+  // orderService.validateOrderRequest) instead of an inline {name,phone,
+  // address} - create a handful of test customers/addresses up front rather
+  // than one per order, same "build a reusable pool" spirit as pizzaFlavors/
+  // productCategories above.
+  const takeawayCustomerIds = await Promise.all(FIRST_NAMES.slice(0, 5).map((name) => createTestCustomer(name)));
+
+  const deliveryCustomers: Pool["deliveryCustomers"] = [];
+  let neighborhoodId: number | null = null;
   try {
-    const empRes = await fetch(`${HTTP_BASE}/api/employees/active`);
-    if (empRes.ok) employeeIds = (await empRes.json()).map((e: { id: number }) => e.id);
+    const citiesRes = await fetch(`${HTTP_BASE}/api/locations/cities`);
+    const cities = citiesRes.ok ? ((await citiesRes.json()) as { id: number }[]) : [];
+    if (cities.length > 0) {
+      const nRes = await fetch(`${HTTP_BASE}/api/locations/cities/${cities[0].id}/neighborhoods`);
+      const neighborhoods = nRes.ok ? ((await nRes.json()) as { id: number }[]) : [];
+      neighborhoodId = neighborhoods[0]?.id ?? null;
+    }
   } catch {
-    // employees are optional on an order - fine to run without any
+    // fall through with neighborhoodId still null
+  }
+  if (neighborhoodId != null) {
+    for (const name of FIRST_NAMES.slice(5, 10)) {
+      const customerId = await createTestCustomer(name);
+      const addrRes = await fetch(`${HTTP_BASE}/api/customers/${customerId}/addresses`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ streetAddress: pick(STREETS), propertyType: "HOUSE", neighborhoodId }),
+      });
+      if (!addrRes.ok) throw new Error(`POST /api/customers/${customerId}/addresses failed: ${addrRes.status}`);
+      const address = (await addrRes.json()) as { id: number };
+      deliveryCustomers.push({ customerId, addressId: address.id });
+    }
   }
 
   return {
@@ -95,6 +143,8 @@ async function loadPool(): Promise<Pool> {
     pizzaFlavors: [...pizzaFlavors],
     productCategories,
     employeeIds,
+    takeawayCustomerIds,
+    deliveryCustomers,
   };
 }
 
@@ -139,12 +189,18 @@ function randomOrder(pool: Pool): OrderRequest {
   const base: OrderRequest = {
     orderType,
     items,
-    employeeId: pool.employeeIds.length > 0 && Math.random() < 0.5 ? pick(pool.employeeIds) : undefined,
+    employeeId: pick(pool.employeeIds),
   };
 
   if (orderType === "dine_in") return { ...base, tableNumber: randInt(1, 9) };
-  if (orderType === "takeaway") return { ...base, customer: { name: pick(FIRST_NAMES) } };
-  return { ...base, customer: { name: pick(FIRST_NAMES), phone: randPhone(), address: pick(STREETS) } };
+  if (orderType === "takeaway") return { ...base, customerId: pick(pool.takeawayCustomerIds) };
+  if (pool.deliveryCustomers.length === 0) {
+    // No neighborhoods seeded (e.g. a fresh DB before db:seed ran) - fall
+    // back to dine_in rather than sending an invalid delivery order.
+    return { ...base, orderType: "dine_in", tableNumber: randInt(1, 9) };
+  }
+  const delivery = pick(pool.deliveryCustomers);
+  return { ...base, customerId: delivery.customerId, customerAddressId: delivery.addressId };
 }
 
 // ---------------------------------------------------------------------------

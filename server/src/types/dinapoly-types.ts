@@ -78,6 +78,8 @@ export interface ProductCategory {
 export interface Product {
   id: string;
   name: string;
+  /** False for a sold-out product - still returned (not filtered out) so it can render as a disabled card instead of just disappearing; the server still rejects ordering it either way (see orderService.resolveProductItem). */
+  isAvailable: boolean;
   /** Absent when the product is priced per size (e.g. calzone). */
   price?: number;
   /** Present when the product comes in sizes with their own price (calzone). */
@@ -86,6 +88,11 @@ export interface Product {
   options?: ProductOption[];
   /** True when the product takes a pizza flavor (gratinados, calzones). */
   pizzaFlavor?: boolean;
+}
+
+/** A Product plus which category it lives in - menuService.searchProducts results span every category, unlike ProductCategory.products which are already grouped. */
+export interface ProductSearchResult extends Product {
+  categoryId: ProductCategoryId;
 }
 
 export interface ProductOption {
@@ -97,6 +104,60 @@ export interface ProductSize {
   id: string;
   name: string;
   price: number;
+}
+
+/**
+ * The full row behind a menu Product, for the admin settings dashboard -
+ * unlike Product (customer/staff-facing, only ever the currently-available
+ * subset, keyed by `key`), this carries the numeric `id` updates/deletes
+ * target, `isAvailable` regardless of value, and `categoryId` since admin
+ * listings aren't pre-grouped like getMenu's response.
+ */
+export interface AdminProduct {
+  id: number;
+  categoryId: ProductCategoryId;
+  key: string;
+  name: string;
+  description: string | null;
+  /** Null when priced per size (e.g. calzone) - see `sizes`. */
+  price: number | null;
+  isAvailable: boolean;
+  sizes: ProductSize[];
+  options: ProductOption[];
+  pizzaFlavor: boolean;
+}
+
+// ============================================================
+// PIZZA ADMIN (editing groups/sizes/flavors from the menu settings dashboard)
+// ============================================================
+
+export interface AdminPizzaGroupSize {
+  id: PizzaSizeId;
+  name: string;
+  slices: number;
+  maxFlavors: number;
+  /** Null for a size not priced flat in this group (e.g. 'slice', priced via portion splitting instead). */
+  price: number | null;
+}
+
+export interface AdminPizzaGroup {
+  id: PizzaGroupId;
+  name: string;
+  sizes: AdminPizzaGroupSize[];
+}
+
+/** A flavor can belong to more than one group (pizza_group_flavors is many-to-many) - groupIds is which category(ies) it's offered under. */
+export interface AdminPizzaFlavor {
+  id: number;
+  key: string;
+  name: string;
+  description: string | null;
+  groupIds: PizzaGroupId[];
+}
+
+export interface PizzaAdminData {
+  groups: AdminPizzaGroup[];
+  flavors: AdminPizzaFlavor[];
 }
 
 // ============================================================
@@ -120,32 +181,94 @@ export interface Employee {
 }
 
 // ============================================================
+// CUSTOMERS
+// A customer is created/looked up via the /api/customers endpoints (open,
+// no auth - see routes/customers.ts) before placing an order; the order
+// itself only ever carries a customerId reference, same as employeeId.
+// Only deleting a customer outright is admin-gated.
+// ============================================================
+
+export interface Customer {
+  id: number;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  /** Every saved address for this customer, newest first. */
+  addresses: CustomerAddress[];
+}
+
+export type PropertyType = "HOUSE" | "APARTMENT" | "OFFICE" | "BUILDING" | "OTHER";
+
+export interface CustomerAddress {
+  id: number;
+  customerId: number;
+  streetAddress: string;
+  /** Free-text second line (e.g. "casa 5, interior 2"), independent of propertyType. */
+  addressLine2: string | null;
+  propertyType: PropertyType;
+  neighborhoodId: number;
+  neighborhoodName: string;
+  cityId: number;
+  cityName: string;
+  /** Integer COP. The neighborhood's delivery_fee, surfaced here so the frontend doesn't need a second lookup to default a delivery order's fee. */
+  deliveryFee: number;
+  apartmentNumber: string | null;
+  tower: string | null;
+  buildingName: string | null;
+  reference: string | null;
+  /** Nullable - no maps/geocoding integration yet, reserved for one later. */
+  latitude: number | null;
+  longitude: number | null;
+  googlePlaceId: string | null;
+  formattedAddress: string | null;
+}
+
+export interface City {
+  id: number;
+  name: string;
+  department: string | null;
+  country: string;
+}
+
+export interface Neighborhood {
+  id: number;
+  name: string;
+  cityId: number;
+  /** Integer COP. Seeds a new delivery order's deliveryFee unless the client explicitly overrides it - see orderService.createOrder. */
+  deliveryFee: number;
+}
+
+// ============================================================
 // ORDER REQUEST (client -> server payload)
 // Client sends references and quantities only. Prices are
 // always resolved server-side from the menu.
 // ============================================================
 
-/** 'duo': 2 products (personal pizza/lasagna/pasta/gratin) for a flat $37,000. 'pizza_xl': XL pizza + free soda + free bread for $80,000. See resolvePromoItems. */
+/** 'duo': 2 products (personal pizza/lasagna/pasta/gratin) for a flat price. 'pizza_xl': XL pizza + free soda + free bread for a flat price. Prices are admin-editable (see PromoSettings) - see resolvePromoItems for the composition rules. */
 export type PromoType = "duo" | "pizza_xl";
+
+/** Admin-editable flat pricing for a promo (see routes/promos.ts) - orderService.applyPromoPricing reads these live at order-creation time. */
+export interface PromoSettings {
+  promoType: PromoType;
+  price: number;
+  /** COP. 'pizza_xl' only - the extra charge for choosing Coca-Cola/Quatro as the promo's soda. Always 0 for 'duo'. */
+  sodaSurcharge: number;
+}
 
 export interface OrderRequest {
   orderType: OrderType;
-  /** Optional. When present, must be an active employee's id. */
-  employeeId?: number;
+  /** Required - must be an active employee's id. Every order must be attributable to whoever placed it (see validateOrderRequest). */
+  employeeId: number;
   /** Required when orderType = 'dine_in'. 1-9. */
   tableNumber?: number;
-  /** Required for 'takeaway' (name) and 'delivery' (name, phone, address). */
-  customer?: CustomerInfo;
+  /** Required for 'takeaway' and 'delivery'; optional for 'dine_in' - customers can be attached to any order type. */
+  customerId?: number;
+  /** Required for 'delivery' only; must be one of customerId's own addresses. */
+  customerAddressId?: number;
   notes?: string;
   /** Optional. When set, `items` must exactly match that promo's required composition - see resolvePromoItems. */
   promoType?: PromoType;
   items: OrderItemRequest[];
-}
-
-export interface CustomerInfo {
-  name: string;
-  phone?: string;
-  address?: string;
 }
 
 export type OrderItemRequest = PizzaItemRequest | ProductItemRequest;
@@ -198,8 +321,19 @@ export interface Order {
   employeeId: number | null;
   employeeName: string | null;
   tableNumber: number | null;
+  /** The customer attached to the order, if any. */
+  customerId: number | null;
+  /** The delivery address used, if any (delivery orders only). */
+  customerAddressId: number | null;
+  /**
+   * Derived via JOIN from customers/customer_addresses (getOrderById) -
+   * these used to be plain columns on `orders` itself; kept under the same
+   * field names so printerService/billingService (which only ever read the
+   * resolved Order object, never the raw row) didn't need to change.
+   */
   customerName: string | null;
   phone: string | null;
+  /** Formatted delivery address (street + building/tower/apt + neighborhood + city), delivery orders only. */
   address: string | null;
   /**
    * Integer COP. Computed server-side, sum of items only - excludes
@@ -368,6 +502,13 @@ export interface ClosingReport {
   tips: number;
   /** COP. Total discounts given across all payment methods (not subtracted from totalSales - see OrderPayment.grossAmount). */
   discounts: number;
+  /** Total quantity of order_items across every COMPLETED order this business day (a pizza with quantity 2 counts as 2). */
+  itemsSold: number;
+  /** Distinct customers across today's COMPLETED orders - the same customer ordering twice still counts once. */
+  customersServed: number;
+  deliveryOrderCount: number;
+  dineInOrderCount: number;
+  takeawayOrderCount: number;
   /** COP. Total cash_expenses recorded against this business day. */
   totalExpenses: number;
   createdAt: string;

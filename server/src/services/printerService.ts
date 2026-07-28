@@ -234,16 +234,35 @@ const PAYMENT_METHOD_ES: Record<PaymentMethod, string> = {
   transfer: "Transferencia",
 };
 const PROMO_LABEL_ES: Record<NonNullable<Order["promoType"]>, string> = {
-  duo: "PROMO DUO ($37.000)",
-  pizza_xl: "PROMO PIZZA XL ($80.000)",
+  duo: "PROMO DUO",
+  pizza_xl: "PROMO PIZZA XL",
 };
 
 export function describeOrderType(orderType: Order["orderType"]): string {
   return ORDER_TYPE_ES[orderType];
 }
 
-export function describePromoType(promoType: NonNullable<Order["promoType"]>): string {
-  return PROMO_LABEL_ES[promoType];
+/**
+ * The flat promo price actually charged for THIS order, derived from its
+ * own item snapshot rather than the currently-configured price (which may
+ * have changed since - see promoSettingsService) - so a reprinted/
+ * historical ticket always matches what was actually charged at the time.
+ */
+function promoBasePrice(order: Order): number {
+  if (order.promoType === "duo") {
+    // One item carries the full price, the other is 0 - whichever is larger.
+    return Math.max(...order.items.map((item) => item.unitPrice));
+  }
+  // pizza_xl: the pizza item carries the base price; the soda's own
+  // unitPrice is just its surcharge (0 or the configured extra), not part
+  // of this label.
+  const pizzaItem = order.items.find((item) => item.pizzaRef != null);
+  return pizzaItem?.unitPrice ?? 0;
+}
+
+export function describePromoType(order: Order): string {
+  if (!order.promoType) return "";
+  return `${PROMO_LABEL_ES[order.promoType]} (${formatMoney(promoBasePrice(order))})`;
 }
 
 export function describePaymentMethod(method: PaymentMethod): string {
@@ -362,7 +381,8 @@ export function renderKitchenTicket(order: Order): string {
   lines.push(centerText("COMANDA", width));
   lines.push(`Orden #${order.id}`);
   lines.push(`${describeOrderType(order.orderType)}`);
-  if (order.promoType) lines.push(centerText(describePromoType(order.promoType), width));
+  if (order.promoType)
+    lines.push(centerText(describePromoType(order), width));
   if (order.tableNumber) lines.push(`Mesa: ${order.tableNumber}`);
   if (order.customerName) pushLabeled("Cliente", order.customerName);
   if (order.phone) pushLabeled("Tel", order.phone);
@@ -393,6 +413,7 @@ const KITCHEN_TICKET_COPIES = 2;
 export function printKitchenTicket(order: Order): void {
   const text = renderKitchenTicket(order);
   savePrintJob(order.id, "kitchen_ticket", text);
+  // Todo: Uncomment line below to enable printing of kitchen tickets. Currently disabled for testing purposes.
   // printText(order.id, 'kitchen_ticket', text, KITCHEN_TICKET_COPIES);
 }
 

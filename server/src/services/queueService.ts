@@ -4,6 +4,7 @@ import {
   printKitchenTicket,
   printKitchenTicketAddendum,
 } from "./printerService.js";
+import { broadcastOrderUpdate } from "../ws/broadcast.js";
 import type { OrderStatus } from "../types/dinapoly-types.js";
 
 const POLL_INTERVAL_MS = 2000;
@@ -37,6 +38,7 @@ let intervalHandle: ReturnType<typeof setInterval> | null = null;
 
 function processOrder(id: number): void {
   markPrinting.run(id);
+  broadcastOrderUpdate(id);
   const order = getOrderById(id);
   const newItems = order.items.filter((item) => item.printedAt == null);
   // If some items already have printed_at set, the original kitchen ticket
@@ -53,6 +55,7 @@ function processOrder(id: number): void {
     }
     markItemsPrinted.run(id);
     markActive.run(id);
+    broadcastOrderUpdate(id);
   } catch (err) {
     // Leave status as PRINTING; the next tick (or the next boot, after a
     // blackout) will pick it up and try again.

@@ -20,6 +20,53 @@ function seedCashRegisterSettings(): void {
   db.prepare('INSERT OR IGNORE INTO cash_register_settings (id, default_opening_cash) VALUES (1, 0)').run();
 }
 
+// Starting data only - delivery_fee is a placeholder (0) for staff to fill
+// in via the admin locations page (dashboard/locations), and more
+// cities/neighborhoods can be added the same way. Cali is the only city
+// seeded, which also makes it the default in the delivery address form
+// (CustomerAddressForm defaults to cities[0]).
+const CALI_NEIGHBORHOODS = [
+  // Norte / centro
+  'Granada',
+  'El Peñón',
+  'Menga',
+  'Chipichape',
+  'La Flora',
+  'Normandía',
+  // Sur, cerca a Valle del Lili
+  'Valle del Lili',
+  'Ciudad Jardín',
+  'Pance',
+  'El Ingenio',
+  'Cañasgordas',
+  'La Buitrera',
+  // Estrato medio
+  'Tequendama',
+  'San Nicolás',
+  'Champagnat',
+  'Santa Mónica',
+  'Guadalupe',
+  'Departamental',
+  // Estrato alto
+  'San Fernando',
+];
+
+function seedCitiesAndNeighborhoods(): void {
+  const insertCity = db.prepare<[string, string, string]>(
+    'INSERT OR IGNORE INTO cities (name, department, country) VALUES (?, ?, ?)'
+  );
+  const getCity = db.prepare<[string], { id: number }>('SELECT id FROM cities WHERE name = ?');
+  const insertNeighborhood = db.prepare<[string, number, number]>(
+    'INSERT OR IGNORE INTO neighborhoods (name, city_id, delivery_fee) VALUES (?, ?, ?)'
+  );
+
+  insertCity.run('Cali', 'Valle del Cauca', 'Colombia');
+  const cityId = getCity.get('Cali')!.id;
+  for (const name of CALI_NEIGHBORHOODS) {
+    insertNeighborhood.run(name, cityId, 0);
+  }
+}
+
 function seedPizzas(pizzaCategory: PizzaCategory): void {
   const insertGroup = db.prepare<[string, string]>('INSERT OR IGNORE INTO pizza_groups (key, name) VALUES (?, ?)');
   const getGroup = db.prepare<[string], { id: number }>('SELECT id FROM pizza_groups WHERE key = ?');
@@ -108,4 +155,5 @@ function seedMenu(): void {
 seedRestaurantTables();
 seedCashRegisterSettings();
 seedMenu();
-console.log('Database seeded: restaurant tables, cash register settings, and menu.');
+seedCitiesAndNeighborhoods();
+console.log('Database seeded: restaurant tables, cash register settings, menu, and cities/neighborhoods.');

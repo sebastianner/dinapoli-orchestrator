@@ -76,13 +76,22 @@ function OrderHistoryContent({ today }: { today: string }) {
     [closingReports, selectedDate],
   );
 
+  // Any employee can generate the closing report now, as long as every one
+  // of today's orders is already COMPLETED - the server enforces this too
+  // (see endOfDayService.closeDay), this is just the matching UI gate.
+  const hasOpenOrders = ordersToday.some((o) => o.status !== 'COMPLETED');
+
   const handleGenerateReport = async () => {
-    if (!isAdmin) return;
     setGenerating(true);
     try {
       const report = await closeDay();
       pushToast('Cierre generado');
-      navigate({ to: '/dashboard/closing-reports/$id', params: { id: String(report.id) } });
+      // Reviewing a report is still admin-only (see routes/endOfDay.ts) -
+      // don't send a non-admin to a detail page that'll just bounce them
+      // back out.
+      if (isAdmin) {
+        navigate({ to: '/dashboard/closing-reports/$id', params: { id: String(report.id) } });
+      }
     } catch (err) {
       pushToast(err instanceof Error ? err.message : 'No se pudo generar el cierre', 'error');
     } finally {
@@ -154,8 +163,14 @@ function OrderHistoryContent({ today }: { today: string }) {
               <button
                 type="button"
                 onClick={handleGenerateReport}
-                disabled={generating || ordersToday.length === 0 || !isAdmin}
-                title={!isAdmin ? 'Solo los administradores pueden generar el cierre del día' : ordersToday.length === 0 ? 'No hay órdenes hoy todavía' : undefined}
+                disabled={generating || ordersToday.length === 0 || hasOpenOrders}
+                title={
+                  ordersToday.length === 0
+                    ? 'No hay órdenes hoy todavía'
+                    : hasOpenOrders
+                      ? 'Todas las órdenes de hoy deben estar completadas antes de generar el cierre'
+                      : undefined
+                }
                 className="rounded-full bg-success px-4 py-2 text-sm font-semibold text-white transition-opacity duration-fast hover:opacity-90 disabled:opacity-60"
               >
                 {generating ? 'Generando...' : 'Generar cierre del día'}

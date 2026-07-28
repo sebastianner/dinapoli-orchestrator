@@ -2,6 +2,7 @@ import type { Server as HttpServer } from 'node:http';
 import { WebSocketServer } from 'ws';
 import { createOrder } from '../services/orderService.js';
 import { notifyPrintQueue } from '../services/queueService.js';
+import { registerClient } from './broadcast.js';
 
 const WS_PATH = '/ws/orders';
 
@@ -9,6 +10,7 @@ export function attachOrderSocket(httpServer: HttpServer): WebSocketServer {
   const wss = new WebSocketServer({ server: httpServer, path: WS_PATH });
 
   wss.on('connection', (socket) => {
+    registerClient(socket);
     socket.send(JSON.stringify({ type: 'connected', message: 'Send an OrderRequest JSON payload to place an order.' }));
 
     socket.on('message', (raw) => {
@@ -24,6 +26,8 @@ export function attachOrderSocket(httpServer: HttpServer): WebSocketServer {
         const order = createOrder(orderRequest);
         notifyPrintQueue();
         socket.send(JSON.stringify({ type: 'order_created', order }));
+        // createOrder itself broadcasts 'order_updated' to every connected
+        // client (see orderService.ts) - not just this socket's reply above.
       } catch (err) {
         socket.send(JSON.stringify({ type: 'error', message: (err as Error).message }));
       }

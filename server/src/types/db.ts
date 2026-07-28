@@ -100,15 +100,56 @@ export interface OrderRow {
   status: OrderStatusDb;
   employee_id: number | null;
   table_number: number | null;
-  customer_name: string | null;
-  phone: string | null;
-  address: string | null;
+  customer_id: number | null;
+  customer_address_id: number | null;
   notes: string | null;
   promo_type: string | null;
   total: number;
   created_at: string;
   completed_at: string | null;
   print_attempts: number;
+}
+
+export interface CityRow {
+  id: number;
+  name: string;
+  department: string | null;
+  country: string;
+}
+
+export interface NeighborhoodRow {
+  id: number;
+  name: string;
+  city_id: number;
+  delivery_fee: number;
+}
+
+export interface CustomerRow {
+  id: number;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  created_at: string;
+}
+
+export type PropertyTypeDb = 'HOUSE' | 'APARTMENT' | 'OFFICE' | 'BUILDING' | 'OTHER';
+
+export interface CustomerAddressRow {
+  id: number;
+  customer_id: number;
+  street_address: string;
+  address_line_2: string | null;
+  property_type: PropertyTypeDb;
+  neighborhood_id: number;
+  apartment_number: string | null;
+  tower: string | null;
+  building_name: string | null;
+  reference: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  google_place_id: string | null;
+  formatted_address: string | null;
+  created_at: string;
 }
 
 export interface OrderPaymentRow {
@@ -156,6 +197,12 @@ export interface CashRegisterSettingsRow {
   default_opening_cash: number;
 }
 
+export interface PromoSettingsRow {
+  promo_type: 'duo' | 'pizza_xl';
+  price: number;
+  soda_surcharge: number;
+}
+
 export interface CashFlowRow {
   id: number;
   date: string;
@@ -184,6 +231,11 @@ export interface ClosingReportRow {
   total_sales: number;
   tips: number;
   discounts: number;
+  items_sold: number;
+  customers_served: number;
+  delivery_order_count: number;
+  dine_in_order_count: number;
+  takeaway_order_count: number;
   total_expenses: number;
   content: string;
   created_at: string;

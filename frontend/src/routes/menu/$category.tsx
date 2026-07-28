@@ -3,7 +3,7 @@ import { useMenu } from '@/lib/queries';
 import { allPizzaFlavors, getPizzaCategory, getProductCategory } from '@/lib/pricing';
 import { ProductCard } from '@/components/menu/ProductCard';
 import { useOrderStore } from '@/store/useOrderStore';
-import { DUO_EXCLUDED_FLAVORS, PROMO_ALLOWED_CATEGORIES } from '@/lib/promos';
+import { DUO_EXCLUDED_FLAVORS, PROMO_ALLOWED_CATEGORIES, eligibleProductsForPromo } from '@/lib/promos';
 import type { ProductCategoryId } from '@/types/api';
 
 export const Route = createFileRoute('/menu/$category')({
@@ -14,14 +14,6 @@ export const Route = createFileRoute('/menu/$category')({
   },
   component: MenuCategoryPage,
 });
-
-/** Duo excludes specific products within an otherwise-eligible category; pizza_xl narrows drinks down to just the one soda. */
-function eligibleProducts<T extends { id: string }>(promoType: 'duo' | 'pizza_xl' | undefined, categoryId: ProductCategoryId, products: T[]): T[] {
-  if (promoType === 'duo' && categoryId === 'lasagnas') return products.filter((p) => p.id !== 'mamma_mia');
-  if (promoType === 'duo' && categoryId === 'pastas') return products.filter((p) => p.id !== 'seafood');
-  if (promoType === 'pizza_xl' && categoryId === 'drinks') return products.filter((p) => p.id === 'soft_drink');
-  return products;
-}
 
 function MenuCategoryPage() {
   const { category } = Route.useParams();
@@ -39,7 +31,7 @@ function MenuCategoryPage() {
 
   const pizzaCategory = getPizzaCategory(menu);
   const flavors = pizzaCategory ? allPizzaFlavors(pizzaCategory) : [];
-  const products = eligibleProducts(promoDraft?.type, productCategory.id, productCategory.products);
+  const products = eligibleProductsForPromo(promoDraft?.type, productCategory.id, productCategory.products);
   const excludedFlavorIds = promoDraft?.type === 'duo' && productCategory.id === 'gratinados' ? DUO_EXCLUDED_FLAVORS : undefined;
 
   return (

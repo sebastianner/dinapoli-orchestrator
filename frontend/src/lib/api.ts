@@ -2,15 +2,28 @@ import type {
   CashExpense,
   CashFlowDay,
   CashRegisterSettings,
+  City,
   ClosingReport,
+  Customer,
+  CustomerAddress,
   Employee,
   EmployeeRole,
   Menu,
+  Neighborhood,
   Order,
   OrderStatus,
   OrderType,
   PaymentSplitRequest,
+  PromoSettings,
+  PromoType,
+  PropertyType,
+  ProductSearchResult,
+  AdminProduct,
   RestaurantTableSummary,
+  PizzaAdminData,
+  AdminPizzaGroup,
+  AdminPizzaFlavor,
+  PizzaGroupId,
 } from '@/types/api';
 
 class ApiError extends Error {
@@ -94,6 +107,37 @@ const del = <T>(path: string) => request<T>(path, { method: 'DELETE' });
 
 export const fetchMenu = () => get<Menu>('/menu');
 
+export const searchProducts = (query: string) => get<ProductSearchResult[]>(`/menu/search?q=${encodeURIComponent(query)}`);
+
+// ---------- Menu settings (admin) ----------
+
+export const fetchAdminProducts = () => get<AdminProduct[]>('/products');
+export interface AdminProductInput {
+  categoryId?: string;
+  name?: string;
+  description?: string | null;
+  price?: number;
+  isAvailable?: boolean;
+}
+export const createAdminProduct = (input: AdminProductInput) => post<AdminProduct>('/products', input);
+export const updateAdminProduct = (id: number, input: AdminProductInput) => put<AdminProduct>(`/products/${id}`, input);
+export const deleteAdminProduct = (id: number) => del<{ status: string; id: number }>(`/products/${id}`);
+
+// ---------- Pizza settings (admin) ----------
+
+export const fetchPizzaAdminData = () => get<PizzaAdminData>('/pizza-admin');
+export const renamePizzaGroup = (groupId: PizzaGroupId, name: string) => put<AdminPizzaGroup>(`/pizza-admin/groups/${groupId}`, { name });
+export const updatePizzaGroupSizePrice = (groupId: PizzaGroupId, sizeId: string, price: number | null) =>
+  put<AdminPizzaGroup>(`/pizza-admin/groups/${groupId}/sizes/${sizeId}`, { price });
+export interface PizzaFlavorInput {
+  name?: string;
+  description?: string | null;
+  groupIds?: PizzaGroupId[];
+}
+export const createPizzaFlavor = (input: Required<Pick<PizzaFlavorInput, 'name' | 'groupIds'>> & PizzaFlavorInput) =>
+  post<AdminPizzaFlavor>('/pizza-admin/flavors', input);
+export const updatePizzaFlavor = (id: number, input: PizzaFlavorInput) => put<AdminPizzaFlavor>(`/pizza-admin/flavors/${id}`, input);
+
 // ---------- Auth ----------
 
 export interface SessionResponse {
@@ -119,9 +163,67 @@ export const activateEmployee = (id: number) => post<Employee>(`/employees/${id}
 export const setEmployeeRole = (id: number, role: EmployeeRole, password?: string) =>
   put<Employee>(`/employees/${id}/role`, { role, password });
 
+// ---------- Customers ----------
+
+/** Fuzzy/typo-tolerant, matches against name and phone. Open, no auth. */
+export const searchCustomers = (query: string) => get<Customer[]>(`/customers/search?q=${encodeURIComponent(query)}`);
+export const fetchCustomer = (id: number) => get<Customer>(`/customers/${id}`);
+export const createCustomer = (name: string, phone?: string, email?: string) => post<Customer>('/customers', { name, phone, email });
+export const updateCustomer = (id: number, name?: string, phone?: string, email?: string) =>
+  put<Customer>(`/customers/${id}`, { name, phone, email });
+/** Admin only - the only customer-management action that is. */
+export const deleteCustomer = (id: number) => del<{ status: string }>(`/customers/${id}`);
+
+export interface CustomerAddressInput {
+  streetAddress: string;
+  addressLine2?: string;
+  propertyType: PropertyType;
+  neighborhoodId: number;
+  apartmentNumber?: string;
+  tower?: string;
+  buildingName?: string;
+  reference?: string;
+}
+
+export const createCustomerAddress = (customerId: number, input: CustomerAddressInput) =>
+  post<CustomerAddress>(`/customers/${customerId}/addresses`, input);
+export const updateCustomerAddress = (customerId: number, addressId: number, input: Partial<CustomerAddressInput>) =>
+  put<CustomerAddress>(`/customers/${customerId}/addresses/${addressId}`, input);
+export const deleteCustomerAddress = (customerId: number, addressId: number) =>
+  del<{ status: string }>(`/customers/${customerId}/addresses/${addressId}`);
+/** Distinct previously-used building/conjunto names for a neighborhood - the autocomplete just grows organically, custom values are always allowed too. */
+export const suggestBuildingNames = (neighborhoodId: number, query: string) =>
+  get<string[]>(`/customers/addresses/buildings?neighborhoodId=${neighborhoodId}&q=${encodeURIComponent(query)}`);
+
+// ---------- Locations (cities/neighborhoods) ----------
+
+export const fetchCities = () => get<City[]>('/locations/cities');
+export const fetchNeighborhoods = (cityId: number) => get<Neighborhood[]>(`/locations/cities/${cityId}/neighborhoods`);
+/** Admin only - operational config, same footing as cash-flow settings. */
+export const createCity = (name: string, department?: string, country?: string) =>
+  post<City>('/locations/cities', { name, department, country });
+export const updateCity = (id: number, name?: string, department?: string, country?: string) =>
+  put<City>(`/locations/cities/${id}`, { name, department, country });
+export const deleteCity = (id: number) => del<{ status: string }>(`/locations/cities/${id}`);
+export const createNeighborhood = (name: string, cityId: number, deliveryFee?: number) =>
+  post<Neighborhood>('/locations/neighborhoods', { name, cityId, deliveryFee });
+export const updateNeighborhood = (id: number, name?: string, deliveryFee?: number) =>
+  put<Neighborhood>(`/locations/neighborhoods/${id}`, { name, deliveryFee });
+export const deleteNeighborhood = (id: number) => del<{ status: string }>(`/locations/neighborhoods/${id}`);
+
+// ---------- Promos ----------
+
+/** Public - every order-placing screen needs current prices, not just admins. */
+export const fetchPromoSettings = () => get<PromoSettings[]>('/promos');
+/** Admin only. `sodaSurcharge` only applies to 'pizza_xl' - omit for 'duo', or omit entirely to leave it unchanged. */
+export const updatePromoSettings = (promoType: PromoType, price: number, sodaSurcharge?: number) =>
+  put<PromoSettings>(`/promos/${promoType}`, { price, sodaSurcharge });
+
 // ---------- Tables ----------
 
 export const fetchTables = () => get<RestaurantTableSummary[]>('/tables');
+export const increaseTableCount = () => post<RestaurantTableSummary[]>('/tables/increase');
+export const decreaseTableCount = () => post<RestaurantTableSummary[]>('/tables/decrease');
 
 // ---------- Orders ----------
 
@@ -166,6 +268,7 @@ export const reprintOrderDocument = (id: number, kind: 'kitchen_ticket' | 'bill'
   post<{ status: string; orderId: number; kind: string }>(`/orders/${id}/reprint`, { kind });
 /** Admin only, irreversible - deletes the order and everything derived from it (items, payments, print jobs). */
 export const deleteOrder = (id: number) => del<{ status: string; orderId: number }>(`/orders/${id}`);
+export const updateOrderTable = (id: number, tableNumber: number) => put<Order>(`/orders/${id}/table`, { tableNumber });
 
 // ---------- Cash flow ----------
 

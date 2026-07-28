@@ -72,6 +72,8 @@ function ClosingReportPage() {
           tooltip="Este valor no incluye propinas ni descuentos - se muestran aparte."
         />
         <StatCard label="Órdenes" value={String(report.orderCount)} />
+        <StatCard label="Artículos vendidos" value={String(report.itemsSold)} />
+        <StatCard label="Clientes atendidos" value={String(report.customersServed)} />
         <StatCard label="Domicilio" value={formatCOP(report.deliverySales)} />
         <StatCard label="Mesa / para llevar" value={formatCOP(report.dineInTakeawaySales)} />
         <StatCard label="Efectivo" value={formatCOP(report.cashSales)} />
@@ -80,6 +82,9 @@ function ClosingReportPage() {
         <StatCard label="Propinas" value={formatCOP(report.tips)} />
         <StatCard label="Descuentos" value={formatCOP(report.discounts)} tone="danger" />
         <StatCard label="Gastos totales" value={formatCOP(report.totalExpenses)} tone="danger" />
+        <StatCard label="Órdenes domicilio" value={String(report.deliveryOrderCount)} />
+        <StatCard label="Órdenes mesa" value={String(report.dineInOrderCount)} />
+        <StatCard label="Órdenes para llevar" value={String(report.takeawayOrderCount)} />
       </div>
 
       <HourlySalesChart orders={orders} />

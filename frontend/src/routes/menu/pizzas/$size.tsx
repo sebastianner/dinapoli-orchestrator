@@ -2,7 +2,7 @@ import { useState } from 'react';
 import classNames from 'classnames';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { MessageSquarePlus, Plus } from 'lucide-react';
-import { useMenu } from '@/lib/queries';
+import { useMenu, usePromoSettings } from '@/lib/queries';
 import {
   allPizzaFlavors,
   computeFlavorPortions,
@@ -46,12 +46,11 @@ function PizzaFlavorPage() {
   const [showComment, setShowComment] = useState(false);
   const [notes, setNotes] = useState('');
 
-  const currentOrderId = useOrderStore((s) => s.currentOrderId);
-  const newOrderInfo = useOrderStore((s) => s.newOrderInfo);
   const addCartItem = useOrderStore((s) => s.addCartItem);
   const promoDraft = useOrderStore((s) => s.promoDraft);
   const addPromoItem = useOrderStore((s) => s.addPromoItem);
   const pushToast = useToastStore((s) => s.push);
+  const { data: promoSettings = [] } = usePromoSettings();
 
   if (isLoading || !menu) return <p className="text-sm text-text-secondary">Cargando...</p>;
 
@@ -67,7 +66,6 @@ function PizzaFlavorPage() {
   // single flavor, regardless of how many the size would normally allow.
   const maxFlavors = isDuoPromo ? 1 : maxFlavorsFor(pizzas, sizeId);
   const price = promoDraft ? 0 : pizzaUnitPrice(pizzas, sizeId, selectedFlavors);
-  const hasOrderContext = currentOrderId != null || newOrderInfo != null;
   const availablePatterns = isDuoPromo ? [] : splitPatternsFor(selectedFlavors.length);
   const portions = computeFlavorPortions(selectedFlavors, pattern, halfFlavorId ?? undefined);
 
@@ -89,10 +87,6 @@ function PizzaFlavorPage() {
   };
 
   const handleAdd = () => {
-    if (!hasOrderContext) {
-      pushToast('Primero elige una mesa, domicilio o para llevar', 'warning');
-      return;
-    }
     if (selectedFlavors.length === 0) {
       pushToast('Elige al menos un sabor', 'warning');
       return;
@@ -119,8 +113,13 @@ function PizzaFlavorPage() {
     };
 
     if (promoDraft) {
-      addPromoItem(item);
-      pushToast(promoProgressText(promoDraft.type, promoDraft.items.length + 1));
+      const settings = promoSettings.find((s) => s.promoType === promoDraft.type);
+      if (!settings) {
+        pushToast('No se pudo cargar el precio de la promoción, intenta de nuevo', 'error');
+        return;
+      }
+      addPromoItem(item, settings);
+      pushToast(promoProgressText(promoDraft.type, promoDraft.items.length + 1, settings));
       navigate({ to: '/menu' });
       return;
     }

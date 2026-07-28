@@ -3,6 +3,12 @@ erDiagram
   EMPLOYEES |o--o{ ORDERS : "placed by"
   EMPLOYEES ||--o{ REFRESH_TOKENS : "authenticates via"
 
+  CITIES ||--o{ NEIGHBORHOODS : contains
+  NEIGHBORHOODS ||--o{ CUSTOMER_ADDRESSES : "delivery zone for"
+  CUSTOMERS ||--o{ CUSTOMER_ADDRESSES : owns
+  CUSTOMERS |o--o{ ORDERS : "placed by (customer)"
+  CUSTOMER_ADDRESSES |o--o{ ORDERS : "delivered to"
+
   CATEGORIES ||--o{ PRODUCTS : contains
   PRODUCTS ||--o{ PRODUCT_SIZES : "priced as"
   PRODUCTS ||--o{ PRODUCT_OPTIONS : "variant of"
@@ -28,7 +34,7 @@ erDiagram
 
   RESTAURANT_TABLES {
     int id PK
-    int number "1 to 9, unique"
+    int number "unique, > 0. numbered 1..N with no gaps - N is the restaurant's current table count, admin-adjustable via tableService.increase/decreaseTableCount, not a fixed 1-9"
     text status "free or busy, derived from open orders"
   }
 
@@ -50,11 +56,61 @@ erDiagram
     text created_at
   }
 
+  CITIES {
+    int id PK
+    text name
+    text department "nullable"
+    text country "default 'Colombia'"
+  }
+
+  NEIGHBORHOODS {
+    int id PK
+    text name
+    int city_id FK
+    int delivery_fee "integer COP. suggests a new delivery order's fee unless explicitly overridden - see orderService.createOrder"
+  }
+
+  %% No auth required to create/update (routes/customers.ts) - staff entering
+  %% a walk-in/calling customer's details, not a public-facing account
+  %% system. Only DELETE is admin-gated. Also backed by an FTS5 virtual table
+  %% (customers_fts, trigram-tokenized over name/phone, kept in sync via
+  %% triggers) powering the order form's fuzzy autocomplete - not modeled
+  %% here since it's a search index mirror, not a domain entity.
+  CUSTOMERS {
+    int id PK
+    text name
+    text phone "nullable"
+    text email "nullable"
+    text created_at
+  }
+
+  CUSTOMER_ADDRESSES {
+    int id PK
+    int customer_id FK
+    text street_address
+    text property_type "HOUSE, APARTMENT, OFFICE, BUILDING, or OTHER - only HOUSE/APARTMENT are exposed in the order form for now"
+    int neighborhood_id FK
+    text apartment_number "nullable"
+    text tower "nullable"
+    text building_name "nullable. free text, autocompleted from prior entries in the same neighborhood - not a managed table"
+    text reference "nullable"
+    real latitude "nullable. no maps/geocoding integration yet, reserved for one later"
+    real longitude "nullable"
+    text google_place_id "nullable"
+    text formatted_address "nullable"
+    text created_at
+  }
+
   CATEGORIES {
     int id PK
     text key "stable id, e.g. appetizers, drinks. not 'pizzas'"
     text name
   }
+  %% Also backed by an FTS5 virtual table (products_fts, trigram-tokenized
+  %% over name/description, kept in sync via triggers) powering
+  %% menuService.searchProducts (/menu/search, the "Todos" tab's search bar)
+  %% - not modeled here since it's a search index mirror, not a domain
+  %% entity. Same setup as CUSTOMERS' customers_fts below.
   PRODUCTS {
     int id PK
     int category_id FK
@@ -114,11 +170,10 @@ erDiagram
     int id PK
     text order_type "dine_in, takeaway, delivery"
     text status "PENDING, PRINTING, ACTIVE, COMPLETED"
-    int employee_id FK "nullable. who placed the order, if recorded"
-    int table_number "nullable. dine_in only, 1 to 9"
-    text customer_name "nullable. takeaway, delivery"
-    text phone "nullable. delivery only"
-    text address "nullable. delivery only"
+    int employee_id FK "nullable in the DB (kept for old rows), but required by validation on every new order - see orderService.validateOrderRequest"
+    int table_number "nullable. dine_in only, > 0 - must be one of RESTAURANT_TABLES.number's current values (tableService.tableExists), no fixed upper bound. Editable after creation by an admin (orderService.updateOrderTable)"
+    int customer_id FK "nullable. required by validation (not the DB) for takeaway/delivery, optional for dine_in"
+    int customer_address_id FK "nullable. required by validation for delivery only, must belong to customer_id"
     text notes "nullable. order-level comments"
     text promo_type "nullable. 'duo' or 'pizza_xl'. set once at creation, never changed - see resolvePromoItems"
     int total "sum of items only, excludes tip and delivery_fee - see grandTotal (API-level, not a column) for total+tip+delivery_fee"
@@ -171,6 +226,11 @@ erDiagram
     int id PK "always 1, single row"
     int default_opening_cash "seeds a new CASH_FLOW period"
   }
+  PROMO_SETTINGS {
+    text promo_type PK "'duo' or 'pizza_xl'"
+    int price "admin-editable, read live by applyPromoPricing at order creation - no caching, no restart needed"
+    int soda_surcharge "pizza_xl only, always 0 and unused for duo"
+  }
   CASH_FLOW {
     int id PK
     text date "YYYY-MM-DD business day. one row per day, auto-opened when stale"
@@ -198,6 +258,11 @@ erDiagram
     int total_sales "delivery_sales + dine_in_takeaway_sales"
     int tips "sum of ORDER_PAYMENTS.tip_amount for the day, not part of total_sales"
     int discounts "sum of ORDER_PAYMENTS.discount for the day, not subtracted from total_sales"
+    int items_sold "sum of ORDER_ITEMS.quantity across the day's completed orders"
+    int customers_served "distinct customer_id count - the same customer ordering twice still counts once"
+    int delivery_order_count
+    int dine_in_order_count
+    int takeaway_order_count
     int total_expenses "sum of CASH_FLOW.expenses for the day"
     text content "rendered receipt text, for reprint"
     text created_at "always a manual staff action, never auto-generated"

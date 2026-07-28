@@ -1,9 +1,10 @@
 import { createFileRoute, Link, Outlet } from '@tanstack/react-router';
 import { AlertTriangle, Sparkles, X } from 'lucide-react';
-import { useMenu } from '@/lib/queries';
+import { useMenu, useOrder, usePromoSettings } from '@/lib/queries';
 import { useOrderStore } from '@/store/useOrderStore';
 import { CategorySidebar } from '@/components/menu/CategorySidebar';
 import { OrderOverview } from '@/components/order/OrderOverview';
+import { OrderContextBar } from '@/components/menu/OrderContextBar';
 import { promoProgressText } from '@/lib/promos';
 
 export const Route = createFileRoute('/menu')({
@@ -17,6 +18,16 @@ function MenuLayout() {
   const promoDraft = useOrderStore((s) => s.promoDraft);
   const cancelPromo = useOrderStore((s) => s.cancelPromo);
   const hasOrderContext = currentOrderId != null || newOrderInfo != null;
+  const { data: promoSettings = [] } = usePromoSettings();
+  const activePromoSettings = promoDraft ? promoSettings.find((s) => s.promoType === promoDraft.type) : undefined;
+
+  // Same source either way (an order already placed vs. a not-yet-submitted
+  // draft) - existingOrder wins once loaded since it's the authoritative one.
+  const { data: existingOrder } = useOrder(currentOrderId);
+  const orderType = existingOrder?.orderType ?? newOrderInfo?.orderType;
+  const tableNumber = existingOrder?.tableNumber ?? newOrderInfo?.tableNumber;
+  const customerName = existingOrder?.customerName ?? newOrderInfo?.customerDisplay?.name;
+  const customerAddress = existingOrder?.address ?? newOrderInfo?.customerDisplay?.address;
 
   return (
     <div className="flex h-full">
@@ -37,10 +48,14 @@ function MenuLayout() {
           </div>
         )}
 
-        {promoDraft && (
+        {orderType && (
+          <OrderContextBar orderType={orderType} tableNumber={tableNumber} customerName={customerName} customerAddress={customerAddress} />
+        )}
+
+        {promoDraft && activePromoSettings && (
           <div className="flex items-center justify-between gap-4 border-b border-brand-400/30 bg-brand-500/10 px-6 py-3">
             <span className="flex items-center gap-2 text-sm font-medium text-brand-700">
-              <Sparkles size={16} /> {promoProgressText(promoDraft.type, promoDraft.items.length)}
+              <Sparkles size={16} /> {promoProgressText(promoDraft.type, promoDraft.items.length, activePromoSettings)}
             </span>
             <button
               type="button"

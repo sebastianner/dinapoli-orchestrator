@@ -7,11 +7,17 @@ export const Route = createFileRoute('/dashboard')({
 
 const tabs = [{ to: '/dashboard/order-history', label: 'Historial de órdenes' }] as const;
 
-// Both admin-only: closing reports expose the day's full sales/tips/discounts
-// breakdown (see routes/endOfDay.ts), employee management is self-explanatory.
+// All admin-only: closing reports expose the day's full sales/tips/discounts
+// breakdown, employee management is self-explanatory, and cities/
+// neighborhoods are operational config (see routes/endOfDay.ts,
+// routes/employees.ts, routes/locations.ts).
 const adminTabs = [
   { to: '/dashboard/closing-reports', label: 'Cierres del día' },
   { to: '/dashboard/employees', label: 'Empleados' },
+  { to: '/dashboard/locations', label: 'Ciudades y barrios' },
+  { to: '/dashboard/promos', label: 'Promociones' },
+  { to: '/dashboard/table-assignments', label: 'Editar mesas' },
+  { to: '/dashboard/menu-settings', label: 'Ajustes de menú' },
 ] as const;
 
 function DashboardLayout() {

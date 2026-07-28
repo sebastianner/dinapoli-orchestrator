@@ -1,26 +1,53 @@
 import { useState } from 'react';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { Bike, ShoppingBag } from 'lucide-react';
+import { Bike, LayoutGrid, Map, ShoppingBag } from 'lucide-react';
+import classNames from 'classnames';
 import { useTables } from '@/lib/queries';
 import { useOrderStore } from '@/store/useOrderStore';
+import { useSessionStore } from '@/store/useSessionStore';
 import { useToastStore } from '@/store/useToastStore';
+import { useMediaQuery } from '@/lib/useMediaQuery';
 import { TableTile } from '@/components/table/TableTile';
+import { TablesFloorPlanView } from '@/components/table/TablesFloorPlanView';
 import { CustomerInfoModal } from '@/components/table/CustomerInfoModal';
-import type { CustomerInfo, RestaurantTableSummary } from '@/types/api';
+import type { CustomerDisplayInfo } from '@/store/useOrderStore';
+import type { Order, RestaurantTableSummary } from '@/types/api';
 
 export const Route = createFileRoute('/tables')({
   component: TablesPage,
 });
+
+type TablesView = 'grid' | 'floorplan';
+const VIEW_STORAGE_KEY = 'dinapoli:tablesView';
+// Dragging a floor plan on a phone-sized screen isn't practical, so the
+// selector only shows - and the floor plan can only be picked - from tablet
+// width up (matches Tailwind's `md` breakpoint).
+const TABLET_UP_QUERY = '(min-width: 768px)';
+
+function initialView(): TablesView {
+  return localStorage.getItem(VIEW_STORAGE_KEY) === 'floorplan' ? 'floorplan' : 'grid';
+}
 
 function TablesPage() {
   const { data: tables = [], isLoading } = useTables();
   const activeOrders = useOrderStore((s) => s.activeOrders);
   const startDraft = useOrderStore((s) => s.startDraft);
   const openExistingOrder = useOrderStore((s) => s.openExistingOrder);
+  const setPendingDeliveryFee = useOrderStore((s) => s.setPendingDeliveryFee);
   const pushToast = useToastStore((s) => s.push);
   const navigate = useNavigate();
+  const isTabletUp = useMediaQuery(TABLET_UP_QUERY);
+  const isAdmin = useSessionStore((s) => s.employee?.role === 'admin');
+
+  const [view, setView] = useState<TablesView>(initialView);
+  const effectiveView: TablesView = isTabletUp ? view : 'grid';
 
   const [customerModalType, setCustomerModalType] = useState<'takeaway' | 'delivery' | null>(null);
+
+  const changeView = (next: TablesView) => {
+    setView(next);
+    localStorage.setItem(VIEW_STORAGE_KEY, next);
+  };
 
   const handleTableClick = (table: RestaurantTableSummary) => {
     if (table.status === 'busy') {
@@ -39,48 +66,114 @@ function TablesPage() {
     navigate({ to: '/menu' });
   };
 
-  const handleCustomerSubmit = (customer: CustomerInfo) => {
+  // Shortcut to /dashboard/table-assignments for admins (see Todo.MD "Edit table
+  // number") - opens straight to that order's edit modal instead of the full list.
+  const handleEditTable = (order: Order) => {
+    navigate({ to: '/dashboard/table-assignments', search: { orderId: order.id } });
+  };
+
+  const handleCustomerSubmit = (
+    customerId: number,
+    customerAddressId: number | undefined,
+    customerDisplay: CustomerDisplayInfo,
+    deliveryFee: number | null,
+  ) => {
     if (!customerModalType) return;
-    startDraft({ orderType: customerModalType, customer });
+    startDraft({ orderType: customerModalType, customerId, customerAddressId, customerDisplay });
+    // startDraft resets pendingDeliveryFee to 0 - apply the neighborhood's fee (already known
+    // client-side, no extra DB round trip) right after, so the "Domicilio" field in the order
+    // overview starts pre-filled instead of making staff type it in every time.
+    if (deliveryFee != null) setPendingDeliveryFee(deliveryFee);
     setCustomerModalType(null);
     navigate({ to: '/menu' });
   };
 
   return (
-    <div className="flex h-full gap-8 p-8">
-      <div className="flex-1">
-        <h1 className="mb-6 text-2xl font-semibold text-text-primary">Mesas</h1>
+    <div className="flex h-full flex-col gap-6 p-8">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold text-text-primary">Mesas</h1>
 
-        {isLoading ? (
-          <p className="text-sm text-text-secondary">Cargando mesas...</p>
-        ) : (
-          <div className="flex flex-wrap gap-5">
-            {tables.map((table) => (
-              <TableTile key={table.number} table={table} onClick={() => handleTableClick(table)} />
-            ))}
+        {isTabletUp && (
+          <div className="flex rounded-xl border border-border bg-surface p-1" role="tablist" aria-label="Vista de mesas">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === 'grid'}
+              onClick={() => changeView('grid')}
+              className={classNames(
+                'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors duration-fast',
+                view === 'grid' ? 'bg-brand-500 text-white' : 'text-text-secondary hover:text-brand-600',
+              )}
+            >
+              <LayoutGrid size={15} /> Cuadrícula
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === 'floorplan'}
+              onClick={() => changeView('floorplan')}
+              className={classNames(
+                'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors duration-fast',
+                view === 'floorplan' ? 'bg-brand-500 text-white' : 'text-text-secondary hover:text-brand-600',
+              )}
+            >
+              <Map size={15} /> Plano
+            </button>
           </div>
         )}
       </div>
 
-      <div className="flex w-48 shrink-0 flex-col gap-4 pt-16">
-        <button
-          type="button"
-          onClick={() => setCustomerModalType('delivery')}
-          className="flex flex-col items-center gap-2 rounded-2xl border-2 border-border bg-surface py-6 text-text-primary shadow-sm transition-transform duration-fast hover:scale-105 hover:border-brand-400 active:scale-95"
-        >
-          <Bike size={28} className="text-brand-600" />
-          <span className="text-sm font-semibold">Domicilio</span>
-        </button>
+      {isLoading ? (
+        <p className="text-sm text-text-secondary">Cargando mesas...</p>
+      ) : effectiveView === 'grid' ? (
+        <div className="flex flex-1 gap-8">
+          <div className="flex-1">
+            <div className="flex flex-wrap gap-5">
+              {tables.map((table) => {
+                const order = table.status === 'busy' ? activeOrders.find((o) => o.tableNumber === table.number) : undefined;
+                return (
+                  <TableTile
+                    key={table.number}
+                    table={table}
+                    order={order}
+                    onClick={() => handleTableClick(table)}
+                    onEditTable={isAdmin && order ? () => handleEditTable(order) : undefined}
+                  />
+                );
+              })}
+            </div>
+          </div>
 
-        <button
-          type="button"
-          onClick={() => setCustomerModalType('takeaway')}
-          className="flex flex-col items-center gap-2 rounded-2xl border-2 border-border bg-surface py-6 text-text-primary shadow-sm transition-transform duration-fast hover:scale-105 hover:border-brand-400 active:scale-95"
-        >
-          <ShoppingBag size={28} className="text-brand-600" />
-          <span className="text-sm font-semibold">Para llevar</span>
-        </button>
-      </div>
+          <div className="flex w-48 shrink-0 flex-col gap-4 pt-2">
+            <button
+              type="button"
+              onClick={() => setCustomerModalType('delivery')}
+              className="flex flex-col items-center gap-2 rounded-2xl border-2 border-border bg-surface py-6 text-text-primary shadow-sm transition-transform duration-fast hover:scale-105 hover:border-brand-400 active:scale-95"
+            >
+              <Bike size={28} className="text-brand-600" />
+              <span className="text-sm font-semibold">Domicilio</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setCustomerModalType('takeaway')}
+              className="flex flex-col items-center gap-2 rounded-2xl border-2 border-border bg-surface py-6 text-text-primary shadow-sm transition-transform duration-fast hover:scale-105 hover:border-brand-400 active:scale-95"
+            >
+              <ShoppingBag size={28} className="text-brand-600" />
+              <span className="text-sm font-semibold">Para llevar</span>
+            </button>
+          </div>
+        </div>
+      ) : (
+        <TablesFloorPlanView
+          tables={tables}
+          activeOrders={activeOrders}
+          onTableClick={handleTableClick}
+          onEditTable={isAdmin ? handleEditTable : undefined}
+          onDeliveryClick={() => setCustomerModalType('delivery')}
+          onTakeawayClick={() => setCustomerModalType('takeaway')}
+        />
+      )}
 
       <CustomerInfoModal
         open={customerModalType != null}

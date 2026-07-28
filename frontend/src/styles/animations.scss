@@ -88,3 +88,34 @@
 .anim-pulse-ring {
   animation: pulse-ring 1.6s ease-out infinite;
 }
+
+/* Full-screen "mobile push" transition for select-employee -> the unlocked
+   app (see __root.tsx/select-employee.tsx): the picker pushes off to the
+   left while the app pushes in from the right, like moving one screen
+   deeper in a mobile nav stack. Distinct from slide-in-right above (a subtle
+   16px nudge for toasts/cards) - these travel the full viewport width. */
+@keyframes push-out-left {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes push-in-right {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.anim-push-out-left {
+  animation: push-out-left var(--duration-slow) var(--ease-standard) both;
+}
+
+.anim-push-in-right {
+  animation: push-in-right var(--duration-slow) var(--ease-standard) both;
+}

@@ -1,13 +1,27 @@
 import WebSocket from "ws";
-import type { OrderRequest } from "../src/types/dinapoly-types.js";
+import type { Employee, OrderRequest } from "../src/types/dinapoly-types.js";
 
 const url = process.env.WS_URL ?? "ws://localhost:3001/ws/orders";
+const httpBase = url.replace(/^ws/, "http").replace(/\/ws\/orders$/, "");
+
+// Orders now require a real employeeId (see orderService.validateOrderRequest)
+// - fetch one rather than hardcoding an id, so this script keeps working
+// however the DB happens to be seeded. Employee creation is admin-gated, so
+// this deliberately doesn't try to create one itself if none exist.
+const employeesRes = await fetch(`${httpBase}/api/employees/active`);
+const employees = (await employeesRes.json()) as Employee[];
+if (employees.length === 0) {
+  console.error("No active employees found - create one first (e.g. npm run admin:create -- \"<name>\" \"<password>\").");
+  process.exit(1);
+}
+const employeeId = employees[0].id;
+
 const ws = new WebSocket(url);
 
 const order: OrderRequest = {
   orderType: "dine_in",
-  customer: { name: "Don Chimbo", phone: "555-1234", address: "123 Main St" },
   tableNumber: 6,
+  employeeId,
   items: [
     {
       type: "pizza",

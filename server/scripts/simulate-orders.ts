@@ -2,12 +2,63 @@
 // 'connected' handshake ack, one order from ORDERS is sent every 30 seconds until
 // the array is exhausted, then the connection closes.
 import WebSocket from "ws";
-import type { OrderRequest } from "../src/types/dinapoly-types.js";
+import type { Employee, OrderRequest } from "../src/types/dinapoly-types.js";
 
 const url = process.env.WS_URL ?? "ws://localhost:3001/ws/orders";
+const HTTP_BASE = url.replace(/^ws/, "http").replace(/\/ws\/orders$/, "");
 const SEND_INTERVAL_MS = 200;
 
-const ORDERS: OrderRequest[] = [
+async function createCustomer(name: string, phone?: string): Promise<number> {
+  const res = await fetch(`${HTTP_BASE}/api/customers`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, phone }),
+  });
+  if (!res.ok) throw new Error(`POST /api/customers failed: ${res.status}`);
+  return ((await res.json()) as { id: number }).id;
+}
+
+async function createAddress(customerId: number, streetAddress: string): Promise<number> {
+  const citiesRes = await fetch(`${HTTP_BASE}/api/locations/cities`);
+  const cities = (await citiesRes.json()) as { id: number }[];
+  if (cities.length === 0) throw new Error("no cities seeded - run npm run db:seed first");
+  const neighborhoodsRes = await fetch(`${HTTP_BASE}/api/locations/cities/${cities[0].id}/neighborhoods`);
+  const neighborhoods = (await neighborhoodsRes.json()) as { id: number }[];
+  if (neighborhoods.length === 0) throw new Error("no neighborhoods seeded - run npm run db:seed first");
+
+  const res = await fetch(`${HTTP_BASE}/api/customers/${customerId}/addresses`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ streetAddress, propertyType: "HOUSE", neighborhoodId: neighborhoods[0].id }),
+  });
+  if (!res.ok) throw new Error(`POST /api/customers/${customerId}/addresses failed: ${res.status}`);
+  return ((await res.json()) as { id: number }).id;
+}
+
+// takeaway/delivery orders below now reference a real customerId/
+// customerAddressId (see orderService.validateOrderRequest) instead of an
+// inline {name,phone,address} - resolved once up front via the REST API
+// rather than over the WS the rest of this script uses.
+console.log(`Creating test customers via ${HTTP_BASE}...`);
+const lauraId = await createCustomer("Laura Gómez");
+const andreaId = await createCustomer("Andrea");
+const carlosId = await createCustomer("Carlos Ruiz", "3011234567");
+const carlosAddressId = await createAddress(carlosId, "Cra 45 #12-30");
+const pedroId = await createCustomer("Pedro", "3009876543");
+const pedroAddressId = await createAddress(pedroId, "Calle 80 #10-05");
+console.log("Test customers ready.");
+
+// Orders now require a real employeeId (see orderService.validateOrderRequest)
+// - fetch one rather than hardcoding an id, so this script keeps working
+// however the DB happens to be seeded.
+const employeesRes = await fetch(`${HTTP_BASE}/api/employees/active`);
+const employees = (await employeesRes.json()) as Employee[];
+if (employees.length === 0) {
+  throw new Error('No active employees found - create one first (e.g. npm run admin:create -- "<name>" "<password>").');
+}
+const employeeId = employees[0].id;
+
+const ORDER_TEMPLATES: Omit<OrderRequest, "employeeId">[] = [
   {
     orderType: "dine_in",
     tableNumber: 3,
@@ -55,7 +106,7 @@ const ORDERS: OrderRequest[] = [
   },
   {
     orderType: "takeaway",
-    customer: { name: "Laura Gómez" },
+    customerId: lauraId,
     items: [
       {
         type: "product",
@@ -79,11 +130,8 @@ const ORDERS: OrderRequest[] = [
   },
   {
     orderType: "delivery",
-    customer: {
-      name: "Carlos Ruiz",
-      phone: "3011234567",
-      address: "Cra 45 #12-30",
-    },
+    customerId: carlosId,
+    customerAddressId: carlosAddressId,
     items: [
       {
         type: "product",
@@ -130,7 +178,7 @@ const ORDERS: OrderRequest[] = [
   },
   {
     orderType: "takeaway",
-    customer: { name: "Andrea" },
+    customerId: andreaId,
     items: [
       {
         type: "pizza",
@@ -155,11 +203,8 @@ const ORDERS: OrderRequest[] = [
   },
   {
     orderType: "delivery",
-    customer: {
-      name: "Pedro",
-      phone: "3009876543",
-      address: "Calle 80 #10-05",
-    },
+    customerId: pedroId,
+    customerAddressId: pedroAddressId,
     items: [
       { type: "product", category: "pastas", product: "seafood", quantity: 2 },
       {
@@ -198,6 +243,8 @@ const ORDERS: OrderRequest[] = [
     ],
   },
 ];
+
+const ORDERS: OrderRequest[] = ORDER_TEMPLATES.map((o) => ({ ...o, employeeId }));
 
 const ws = new WebSocket(url);
 let index = 0;
@@ -239,9 +286,24 @@ ws.on("message", (data) => {
     console.log(
       `  -> order #${msg.order.id} created (${msg.order.orderType}), total ${msg.order.total} COP`,
     );
-  } else {
-    console.log(`  -> error: ${msg.message}`);
+    return;
   }
+
+  // 'order_updated'/'tables_updated' are broadcast to every connected client
+  // (see ws/broadcast.ts) whenever any order changes status/items or a table
+  // flips free/busy - not just to whoever caused the change. Since this
+  // script is itself a connected client, it gets these too (its own order
+  // creations trigger them, both immediately and again as the print queue
+  // moves the order PENDING -> PRINTING -> ACTIVE) - they aren't errors, just
+  // informational, so log them distinctly instead of falling into the
+  // 'error' branch below (which assumes every other message has a
+  // `.message`, which these don't - hence the old "error: undefined").
+  if (msg.type === "order_updated" || msg.type === "tables_updated") {
+    console.log(`  -> broadcast: ${msg.type}${"orderId" in msg ? ` (order #${msg.orderId})` : ""}`);
+    return;
+  }
+
+  console.log(`  -> error: ${msg.message}`);
 });
 
 ws.on("close", () => {

@@ -13,9 +13,11 @@ function parseReportId(param: string): number {
   return id;
 }
 
-// End-of-day closing reports expose the whole day's sales/tips/discounts
-// breakdown - generating and reviewing them is admin-only, both routes.
-router.post('/close', requireAuth, requireAdmin, (_req, res) => {
+// Generating is open to any logged-in employee - closeDay() itself enforces
+// the "every order today is already COMPLETED" precondition. Reviewing past
+// reports still exposes the whole day's sales/tips/discounts breakdown
+// though, so that stays admin-only.
+router.post('/close', requireAuth, (_req, res) => {
   res.json(closeDay());
 });
 

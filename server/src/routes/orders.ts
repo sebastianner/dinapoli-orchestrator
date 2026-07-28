@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getOrderById, listOrders, completeOrder, reprintOrderDocument, addOrderItems, deleteOrder } from '../services/orderService.js';
+import { getOrderById, listOrders, completeOrder, reprintOrderDocument, addOrderItems, deleteOrder, updateOrderTable } from '../services/orderService.js';
 import { notifyPrintQueue } from '../services/queueService.js';
 import { ValidationError } from '../utils/errors.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
@@ -44,6 +44,18 @@ router.post('/:id/items', (req, res, next) => {
   try {
     const order = addOrderItems(parseOrderId(req.params.id), req.body?.items);
     notifyPrintQueue();
+    res.json(order);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Admin only - correcting a table assignment isn't something a server should
+// do unilaterally mid-service. The frontend gates this behind an explicit
+// confirmation dialog too (see dashboard/table-assignments).
+router.put('/:id/table', requireAuth, requireAdmin, (req, res, next) => {
+  try {
+    const order = updateOrderTable(parseOrderId(req.params.id), req.body?.tableNumber);
     res.json(order);
   } catch (err) {
     next(err);

@@ -1,18 +1,27 @@
 import useSWR from 'swr';
 import {
   fetchActiveEmployees,
+  fetchAdminProducts,
   fetchCashFlowExpenses,
   fetchCashFlowHistory,
   fetchCashFlowSettings,
+  fetchCities,
   fetchClosingReport,
   fetchClosingReports,
   fetchCurrentCashFlow,
+  fetchCustomer,
   fetchInactiveEmployees,
   fetchMenu,
+  fetchNeighborhoods,
   fetchOrder,
   fetchOrders,
   fetchOrdersPage,
+  fetchPizzaAdminData,
+  fetchPromoSettings,
   fetchTables,
+  searchCustomers,
+  searchProducts,
+  suggestBuildingNames,
   type FetchOrdersFilter,
 } from '@/lib/api';
 
@@ -24,16 +33,38 @@ export function useMenu() {
   return useSWR('/menu', fetchMenu);
 }
 
+/** Fuzzy/typo-tolerant product search across every category (see /menu/todos). Caller is expected to debounce `query` itself, same as useCustomerSearch. */
+export function useProductSearch(query: string) {
+  const trimmed = query.trim();
+  return useSWR(trimmed.length > 0 ? `/menu/search?q=${trimmed}` : null, () => searchProducts(trimmed));
+}
+
+/** Admin only (see routes/products.ts) - every product regardless of availability, for /dashboard/menu-settings. */
+export function useAdminProducts() {
+  return useSWR('/products', fetchAdminProducts);
+}
+
+/** Admin only (see routes/pizzaAdmin.ts) - pizza groups/sizes/flavors for /dashboard/menu-settings. */
+export function usePizzaAdminData() {
+  return useSWR('/pizza-admin', fetchPizzaAdminData);
+}
+
 export function useActiveEmployees() {
   return useSWR('/employees/active', fetchActiveEmployees);
 }
 
-export function useInactiveEmployees() {
-  return useSWR('/employees/inactive', fetchInactiveEmployees);
+/** Only shown when switching employees mid-session, not on the initial select-employee gate (see select-employee.tsx) - pass enabled: false to skip the fetch there entirely. */
+export function useInactiveEmployees(enabled = true) {
+  return useSWR(enabled ? '/employees/inactive' : null, fetchInactiveEmployees);
 }
 
 export function useTables() {
   return useSWR('/tables', fetchTables);
+}
+
+/** Public - the current promo prices, needed by every order-placing screen (see menu/promos.tsx, useOrderStore.startPromo/addPromoItem) as well as the admin editing page. */
+export function usePromoSettings() {
+  return useSWR('/promos', fetchPromoSettings);
 }
 
 /** Up-to-date detail for a single order, e.g. after reconnecting or deep-linking into it. */
@@ -76,4 +107,30 @@ export function useClosingReports(enabled = true) {
 
 export function useClosingReport(id: number | null, enabled = true) {
   return useSWR(enabled && id != null ? `/end-of-day/${id}` : null, () => fetchClosingReport(id as number));
+}
+
+export function useCustomer(id: number | null) {
+  return useSWR(id != null ? `/customers/${id}` : null, () => fetchCustomer(id as number));
+}
+
+/** Caller is expected to debounce `query` itself (e.g. CustomerAutocomplete) - this hook just wraps the fetch. */
+export function useCustomerSearch(query: string) {
+  const trimmed = query.trim();
+  return useSWR(trimmed.length > 0 ? `/customers/search?q=${trimmed}` : null, () => searchCustomers(trimmed));
+}
+
+export function useCities() {
+  return useSWR('/locations/cities', fetchCities);
+}
+
+export function useNeighborhoods(cityId: number | null) {
+  return useSWR(cityId != null ? `/locations/cities/${cityId}/neighborhoods` : null, () => fetchNeighborhoods(cityId as number));
+}
+
+/** Caller is expected to debounce `query` itself, same as useCustomerSearch. */
+export function useBuildingSuggestions(neighborhoodId: number | null, query: string) {
+  const trimmed = query.trim();
+  return useSWR(neighborhoodId != null ? `/customers/addresses/buildings?neighborhoodId=${neighborhoodId}&q=${trimmed}` : null, () =>
+    suggestBuildingNames(neighborhoodId as number, trimmed)
+  );
 }

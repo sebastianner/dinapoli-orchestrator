@@ -1,6 +1,14 @@
 import { create } from 'zustand';
-import type { CustomerInfo, Order, OrderItemRequest, OrderType, PromoType } from '@/types/api';
+import type { Order, OrderItemRequest, OrderType, PromoSettings, PromoType } from '@/types/api';
 import { applyPromoPricingPreview, freeBreadRequest, PROMO_ITEM_COUNTS } from '@/lib/promos';
+
+/** Cached at draft-start time (see startDraft) purely for display in the Order Overview panel, so it doesn't need an extra fetch - only customerId/customerAddressId are ever sent to the server. */
+export interface CustomerDisplayInfo {
+  name: string;
+  phone: string | null;
+  /** Formatted delivery address, delivery orders only. */
+  address: string | null;
+}
 
 /** A menu item staged in the Order Overview, not yet sent to the server. */
 export interface CartItem {
@@ -25,7 +33,9 @@ export interface PromoDraft {
 export interface NewOrderInfo {
   orderType: OrderType;
   tableNumber?: number;
-  customer?: CustomerInfo;
+  customerId?: number;
+  customerAddressId?: number;
+  customerDisplay?: CustomerDisplayInfo;
 }
 
 interface OrderState {
@@ -33,6 +43,8 @@ interface OrderState {
   activeOrders: Order[];
   setActiveOrders: (orders: Order[]) => void;
   upsertActiveOrder: (order: Order) => void;
+  /** For an order deleted server-side (see LiveOrderUpdates - a 404 on refetch after 'order_updated' means it's gone, not stale). */
+  removeActiveOrder: (orderId: number) => void;
 
   /** Set once the order being worked on already exists on the server. Mutually exclusive with `newOrderInfo`. */
   currentOrderId: number | null;
@@ -71,8 +83,8 @@ interface OrderState {
   setPendingDiscount: (discount: number) => void;
   /** Starts a promo draft; 'pizza_xl' auto-adds its free bread since there's no choice to make for it. */
   startPromo: (type: PromoType) => void;
-  /** Adds one item toward the active promo draft; once it reaches the promo's required count, prices it (preview only) and finalizes it into `cart` automatically. No-op if no promo is active. */
-  addPromoItem: (item: CartItem) => void;
+  /** Adds one item toward the active promo draft; once it reaches the promo's required count, prices it (preview only, using the passed-in current settings) and finalizes it into `cart` automatically. No-op if no promo is active. */
+  addPromoItem: (item: CartItem, settings: PromoSettings) => void;
   cancelPromo: () => void;
 }
 
@@ -85,6 +97,7 @@ export const useOrderStore = create<OrderState>((set) => ({
       const withoutOrder = state.activeOrders.filter((o) => o.id !== order.id);
       return { activeOrders: isStillActive ? [...withoutOrder, order] : withoutOrder };
     }),
+  removeActiveOrder: (orderId) => set((state) => ({ activeOrders: state.activeOrders.filter((o) => o.id !== orderId) })),
 
   currentOrderId: null,
   newOrderInfo: null,
@@ -95,8 +108,12 @@ export const useOrderStore = create<OrderState>((set) => ({
   promoDraft: null,
   activePromoType: null,
 
+  // Doesn't clear `cart` - a table/delivery/takeaway can be picked *after*
+  // items were already added (see ProductCard etc., which no longer require
+  // an order context to add to cart), and those items should carry into the
+  // draft being started rather than get silently wiped.
   startDraft: (info) =>
-    set({ currentOrderId: null, newOrderInfo: info, cart: [], pendingTip: 0, pendingDeliveryFee: 0, pendingDiscount: 0, promoDraft: null, activePromoType: null }),
+    set({ currentOrderId: null, newOrderInfo: info, pendingTip: 0, pendingDeliveryFee: 0, pendingDiscount: 0, promoDraft: null, activePromoType: null }),
   openExistingOrder: (orderId) =>
     set({
       currentOrderId: orderId,
@@ -133,14 +150,14 @@ export const useOrderStore = create<OrderState>((set) => ({
             : [],
       },
     }),
-  addPromoItem: (item) =>
+  addPromoItem: (item, settings) =>
     set((state) => {
       if (!state.promoDraft) return state;
       const items = [...state.promoDraft.items, item];
       if (items.length < PROMO_ITEM_COUNTS[state.promoDraft.type]) {
         return { promoDraft: { ...state.promoDraft, items } };
       }
-      const priced = applyPromoPricingPreview(state.promoDraft.type, items);
+      const priced = applyPromoPricingPreview(state.promoDraft.type, items, settings);
       return { promoDraft: null, activePromoType: state.promoDraft.type, cart: [...state.cart, ...priced] };
     }),
   cancelPromo: () => set({ promoDraft: null }),

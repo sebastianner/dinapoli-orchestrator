@@ -92,14 +92,26 @@ export function OrderOverview() {
   };
 
   const handleSubmitNewOrder = async () => {
-    if (!newOrderInfo || cart.length === 0) return;
+    if (cart.length === 0) return;
+    if (!newOrderInfo) {
+      pushToast('Primero elige una mesa, domicilio o para llevar', 'warning');
+      return;
+    }
+    // Shouldn't happen - __root.tsx blocks every route but /select-employee
+    // until an employee is selected - but the type is no longer optional,
+    // so this is the explicit guard that makes that guarantee checkable here.
+    if (!employee) {
+      pushToast('Selecciona un empleado antes de enviar la orden', 'error');
+      return;
+    }
     setSubmitting(true);
     try {
       const order = await orderSocketClient.submitOrder({
         orderType: newOrderInfo.orderType,
         tableNumber: newOrderInfo.tableNumber,
-        customer: newOrderInfo.customer,
-        employeeId: employee?.id,
+        customerId: newOrderInfo.customerId,
+        customerAddressId: newOrderInfo.customerAddressId,
+        employeeId: employee.id,
         promoType: activePromoType ?? undefined,
         items: cart.map((item) => item.request),
       });
@@ -148,8 +160,8 @@ export function OrderOverview() {
         <h2 className="font-semibold text-text-primary">
           {existingOrder ? orderTitle(existingOrder.orderType, existingOrder.tableNumber) : orderTitle(newOrderInfo?.orderType, newOrderInfo?.tableNumber)}
         </h2>
-        {(existingOrder?.customerName ?? newOrderInfo?.customer?.name) && (
-          <p className="text-xs text-text-secondary">{existingOrder?.customerName ?? newOrderInfo?.customer?.name}</p>
+        {(existingOrder?.customerName ?? newOrderInfo?.customerDisplay?.name) && (
+          <p className="text-xs text-text-secondary">{existingOrder?.customerName ?? newOrderInfo?.customerDisplay?.name}</p>
         )}
       </div>
 

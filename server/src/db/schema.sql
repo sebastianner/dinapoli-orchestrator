@@ -1,8 +1,13 @@
 -- Dinapoli Pizza schema (SQLite). See ../../../dinapoli_schema.mmd for the ER diagram.
 
+-- Numbered 1..N with no gaps, N being however many tables the restaurant
+-- currently has - tableService.increaseTableCount/decreaseTableCount only
+-- ever add/remove the highest number, so this invariant holds without a
+-- static upper bound (see migrate.ts's widenTableNumberBounds for the
+-- one-time migration off the old hardcoded 1-9 CHECK).
 CREATE TABLE IF NOT EXISTS restaurant_tables (
   id     INTEGER PRIMARY KEY AUTOINCREMENT,
-  number INTEGER NOT NULL UNIQUE CHECK (number BETWEEN 1 AND 9),
+  number INTEGER NOT NULL UNIQUE CHECK (number > 0),
   status TEXT NOT NULL DEFAULT 'free' CHECK (status IN ('free', 'busy'))
 );
 
@@ -35,6 +40,90 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
   revoked_at  TEXT,
   created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
+
+-- One row per delivery-fee zone. delivery_fee seeds orders.deliveryFee for a
+-- new delivery order when the client doesn't explicitly override it (see
+-- orderService.createOrder) - staff can still always override per order.
+CREATE TABLE IF NOT EXISTS cities (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  name       TEXT NOT NULL,
+  department TEXT,
+  country    TEXT NOT NULL DEFAULT 'Colombia'
+);
+
+CREATE TABLE IF NOT EXISTS neighborhoods (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  name          TEXT NOT NULL,
+  city_id       INTEGER NOT NULL REFERENCES cities(id),
+  delivery_fee  INTEGER NOT NULL DEFAULT 0,
+  UNIQUE (city_id, name)
+);
+
+-- No auth required to create/update (see routes/customers.ts) - this is
+-- staff entering a walk-in/calling customer's details, not a public-facing
+-- account system. Only deleting a customer outright is admin-gated.
+CREATE TABLE IF NOT EXISTS customers (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  name       TEXT NOT NULL,
+  phone      TEXT,
+  email      TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+-- A customer may have zero or more saved addresses. The geo/place columns
+-- (latitude/longitude/google_place_id/formatted_address) are nullable and
+-- unused for now - no maps/geocoding integration in this pass, just reserved
+-- for one later.
+CREATE TABLE IF NOT EXISTS customer_addresses (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  customer_id       INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  street_address    TEXT NOT NULL,
+  -- Free-text second line (e.g. "casa 5, interior 2"), independent of
+  -- property_type - unlike apartment_number/tower/building_name, which only
+  -- apply to APARTMENT.
+  address_line_2    TEXT,
+  property_type     TEXT NOT NULL CHECK (property_type IN ('HOUSE', 'APARTMENT', 'OFFICE', 'BUILDING', 'OTHER')),
+  neighborhood_id   INTEGER NOT NULL REFERENCES neighborhoods(id),
+  apartment_number  TEXT,
+  tower             TEXT,
+  building_name     TEXT,
+  reference         TEXT,
+  latitude          REAL,
+  longitude         REAL,
+  google_place_id   TEXT,
+  formatted_address TEXT,
+  created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+-- External-content FTS5 table (tokenize='trigram' for typo/substring-tolerant
+-- matching) over customers.name/phone, used by customerService.searchCustomers
+-- for the order-form autocomplete. "External content" means the FTS index
+-- stores no data of its own - content_rowid ties each row back to customers.id
+-- - so it MUST be kept in sync via the triggers below rather than written to
+-- directly. This is the first FTS5 use in this codebase, chosen over
+-- spellfix1 (not vendored anywhere in this repo/environment, would need a
+-- per-platform compiled binary) since FTS5 is already compiled into the
+-- installed better-sqlite3 with no extra setup.
+CREATE VIRTUAL TABLE IF NOT EXISTS customers_fts USING fts5(
+  name,
+  phone,
+  content='customers',
+  content_rowid='id',
+  tokenize='trigram'
+);
+
+CREATE TRIGGER IF NOT EXISTS customers_fts_insert AFTER INSERT ON customers BEGIN
+  INSERT INTO customers_fts (rowid, name, phone) VALUES (new.id, new.name, new.phone);
+END;
+
+CREATE TRIGGER IF NOT EXISTS customers_fts_delete AFTER DELETE ON customers BEGIN
+  INSERT INTO customers_fts (customers_fts, rowid, name, phone) VALUES ('delete', old.id, old.name, old.phone);
+END;
+
+CREATE TRIGGER IF NOT EXISTS customers_fts_update AFTER UPDATE ON customers BEGIN
+  INSERT INTO customers_fts (customers_fts, rowid, name, phone) VALUES ('delete', old.id, old.name, old.phone);
+  INSERT INTO customers_fts (rowid, name, phone) VALUES (new.id, new.name, new.phone);
+END;
 
 CREATE TABLE IF NOT EXISTS categories (
   id   INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -70,6 +159,31 @@ CREATE TABLE IF NOT EXISTS product_options (
   name       TEXT NOT NULL,
   UNIQUE (product_id, key)
 );
+
+-- Same external-content trigram FTS5 setup as customers_fts above, over
+-- products.name/description - powers menuService.searchProducts (the
+-- /menu/todos "buscar" bar). See customers_fts's comment for why trigram
+-- over spellfix1.
+CREATE VIRTUAL TABLE IF NOT EXISTS products_fts USING fts5(
+  name,
+  description,
+  content='products',
+  content_rowid='id',
+  tokenize='trigram'
+);
+
+CREATE TRIGGER IF NOT EXISTS products_fts_insert AFTER INSERT ON products BEGIN
+  INSERT INTO products_fts (rowid, name, description) VALUES (new.id, new.name, new.description);
+END;
+
+CREATE TRIGGER IF NOT EXISTS products_fts_delete AFTER DELETE ON products BEGIN
+  INSERT INTO products_fts (products_fts, rowid, name, description) VALUES ('delete', old.id, old.name, old.description);
+END;
+
+CREATE TRIGGER IF NOT EXISTS products_fts_update AFTER UPDATE ON products BEGIN
+  INSERT INTO products_fts (products_fts, rowid, name, description) VALUES ('delete', old.id, old.name, old.description);
+  INSERT INTO products_fts (rowid, name, description) VALUES (new.id, new.name, new.description);
+END;
 
 CREATE TABLE IF NOT EXISTS pizza_groups (
   id   INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -109,23 +223,30 @@ CREATE TABLE IF NOT EXISTS pizza_group_flavors (
 );
 
 CREATE TABLE IF NOT EXISTS orders (
-  id             INTEGER PRIMARY KEY AUTOINCREMENT,
-  order_type     TEXT NOT NULL CHECK (order_type IN ('dine_in', 'takeaway', 'delivery')),
-  status         TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'PRINTING', 'ACTIVE', 'COMPLETED')),
-  employee_id    INTEGER REFERENCES employees(id),
-  table_number   INTEGER CHECK (table_number BETWEEN 1 AND 9),
-  customer_name  TEXT,
-  phone          TEXT,
-  address        TEXT,
-  notes          TEXT,
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_type          TEXT NOT NULL CHECK (order_type IN ('dine_in', 'takeaway', 'delivery')),
+  status              TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'PRINTING', 'ACTIVE', 'COMPLETED')),
+  employee_id         INTEGER REFERENCES employees(id),
+  -- No upper bound - restaurant_tables.number has none either, since the
+  -- table count is admin-adjustable at runtime (see tableService).
+  table_number        INTEGER CHECK (table_number IS NULL OR table_number > 0),
+  -- Nullable - required by validation (customerService/orderService), not the
+  -- DB, same as table_number above: dine_in never sets these, takeaway
+  -- requires customer_id, delivery requires both. customer_name/phone/address
+  -- used to be plain columns here; now derived via JOIN in orderService
+  -- .getOrderById, under the same field names, so printerService/
+  -- billingService read them unchanged.
+  customer_id         INTEGER REFERENCES customers(id),
+  customer_address_id INTEGER REFERENCES customer_addresses(id),
+  notes               TEXT,
   -- Nullable - most orders aren't a promo. Set once at creation, never changed.
-  promo_type     TEXT CHECK (promo_type IS NULL OR promo_type IN ('duo', 'pizza_xl')),
+  promo_type          TEXT CHECK (promo_type IS NULL OR promo_type IN ('duo', 'pizza_xl')),
   -- Items only - excludes tip/deliveryFee/discount (those live in order_payments,
   -- see grandTotal for the "everything included" figure this deliberately isn't).
-  total          INTEGER NOT NULL DEFAULT 0,
-  created_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  completed_at   TEXT,
-  print_attempts INTEGER NOT NULL DEFAULT 0
+  total               INTEGER NOT NULL DEFAULT 0,
+  created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  completed_at        TEXT,
+  print_attempts      INTEGER NOT NULL DEFAULT 0
 );
 
 
@@ -224,6 +345,20 @@ CREATE TABLE IF NOT EXISTS cash_register_settings (
   default_opening_cash  INTEGER NOT NULL DEFAULT 0
 );
 
+-- Admin-editable (see routes/promos.ts) - orderService.applyPromoPricing
+-- reads these live at order-creation time rather than using hardcoded
+-- constants, so a price change takes effect on the next order immediately.
+-- Already-placed orders are unaffected - their items' unit_price was
+-- snapshotted at creation time, same as any other price in this app (see
+-- printerService.describePromoType, which derives a kitchen ticket's promo
+-- label from that snapshot rather than the current setting, for exactly
+-- this reason). soda_surcharge only applies to 'pizza_xl' - 0/unused for 'duo'.
+CREATE TABLE IF NOT EXISTS promo_settings (
+  promo_type     TEXT PRIMARY KEY CHECK (promo_type IN ('duo', 'pizza_xl')),
+  price          INTEGER NOT NULL CHECK (price > 0),
+  soda_surcharge INTEGER NOT NULL DEFAULT 0 CHECK (soda_surcharge >= 0)
+);
+
 -- One row per register period (one per business day). A fresh period opens
 -- automatically the moment the latest row's date isn't today anymore
 -- (cashFlowService.getCurrentCashFlow) - this bookkeeping rotation is not
@@ -265,6 +400,11 @@ CREATE TABLE IF NOT EXISTS closing_reports (
   total_sales            INTEGER NOT NULL,
   tips                   INTEGER NOT NULL DEFAULT 0,
   discounts              INTEGER NOT NULL DEFAULT 0,
+  items_sold             INTEGER NOT NULL DEFAULT 0,
+  customers_served       INTEGER NOT NULL DEFAULT 0,
+  delivery_order_count   INTEGER NOT NULL DEFAULT 0,
+  dine_in_order_count    INTEGER NOT NULL DEFAULT 0,
+  takeaway_order_count   INTEGER NOT NULL DEFAULT 0,
   total_expenses         INTEGER NOT NULL,
   content                TEXT NOT NULL,
   created_at             TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
@@ -273,6 +413,10 @@ CREATE TABLE IF NOT EXISTS closing_reports (
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_orders_table_number ON orders(table_number);
 CREATE INDEX IF NOT EXISTS idx_orders_employee_id ON orders(employee_id);
+CREATE INDEX IF NOT EXISTS idx_orders_customer_id ON orders(customer_id);
 CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);
 CREATE INDEX IF NOT EXISTS idx_order_payments_order_id ON order_payments(order_id);
 CREATE INDEX IF NOT EXISTS idx_cash_expenses_cash_flow_id ON cash_expenses(cash_flow_id);
+CREATE INDEX IF NOT EXISTS idx_customer_addresses_customer_id ON customer_addresses(customer_id);
+CREATE INDEX IF NOT EXISTS idx_customer_addresses_neighborhood_id ON customer_addresses(neighborhood_id);
+CREATE INDEX IF NOT EXISTS idx_neighborhoods_city_id ON neighborhoods(city_id);

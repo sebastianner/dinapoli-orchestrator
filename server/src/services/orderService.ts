@@ -1,11 +1,14 @@
 import db from '../db/index.js';
 import { ValidationError, NotFoundError, ConflictError } from '../utils/errors.js';
-import { markTableBusy, refreshTableStatus } from './tableService.js';
+import { markTableBusy, refreshTableStatus, tableExists } from './tableService.js';
 import { processPayment } from './paymentService.js';
 import type { PaymentSplit } from './paymentService.js';
 import { printBill } from './billingService.js';
 import { reprintJob } from './printerService.js';
 import { getEmployeeById } from './employeeService.js';
+import { getCustomerById } from './customerService.js';
+import { getPromoSettings } from './promoSettingsService.js';
+import { broadcastOrderUpdate } from '../ws/broadcast.js';
 import type {
   Order,
   OrderItem,
@@ -63,11 +66,10 @@ const getProductOptionByKey = db.prepare<[number, string], ProductOptionRow>(
 
 interface InsertOrderParams {
   orderType: OrderType;
-  employeeId: number | null;
+  employeeId: number;
   tableNumber: number | null;
-  customerName: string | null;
-  phone: string | null;
-  address: string | null;
+  customerId: number | null;
+  customerAddressId: number | null;
   notes: string | null;
   promoType: PromoType | null;
   total: number;
@@ -88,8 +90,8 @@ interface InsertOrderItemParams {
 }
 
 const insertOrder = db.prepare<InsertOrderParams>(
-  `INSERT INTO orders (order_type, employee_id, table_number, customer_name, phone, address, notes, promo_type, total)
-   VALUES (@orderType, @employeeId, @tableNumber, @customerName, @phone, @address, @notes, @promoType, @total)`
+  `INSERT INTO orders (order_type, employee_id, table_number, customer_id, customer_address_id, notes, promo_type, total)
+   VALUES (@orderType, @employeeId, @tableNumber, @customerId, @customerAddressId, @notes, @promoType, @total)`
 );
 const insertOrderItem = db.prepare<InsertOrderItemParams>(
   `INSERT INTO order_items
@@ -273,28 +275,37 @@ function validateOrderRequest(input: unknown): OrderRequest {
     throw new ValidationError('request body must be an object');
   }
   const orderRequest = input as OrderRequest;
-  const { orderType, employeeId, tableNumber, customer, items } = orderRequest;
+  const { orderType, employeeId, tableNumber, customerId, customerAddressId, items } = orderRequest;
 
   if (!ORDER_TYPES.has(orderType)) {
     throw new ValidationError(`orderType must be one of ${[...ORDER_TYPES].join(', ')}`);
   }
 
-  if (employeeId != null && !isPositiveInt(employeeId)) {
-    throw new ValidationError('employeeId must be a positive integer when provided');
+  // Every order must be attributable to whoever placed it, so a mis-clicked
+  // or wrong-user order can't happen silently - see the frontend's matching
+  // "select an employee before anything else is reachable" guard in
+  // __root.tsx.
+  if (!isPositiveInt(employeeId)) {
+    throw new ValidationError('employeeId is required - orders must always be associated with an employee');
   }
 
   if (orderType === 'dine_in') {
-    if (!isPositiveInt(tableNumber) || tableNumber < 1 || tableNumber > 9) {
-      throw new ValidationError('tableNumber is required (1-9) for dine_in orders');
+    if (!isPositiveInt(tableNumber) || !tableExists(tableNumber)) {
+      throw new ValidationError('tableNumber must match one of the current restaurant tables for dine_in orders');
+    }
+    if (customerId != null && !isPositiveInt(customerId)) {
+      throw new ValidationError('customerId must be a positive integer when provided');
     }
   }
+  // Customers can be attached to any order type, but takeaway/delivery
+  // require one - existence/ownership is checked in createOrder (same
+  // pattern as employeeId's active check below).
   if (orderType === 'takeaway') {
-    if (!customer?.name) throw new ValidationError('customer.name is required for takeaway orders');
+    if (!isPositiveInt(customerId)) throw new ValidationError('customerId is required for takeaway orders');
   }
   if (orderType === 'delivery') {
-    if (!customer?.name) throw new ValidationError('customer.name is required for delivery orders');
-    if (!customer?.phone) throw new ValidationError('customer.phone is required for delivery orders');
-    if (!customer?.address) throw new ValidationError('customer.address is required for delivery orders');
+    if (!isPositiveInt(customerId)) throw new ValidationError('customerId is required for delivery orders');
+    if (!isPositiveInt(customerAddressId)) throw new ValidationError('customerAddressId is required for delivery orders');
   }
 
   if (!Array.isArray(items) || items.length === 0) {
@@ -317,9 +328,6 @@ function resolveItems(items: OrderItemRequest[]): ResolvedItem[] {
 }
 
 const PROMO_TYPES = new Set<PromoType>(['duo', 'pizza_xl']);
-const DUO_PRICE = 37000;
-const XL_PRICE = 80000;
-const XL_SODA_SURCHARGE = 2000;
 // A single flavor pulled out of the 'duo' promo entirely, whether as a personal
 // pizza's only flavor or as a gratinado's pizzaFlavor - these are the same 5
 // "special" flavors either way, so one set covers both checks below.
@@ -402,24 +410,31 @@ function validatePromoItems(promoType: PromoType, items: OrderItemRequest[]): vo
 /**
  * Overrides resolveItems' normal menu pricing with the promo's flat price -
  * the primary item (the pizza, or items[0] for 'duo') carries the full
- * $37,000/$80,000, the rest are free, matching how the promo is marketed
- * ("gratis gaseosa y panes al gratín"). The XL promo's soda is the one
- * exception: choosing Coca-Cola or Quatro adds a flat surcharge on top.
- * Mutates `resolvedItems` in place; returns the order's total.
+ * admin-configured price (see promoSettingsService), the rest are free,
+ * matching how the promo is marketed ("gratis gaseosa y panes al gratín").
+ * The XL promo's soda is the one exception: choosing Coca-Cola or Quatro
+ * adds a flat surcharge on top. Prices are read live (not cached), so an
+ * admin's price change applies starting with the very next order - already-
+ * placed orders keep whatever was snapshotted into their unit_price at the
+ * time (see printerService.describePromoType for the matching reasoning on
+ * the kitchen ticket label). Mutates `resolvedItems` in place; returns the
+ * order's total.
  */
 function applyPromoPricing(promoType: PromoType, items: OrderItemRequest[], resolvedItems: ResolvedItem[]): number {
+  const settings = getPromoSettings(promoType);
+
   if (promoType === 'duo') {
-    resolvedItems[0].unitPrice = DUO_PRICE;
+    resolvedItems[0].unitPrice = settings.price;
     resolvedItems[1].unitPrice = 0;
-    return DUO_PRICE;
+    return settings.price;
   }
 
-  let total = XL_PRICE;
+  let total = settings.price;
   items.forEach((item, index) => {
     if (item.type === 'pizza') {
-      resolvedItems[index].unitPrice = XL_PRICE;
+      resolvedItems[index].unitPrice = settings.price;
     } else if (item.type === 'product' && item.category === 'drinks') {
-      const surcharge = item.option && XL_SODA_SURCHARGE_OPTIONS.has(item.option) ? XL_SODA_SURCHARGE : 0;
+      const surcharge = item.option && XL_SODA_SURCHARGE_OPTIONS.has(item.option) ? settings.sodaSurcharge : 0;
       resolvedItems[index].unitPrice = surcharge;
       total += surcharge;
     } else {
@@ -432,10 +447,18 @@ function applyPromoPricing(promoType: PromoType, items: OrderItemRequest[], reso
 export function createOrder(input: unknown): Order {
   const orderRequest = validateOrderRequest(input);
 
-  if (orderRequest.employeeId != null) {
-    const employee = getEmployeeById(orderRequest.employeeId); // 404s if the employee doesn't exist
-    if (!employee.isActive) {
-      throw new ValidationError(`employee ${employee.id} is not active`);
+  const employee = getEmployeeById(orderRequest.employeeId as number); // 404s if the employee doesn't exist - always set, validateOrderRequest already required it
+  if (!employee.isActive) {
+    throw new ValidationError(`employee ${employee.id} is not active`);
+  }
+
+  if (orderRequest.customerId != null) {
+    const customer = getCustomerById(orderRequest.customerId); // 404s if the customer doesn't exist
+    if (orderRequest.orderType === 'delivery') {
+      const address = customer.addresses.find((a) => a.id === orderRequest.customerAddressId);
+      if (!address) {
+        throw new ValidationError(`customerAddressId ${orderRequest.customerAddressId} does not belong to customer ${orderRequest.customerId}`);
+      }
     }
   }
 
@@ -452,11 +475,10 @@ export function createOrder(input: unknown): Order {
   const orderId = db.transaction(() => {
     const result = insertOrder.run({
       orderType: orderRequest.orderType,
-      employeeId: orderRequest.employeeId ?? null,
+      employeeId: orderRequest.employeeId as number,
       tableNumber: orderRequest.orderType === 'dine_in' ? (orderRequest.tableNumber as number) : null,
-      customerName: orderRequest.customer?.name ?? null,
-      phone: orderRequest.customer?.phone ?? null,
-      address: orderRequest.customer?.address ?? null,
+      customerId: orderRequest.customerId ?? null,
+      customerAddressId: orderRequest.orderType === 'delivery' ? (orderRequest.customerAddressId as number) : null,
       notes: orderRequest.notes ?? null,
       promoType: orderRequest.promoType ?? null,
       total,
@@ -490,12 +512,68 @@ export function createOrder(input: unknown): Order {
     return newOrderId;
   })();
 
+  broadcastOrderUpdate(orderId);
   return getOrderById(orderId);
 }
 
-const getOrderRow = db.prepare<[number], OrderRow & { employee_name: string | null }>(
-  `SELECT o.*, e.name AS employee_name FROM orders o LEFT JOIN employees e ON e.id = o.employee_id WHERE o.id = ?`
+interface OrderJoinRow extends OrderRow {
+  employee_name: string | null;
+  customer_name: string | null;
+  customer_phone: string | null;
+  address_street: string | null;
+  address_line_2: string | null;
+  address_property_type: string | null;
+  address_apartment_number: string | null;
+  address_tower: string | null;
+  address_building_name: string | null;
+  address_neighborhood_name: string | null;
+  address_city_name: string | null;
+}
+
+// customerName/phone/address used to be plain columns on orders itself;
+// derived here via LEFT JOIN instead (customer_id/customer_address_id are
+// both nullable, so every join below has to be a LEFT JOIN) so that
+// printerService/billingService - which only ever read the resolved Order
+// object, never the raw row - didn't need to change at all.
+const getOrderRow = db.prepare<[number], OrderJoinRow>(
+  `SELECT o.*,
+          e.name AS employee_name,
+          c.name AS customer_name,
+          c.phone AS customer_phone,
+          ca.street_address AS address_street,
+          ca.address_line_2 AS address_line_2,
+          ca.property_type AS address_property_type,
+          ca.apartment_number AS address_apartment_number,
+          ca.tower AS address_tower,
+          ca.building_name AS address_building_name,
+          n.name AS address_neighborhood_name,
+          ci.name AS address_city_name
+   FROM orders o
+   LEFT JOIN employees e ON e.id = o.employee_id
+   LEFT JOIN customers c ON c.id = o.customer_id
+   LEFT JOIN customer_addresses ca ON ca.id = o.customer_address_id
+   LEFT JOIN neighborhoods n ON n.id = ca.neighborhood_id
+   LEFT JOIN cities ci ON ci.id = n.city_id
+   WHERE o.id = ?`
 );
+
+/** Street + (for apartments) building/tower/unit + neighborhood + city, comma-joined - the same info a delivery kitchen ticket needs, formatted once here for both the ticket and the bill. */
+function formatDeliveryAddress(row: OrderJoinRow): string | null {
+  if (!row.address_street) return null;
+  const parts = [row.address_street];
+  if (row.address_line_2) parts.push(row.address_line_2);
+  if (row.address_property_type === 'APARTMENT') {
+    const unitBits = [
+      row.address_building_name,
+      row.address_tower ? `Torre ${row.address_tower}` : null,
+      row.address_apartment_number ? `Apto ${row.address_apartment_number}` : null,
+    ].filter((bit): bit is string => Boolean(bit));
+    if (unitBits.length > 0) parts.push(unitBits.join(', '));
+  }
+  if (row.address_neighborhood_name) parts.push(row.address_neighborhood_name);
+  if (row.address_city_name) parts.push(row.address_city_name);
+  return parts.join(', ');
+}
 const getOrderItemRows = db.prepare<[number], OrderItemRow>('SELECT * FROM order_items WHERE order_id = ? ORDER BY id');
 const getOrderPaymentRows = db.prepare<[number], OrderPaymentRow>('SELECT * FROM order_payments WHERE order_id = ? ORDER BY id');
 // Tip/delivery fee/discount only ever exist as the per-method breakdown in
@@ -588,9 +666,11 @@ export function getOrderById(id: number): Order {
     employeeId: row.employee_id,
     employeeName: row.employee_name,
     tableNumber: row.table_number,
+    customerId: row.customer_id,
+    customerAddressId: row.customer_address_id,
     customerName: row.customer_name,
-    phone: row.phone,
-    address: row.address,
+    phone: row.customer_phone,
+    address: formatDeliveryAddress(row),
     total: row.total,
     tip: totals.tip,
     deliveryFee: totals.delivery_fee,
@@ -615,8 +695,19 @@ const deleteOrderRow = db.prepare<[number]>('DELETE FROM orders WHERE id = ?');
  * Callers (routes/orders.ts) restrict this to admins.
  */
 export function deleteOrder(id: number): void {
-  const { changes } = deleteOrderRow.run(id);
-  if (changes === 0) throw new NotFoundError(`order ${id} not found`);
+  const order = getOrderById(id); // 404s if it doesn't exist; also needed below to know whether to free its table
+
+  deleteOrderRow.run(id);
+  // Reuses 'order_updated' rather than a distinct type - the frontend already
+  // treats a 404 on refetch as "gone" and drops it from every cache (see
+  // LiveOrderUpdates.tsx), so no other client is left showing a deleted order.
+  broadcastOrderUpdate(id);
+  // Deleting a dine_in order can be the table's last open order - recompute
+  // free/busy the same way completing one does, instead of leaving it stuck
+  // busy forever (this order can no longer be counted either way).
+  if (order.orderType === 'dine_in') {
+    refreshTableStatus(order.tableNumber as number);
+  }
 }
 
 /**
@@ -744,6 +835,40 @@ export function addOrderItems(id: number, items: unknown): Order {
     }
   })();
 
+  broadcastOrderUpdate(id);
+  return getOrderById(id);
+}
+
+const updateTableNumber = db.prepare<[number, number]>('UPDATE orders SET table_number = ? WHERE id = ?');
+
+/**
+ * Reassigns a dine_in order to a different table - correcting a mistake at
+ * seating, or moving a party mid-service. Admin-only (see routes/orders.ts).
+ * Frees the old table (unless another of its open orders still occupies it -
+ * refreshTableStatus recomputes rather than assuming) and marks the new one
+ * busy. No-op (but still returns the order) if the table isn't actually
+ * changing.
+ */
+export function updateOrderTable(id: number, tableNumber: unknown): Order {
+  const order = getOrderById(id);
+  if (order.orderType !== 'dine_in') {
+    throw new ValidationError(`order ${id} is a ${order.orderType} order, not dine_in - it has no table to reassign`);
+  }
+  if (order.status === 'COMPLETED') {
+    throw new ConflictError(`order ${id} is already completed`);
+  }
+  if (!isPositiveInt(tableNumber) || !tableExists(tableNumber)) {
+    throw new ValidationError('tableNumber must match one of the current restaurant tables');
+  }
+
+  const previousTable = order.tableNumber as number;
+  if (tableNumber === previousTable) return order;
+
+  updateTableNumber.run(tableNumber, id);
+  markTableBusy(tableNumber);
+  refreshTableStatus(previousTable);
+  broadcastOrderUpdate(id);
+
   return getOrderById(id);
 }
 
@@ -846,6 +971,7 @@ export async function completeOrder(id: number, { payments }: { payments?: unkno
     }
     markCompleted.run(id);
   })();
+  broadcastOrderUpdate(id);
 
   const orderForPayment = getOrderById(id);
   const payment = processPayment(orderForPayment, resolvedPayments);

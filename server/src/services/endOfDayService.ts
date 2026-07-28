@@ -1,5 +1,5 @@
 import db from '../db/index.js';
-import { NotFoundError } from '../utils/errors.js';
+import { NotFoundError, ConflictError } from '../utils/errors.js';
 import { todayDateStrBogota } from '../utils/date.js';
 import { printPlainText, formatMoney, centerText, toAsciiText, RECEIPT_WIDTH } from './printerService.js';
 import type { ClosingReport } from '../types/dinapoly-types.js';
@@ -19,6 +19,11 @@ function rowToClosingReport(row: ClosingReportRow): ClosingReport {
     tips: row.tips,
     discounts: row.discounts,
     totalExpenses: row.total_expenses,
+    itemsSold: row.items_sold,
+    customersServed: row.customers_served,
+    deliveryOrderCount: row.delivery_order_count,
+    dineInOrderCount: row.dine_in_order_count,
+    takeawayOrderCount: row.takeaway_order_count,
     createdAt: row.created_at,
   };
 }
@@ -33,6 +38,11 @@ interface SalesAggregate {
   totalSales: number;
   tips: number;
   discounts: number;
+  itemsSold: number;
+  customersServed: number;
+  deliveryOrderCount: number;
+  dineInOrderCount: number;
+  takeawayOrderCount: number;
 }
 
 // completed_at is stored in UTC; Bogota has no DST (fixed UTC-5 year round),
@@ -42,12 +52,21 @@ interface SalesAggregate {
 // order's sales figure is derived by summing (gross_amount - tip_amount - discount)
 // across its payment rows - this excludes tips and discounts from sales
 // while keeping delivery fees in, exactly, with no proportional guessing.
-const getCompletedOrdersForDate = db.prepare<[string], { id: number; order_type: string }>(
-  `SELECT id, order_type FROM orders WHERE status = 'COMPLETED' AND date(completed_at, '-5 hours') = ?`
+const getCompletedOrdersForDate = db.prepare<[string], { id: number; order_type: string; customer_id: number | null }>(
+  `SELECT id, order_type, customer_id FROM orders WHERE status = 'COMPLETED' AND date(completed_at, '-5 hours') = ?`
 );
 
 const getPaymentsForOrder = db.prepare<[number], { method: string; gross_amount: number; tip_amount: number; discount: number }>(
   'SELECT method, gross_amount, tip_amount, discount FROM order_payments WHERE order_id = ? ORDER BY id'
+);
+
+// Summed separately from the per-order loop below (one query instead of one
+// per order) since it doesn't need to be split by order.
+const getItemsSoldForDate = db.prepare<[string], { total: number | null }>(
+  `SELECT COALESCE(SUM(oi.quantity), 0) AS total
+   FROM order_items oi
+   JOIN orders o ON o.id = oi.order_id
+   WHERE o.status = 'COMPLETED' AND date(o.completed_at, '-5 hours') = ?`
 );
 
 function aggregateSales(date: string): SalesAggregate {
@@ -62,6 +81,11 @@ function aggregateSales(date: string): SalesAggregate {
     totalSales: 0,
     tips: 0,
     discounts: 0,
+    itemsSold: getItemsSoldForDate.get(date)?.total ?? 0,
+    customersServed: 0,
+    deliveryOrderCount: 0,
+    dineInOrderCount: 0,
+    takeawayOrderCount: 0,
   };
 
   function addMethodSales(method: string, amount: number): void {
@@ -70,7 +94,16 @@ function aggregateSales(date: string): SalesAggregate {
     else if (method === 'transfer') agg.transferSales += amount;
   }
 
+  // "Customers served" = distinct customers, not distinct orders - the same
+  // customer placing two orders in one day still only counts once.
+  const customerIds = new Set<number>();
+
   for (const row of rows) {
+    if (row.customer_id != null) customerIds.add(row.customer_id);
+    if (row.order_type === 'delivery') agg.deliveryOrderCount++;
+    else if (row.order_type === 'dine_in') agg.dineInOrderCount++;
+    else if (row.order_type === 'takeaway') agg.takeawayOrderCount++;
+
     let salesAmount = 0;
     for (const p of getPaymentsForOrder.all(row.id)) {
       const net = p.gross_amount - p.tip_amount - p.discount;
@@ -83,6 +116,7 @@ function aggregateSales(date: string): SalesAggregate {
     if (row.order_type === 'delivery') agg.deliverySales += salesAmount;
     else agg.dineInTakeawaySales += salesAmount;
   }
+  agg.customersServed = customerIds.size;
   return agg;
 }
 
@@ -111,6 +145,13 @@ function renderClosingReceipt(date: string, sales: SalesAggregate, totalExpenses
   lines.push(centerText('CIERRE DEL DIA', width));
   lines.push(`Fecha: ${date}`);
   lines.push(`Ordenes completadas: ${sales.orderCount}`);
+  lines.push(`Articulos vendidos: ${sales.itemsSold}`);
+  lines.push(`Clientes atendidos: ${sales.customersServed}`);
+  lines.push('-'.repeat(width));
+  lines.push(centerText('ORDENES POR TIPO', width));
+  lines.push(`Domicilio: ${sales.deliveryOrderCount}`);
+  lines.push(`Mesa: ${sales.dineInOrderCount}`);
+  lines.push(`Para llevar: ${sales.takeawayOrderCount}`);
   lines.push('-'.repeat(width));
   lines.push(centerText('VENTAS POR TIPO', width));
   lines.push(moneyRow('Domicilio', sales.deliverySales, width));
@@ -131,14 +172,23 @@ function renderClosingReceipt(date: string, sales: SalesAggregate, totalExpenses
 }
 
 const insertClosingReport = db.prepare<
-  [string, number, number, number, number, number, number, number, number, number, number, string]
+  [string, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, string]
 >(
   `INSERT INTO closing_reports
-     (date, order_count, delivery_sales, dine_in_takeaway_sales, cash_sales, card_sales, transfer_sales, total_sales, tips, discounts, total_expenses, content)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     (date, order_count, delivery_sales, dine_in_takeaway_sales, cash_sales, card_sales, transfer_sales, total_sales, tips, discounts,
+      items_sold, customers_served, delivery_order_count, dine_in_order_count, takeaway_order_count, total_expenses, content)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 );
 const getClosingReportRow = db.prepare<[number], ClosingReportRow>('SELECT * FROM closing_reports WHERE id = ?');
 const listClosingReportRows = db.prepare<[], ClosingReportRow>('SELECT * FROM closing_reports ORDER BY id DESC');
+
+// Closing the day while orders are still open would silently under-report
+// sales (an order that completes later would never make it into this
+// snapshot) - block it instead, same "today" business-day window as
+// aggregateSales/order-history's date filter.
+const getOpenOrderCountForDate = db.prepare<[string], { count: number }>(
+  `SELECT COUNT(*) AS count FROM orders WHERE status != 'COMPLETED' AND date(created_at, '-5 hours') = ?`
+);
 
 /**
  * Generates today's (Bogota business day) End-of-Day closing report: gathers
@@ -146,10 +196,20 @@ const listClosingReportRows = db.prepare<[], ClosingReportRow>('SELECT * FROM cl
  * payment method (tips excluded, delivery fees included), pulls the day's
  * total expenses from cash_flow, persists the snapshot, and prints it. Always
  * an explicit staff action - see cash_flow's schema comment for why the daily
- * register rotation itself is automatic while this is not.
+ * register rotation itself is automatic while this is not. Any employee can
+ * call this (see routes/endOfDay.ts) as long as every one of today's orders
+ * is already COMPLETED.
  */
 export function closeDay(): ClosingReport {
   const date = todayDateStrBogota();
+
+  const openOrders = getOpenOrderCountForDate.get(date)!.count;
+  if (openOrders > 0) {
+    throw new ConflictError(
+      `${openOrders} order${openOrders === 1 ? '' : 's'} from today ${openOrders === 1 ? 'is' : 'are'} not completed yet - complete or cancel them before closing the day`
+    );
+  }
+
   const sales = aggregateSales(date);
   const totalExpenses = expensesForDate(date);
   const content = renderClosingReceipt(date, sales, totalExpenses);
@@ -165,6 +225,11 @@ export function closeDay(): ClosingReport {
     sales.totalSales,
     sales.tips,
     sales.discounts,
+    sales.itemsSold,
+    sales.customersServed,
+    sales.deliveryOrderCount,
+    sales.dineInOrderCount,
+    sales.takeawayOrderCount,
     totalExpenses,
     content
   );

@@ -21,8 +21,6 @@ function CalzoneFlavorPage() {
   const [showComment, setShowComment] = useState(false);
   const [notes, setNotes] = useState('');
 
-  const currentOrderId = useOrderStore((s) => s.currentOrderId);
-  const newOrderInfo = useOrderStore((s) => s.newOrderInfo);
   const addCartItem = useOrderStore((s) => s.addCartItem);
   const pushToast = useToastStore((s) => s.push);
 
@@ -36,13 +34,8 @@ function CalzoneFlavorPage() {
 
   const flavors = allPizzaFlavors(pizzas);
   const price = productUnitPrice(product, sizeId);
-  const hasOrderContext = currentOrderId != null || newOrderInfo != null;
 
   const handleAdd = () => {
-    if (!hasOrderContext) {
-      pushToast('Primero elige una mesa, domicilio o para llevar', 'warning');
-      return;
-    }
     if (!flavorId) {
       pushToast('Elige un sabor', 'warning');
       return;
