@@ -47,7 +47,7 @@ interface Pool {
   pizzaFlavors: string[];
   productCategories: {
     id: ProductCategoryId;
-    products: { id: string; sizes: string[]; options: string[]; requiresPizzaFlavor: boolean }[];
+    products: { id: string; sizes: string[]; drinkFlavors: string[]; requiresPizzaFlavor: boolean }[];
   }[];
   employeeIds: number[];
   /** takeaway orders just need a customerId - see randomOrder. */
@@ -89,7 +89,7 @@ async function loadPool(): Promise<Pool> {
         products: cat.products.map((p) => ({
           id: p.id,
           sizes: (p.sizes ?? []).map((s) => s.id),
-          options: (p.options ?? []).map((o) => o.id),
+          drinkFlavors: (p.drinkFlavors ?? []).map((f) => f.id),
           requiresPizzaFlavor: p.pizzaFlavor === true,
         })),
       });
@@ -172,9 +172,9 @@ function randomProductItem(pool: Pool): OrderItemRequest {
     category: category.id,
     product: product.id,
     size: product.sizes.length > 0 ? pick(product.sizes) : undefined,
-    // The server requires `option` whenever the product has any configured options
-    // (e.g. juice, beer, soft drinks) - it's only skippable for option-less products.
-    option: product.options.length > 0 ? pick(product.options) : undefined,
+    // The server requires `drinkFlavor` whenever the product has any configured
+    // flavors (e.g. juice, beer, soft drinks) - only skippable for flavor-less products.
+    drinkFlavor: product.drinkFlavors.length > 0 ? pick(product.drinkFlavors) : undefined,
     pizzaFlavor: product.requiresPizzaFlavor ? pick(pool.pizzaFlavors) : undefined,
     quantity: randInt(1, 3),
     notes: pick(NOTES),

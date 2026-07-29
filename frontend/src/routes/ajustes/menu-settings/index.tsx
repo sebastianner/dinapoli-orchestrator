@@ -10,6 +10,7 @@ import { formatCOP } from '@/lib/format';
 import { isPizzaCategory } from '@/types/api';
 import { AddProductModal } from '@/components/menu/AddProductModal';
 import { DeleteProductModal } from '@/components/menu/DeleteProductModal';
+import { DrinkFlavorsModal } from '@/components/menu/DrinkFlavorsModal';
 import { EditProductModal } from '@/components/menu/EditProductModal';
 import { PizzaSettingsPanel } from '@/components/menu/PizzaSettingsPanel';
 import type { AdminProduct, ProductCategoryId } from '@/types/api';
@@ -30,6 +31,7 @@ function MenuSettingsPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<AdminProduct | null>(null);
   const [deleting, setDeleting] = useState<AdminProduct | null>(null);
+  const [managingFlavors, setManagingFlavors] = useState<AdminProduct | null>(null);
   // null until the menu loads, then defaults to the first product category -
   // pizzas isn't the default so admins land on the more common editing task.
   const [selected, setSelected] = useState<RailSelection | null>(null);
@@ -127,13 +129,16 @@ function MenuSettingsPage() {
               <section className="max-w-2xl">
                 <div className="mb-2 flex items-center justify-between">
                   <p className="text-sm font-semibold uppercase tracking-wide text-text-secondary">{activeCategory.name}</p>
-                  <button
-                    type="button"
-                    onClick={() => openAddModal(activeCategory.id)}
-                    className="text-xs font-semibold text-brand-600 hover:text-brand-700"
-                  >
-                    + Agregar aquí
-                  </button>
+                  {/* Calzones ("Pantalón") is a single size-priced product, not a list to grow - no "add another" here. */}
+                  {activeCategory.id !== 'calzones' && (
+                    <button
+                      type="button"
+                      onClick={() => openAddModal(activeCategory.id)}
+                      className="text-xs font-semibold text-brand-600 hover:text-brand-700"
+                    >
+                      + Agregar aquí
+                    </button>
+                  )}
                 </div>
                 {activeCategoryProducts.length === 0 ? (
                   <p className="rounded-xl border border-dashed border-border p-4 text-sm text-text-secondary">
@@ -153,6 +158,8 @@ function MenuSettingsPage() {
                           product={product}
                           onToggleAvailable={() => handleToggleAvailable(product)}
                           onSavePrice={(price) => handleSavePrice(product, price)}
+                          onOpenEditSizes={() => setEditing(product)}
+                          onOpenFlavors={() => setManagingFlavors(product)}
                           onDelete={() => setDeleting(product)}
                         />
                       ))}
@@ -169,7 +176,9 @@ function MenuSettingsPage() {
         open={addOpen}
         onClose={() => setAddOpen(false)}
         onCreated={refresh}
-        categories={categories}
+        // Calzones ("Pantalón") is a single fixed size-priced product, not a
+        // list to grow into - excluded here too, not just from "+ Agregar aquí".
+        categories={categories.filter((c) => c.id !== 'calzones')}
         defaultCategoryId={addingFor}
       />
       <EditProductModal
@@ -179,7 +188,12 @@ function MenuSettingsPage() {
           setEditing(null);
           setDeleting(product);
         }}
+        onRequestFlavors={(product) => {
+          setEditing(null);
+          setManagingFlavors(product);
+        }}
       />
+      <DrinkFlavorsModal product={managingFlavors} onClose={() => setManagingFlavors(null)} />
       <DeleteProductModal
         product={deleting}
         onClose={() => setDeleting(null)}
@@ -233,10 +247,14 @@ interface ProductSettingsRowProps {
   product: AdminProduct;
   onToggleAvailable: () => void;
   onSavePrice: (price: number) => void;
+  /** Opens EditProductModal to edit per-size prices (e.g. Pequeña/Grande) - only rendered for products priced per size, since there's no room for one input per size in this row. */
+  onOpenEditSizes: () => void;
+  /** Opens DrinkFlavorsModal - only rendered for drinks, the only category products currently pick a flavor for. */
+  onOpenFlavors: () => void;
   onDelete: () => void;
 }
 
-function ProductSettingsRow({ product, onToggleAvailable, onSavePrice, onDelete }: ProductSettingsRowProps) {
+function ProductSettingsRow({ product, onToggleAvailable, onSavePrice, onOpenEditSizes, onOpenFlavors, onDelete }: ProductSettingsRowProps) {
   const [priceInput, setPriceInput] = useState(product.price != null ? String(product.price) : '');
 
   const commitPrice = () => {
@@ -268,9 +286,24 @@ function ProductSettingsRow({ product, onToggleAvailable, onSavePrice, onDelete 
           />
         </div>
       ) : (
-        <span className="text-xs text-text-secondary" title="Este producto se precia por tamaño, no aquí">
+        <button
+          type="button"
+          onClick={onOpenEditSizes}
+          title="Editar precio por tamaño"
+          className="text-xs text-text-secondary underline decoration-dotted underline-offset-2 transition-colors duration-fast hover:text-brand-600"
+        >
           {product.sizes.map((s) => `${s.name} ${formatCOP(s.price)}`).join(' · ')}
-        </span>
+        </button>
+      )}
+
+      {product.categoryId === 'drinks' && (
+        <button
+          type="button"
+          onClick={onOpenFlavors}
+          className="flex shrink-0 cursor-pointer items-center gap-1 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors duration-fast hover:border-brand-400 hover:text-brand-600"
+        >
+          {product.drinkFlavors.length > 0 ? `${product.drinkFlavors.length} sabor${product.drinkFlavors.length === 1 ? '' : 'es'}` : '+ Sabores'}
+        </button>
       )}
 
       <button

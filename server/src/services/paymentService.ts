@@ -35,7 +35,7 @@ export interface Payment {
  */
 export function processPayment(order: Order, payments: PaymentSplit[]): Payment {
   if (!Number.isInteger(order.total) || order.total <= 0) {
-    throw new ValidationError('order total must be a positive integer amount in COP');
+    throw new ValidationError('el total de la orden debe ser un monto entero positivo en COP');
   }
 
   const amountCOP = order.grandTotal;

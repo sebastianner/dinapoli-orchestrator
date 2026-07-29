@@ -24,11 +24,13 @@ function rowToClosingReport(row: ClosingReportRow): ClosingReport {
     deliveryOrderCount: row.delivery_order_count,
     dineInOrderCount: row.dine_in_order_count,
     takeawayOrderCount: row.takeaway_order_count,
+    cashInRegister: row.cash_in_register,
+    content: row.content,
     createdAt: row.created_at,
   };
 }
 
-interface SalesAggregate {
+export interface SalesAggregate {
   orderCount: number;
   deliverySales: number;
   dineInTakeawaySales: number;
@@ -69,7 +71,7 @@ const getItemsSoldForDate = db.prepare<[string], { total: number | null }>(
    WHERE o.status = 'COMPLETED' AND date(o.completed_at, '-5 hours') = ?`
 );
 
-function aggregateSales(date: string): SalesAggregate {
+export function aggregateSales(date: string): SalesAggregate {
   const rows = getCompletedOrdersForDate.all(date);
   const agg: SalesAggregate = {
     orderCount: rows.length,
@@ -131,13 +133,22 @@ function expensesForDate(date: string): number {
   return getExpensesForDate.get(date)?.total ?? 0;
 }
 
+const getCashInRegisterForDate = db.prepare<[string], { cash_in_register: number }>(
+  'SELECT cash_in_register FROM cash_flow WHERE date = ?'
+);
+
+/** The register's base cash for `date` (see cashFlowService.getCurrentCashFlow) - 0 if no cash_flow row exists yet for that day. */
+function cashInRegisterForDate(date: string): number {
+  return getCashInRegisterForDate.get(date)?.cash_in_register ?? 0;
+}
+
 function moneyRow(label: string, amount: number, width: number): string {
   const value = formatMoney(amount);
   const padding = Math.max(1, width - label.length - value.length);
   return `${label}${' '.repeat(padding)}${value}`;
 }
 
-function renderClosingReceipt(date: string, sales: SalesAggregate, totalExpenses: number): string {
+function renderClosingReceipt(date: string, sales: SalesAggregate, totalExpenses: number, cashInRegister: number): string {
   const width = RECEIPT_WIDTH;
   const lines: string[] = [];
 
@@ -158,26 +169,32 @@ function renderClosingReceipt(date: string, sales: SalesAggregate, totalExpenses
   lines.push(moneyRow('Mesa / Para llevar', sales.dineInTakeawaySales, width));
   lines.push('-'.repeat(width));
   lines.push(centerText('VENTAS POR METODO DE PAGO', width));
-  lines.push(moneyRow('Efectivo', sales.cashSales, width));
-  lines.push(moneyRow('Tarjeta', sales.cardSales, width));
-  lines.push(moneyRow('Transferencia', sales.transferSales, width));
+  // Net of tips and discounts already (see aggregateSales) - the real money
+  // collected via each method, same figures shown as "Ventas en X" in the UI.
+  lines.push(moneyRow('Ventas en efectivo', sales.cashSales, width));
+  lines.push(moneyRow('Ventas en tarjeta', sales.cardSales, width));
+  lines.push(moneyRow('Ventas en transferencia', sales.transferSales, width));
   lines.push('='.repeat(width));
   lines.push(moneyRow('TOTAL VENTAS', sales.totalSales, width));
   lines.push(moneyRow('Propinas', sales.tips, width));
   lines.push(moneyRow('Descuentos', sales.discounts, width));
   lines.push(moneyRow('Gastos del dia', totalExpenses, width));
+  lines.push('-'.repeat(width));
+  // Base de caja del dia + ventas en efectivo - lo que deberia haber en la
+  // caja al cierre (ver cashFlowService.getCurrentCashFlow).
+  lines.push(moneyRow('Efectivo final en caja', cashInRegister + sales.cashSales, width));
   lines.push('='.repeat(width));
 
   return toAsciiText(lines.join('\n'));
 }
 
 const insertClosingReport = db.prepare<
-  [string, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, string]
+  [string, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, string]
 >(
   `INSERT INTO closing_reports
      (date, order_count, delivery_sales, dine_in_takeaway_sales, cash_sales, card_sales, transfer_sales, total_sales, tips, discounts,
-      items_sold, customers_served, delivery_order_count, dine_in_order_count, takeaway_order_count, total_expenses, content)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      items_sold, customers_served, delivery_order_count, dine_in_order_count, takeaway_order_count, total_expenses, cash_in_register, content)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 );
 const getClosingReportRow = db.prepare<[number], ClosingReportRow>('SELECT * FROM closing_reports WHERE id = ?');
 const listClosingReportRows = db.prepare<[], ClosingReportRow>('SELECT * FROM closing_reports ORDER BY id DESC');
@@ -206,13 +223,14 @@ export function closeDay(): ClosingReport {
   const openOrders = getOpenOrderCountForDate.get(date)!.count;
   if (openOrders > 0) {
     throw new ConflictError(
-      `${openOrders} order${openOrders === 1 ? '' : 's'} from today ${openOrders === 1 ? 'is' : 'are'} not completed yet - complete or cancel them before closing the day`
+      `${openOrders} orden${openOrders === 1 ? '' : 'es'} de hoy ${openOrders === 1 ? 'no está completada' : 'no están completadas'} - complétala${openOrders === 1 ? '' : 's'} o cancélala${openOrders === 1 ? '' : 's'} antes de cerrar el día`
     );
   }
 
   const sales = aggregateSales(date);
   const totalExpenses = expensesForDate(date);
-  const content = renderClosingReceipt(date, sales, totalExpenses);
+  const cashInRegister = cashInRegisterForDate(date);
+  const content = renderClosingReceipt(date, sales, totalExpenses, cashInRegister);
 
   const { lastInsertRowid } = insertClosingReport.run(
     date,
@@ -231,6 +249,7 @@ export function closeDay(): ClosingReport {
     sales.dineInOrderCount,
     sales.takeawayOrderCount,
     totalExpenses,
+    cashInRegister,
     content
   );
 
@@ -252,13 +271,13 @@ export function listClosingReports(): ClosingReport[] {
 
 export function getClosingReport(id: number): ClosingReport {
   const row = getClosingReportRow.get(id);
-  if (!row) throw new NotFoundError(`closing report ${id} not found`);
+  if (!row) throw new NotFoundError(`informe de cierre ${id} no encontrado`);
   return rowToClosingReport(row);
 }
 
 /** Re-sends a previously generated closing report to the printer without recomputing it. */
 export function reprintClosingReport(id: number): void {
   const row = getClosingReportRow.get(id);
-  if (!row) throw new NotFoundError(`closing report ${id} not found`);
+  if (!row) throw new NotFoundError(`informe de cierre ${id} no encontrado`);
   printPlainText(row.content);
 }

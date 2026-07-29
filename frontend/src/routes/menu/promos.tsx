@@ -54,7 +54,7 @@ function PromosPage() {
               key={promo.type}
               type="button"
               onClick={() => handleSelect(promo.type)}
-              className="anim-scale-in flex w-64 flex-col items-start gap-2 rounded-2xl border border-border bg-surface p-5 text-left shadow-sm transition-transform duration-fast hover:scale-105 hover:border-brand-400 active:scale-95"
+              className="anim-scale-in flex w-64 cursor-pointer flex-col items-start gap-2 rounded-2xl border border-border bg-surface p-5 text-left shadow-sm transition-transform duration-fast hover:scale-105 hover:border-brand-400 active:scale-95"
             >
               <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-500/10 text-brand-600">
                 <Sparkles size={20} />

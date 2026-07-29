@@ -60,7 +60,7 @@ function MenuLayout() {
             <button
               type="button"
               onClick={cancelPromo}
-              className="flex shrink-0 items-center gap-1 rounded-full border border-brand-400 px-3 py-1 text-xs font-semibold text-brand-700 transition-colors duration-fast hover:bg-brand-500/10"
+              className="flex shrink-0 cursor-pointer items-center gap-1 rounded-full border border-brand-400 px-3 py-1 text-xs font-semibold text-brand-700 transition-colors duration-fast hover:bg-brand-500/10"
             >
               <X size={13} /> Cancelar promo
             </button>

@@ -2,15 +2,16 @@ import { useRef, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { mutate } from 'swr';
 import classNames from 'classnames';
-import { CreditCard, Send, Trash2 } from 'lucide-react';
-import { useOrderStore, type CartItem } from '@/store/useOrderStore';
+import { CreditCard, Send, Trash2, UserPlus, Pencil, Percent, X } from 'lucide-react';
+import { useOrderStore, type CartItem, type CustomerDisplayInfo } from '@/store/useOrderStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useToastStore } from '@/store/useToastStore';
 import { useMenu, useOrder } from '@/lib/queries';
 import { formatCOP } from '@/lib/format';
-import { addOrderItems } from '@/lib/api';
+import { addOrderItems, updateOrderCustomer } from '@/lib/api';
 import { orderSocketClient } from '@/lib/orderSocket';
 import { PaymentModal } from '@/components/order/PaymentModal';
+import { CustomerInfoModal } from '@/components/table/CustomerInfoModal';
 import { groupOrderItems } from '@/lib/pricing';
 import { useOrderNotificationStore } from '@/store/useOrderNotificationStore';
 import type { Order } from '@/types/api';
@@ -28,6 +29,7 @@ export function OrderOverview() {
   const removeCartItems = useOrderStore((s) => s.removeCartItems);
   const clearCart = useOrderStore((s) => s.clearCart);
   const promoteDraftToOrder = useOrderStore((s) => s.promoteDraftToOrder);
+  const setDraftCustomer = useOrderStore((s) => s.setDraftCustomer);
   const upsertActiveOrder = useOrderStore((s) => s.upsertActiveOrder);
   const clearCurrentOrder = useOrderStore((s) => s.clearCurrentOrder);
   const pendingTip = useOrderStore((s) => s.pendingTip);
@@ -52,8 +54,10 @@ export function OrderOverview() {
   // clicking "Otra", before typing anything) - tipMode itself is derived
   // from pendingTip so it survives navigating away and back.
   const [customTipOpen, setCustomTipOpen] = useState(false);
+  const [discountOpen, setDiscountOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [paymentOpen, setPaymentOpen] = useState(false);
+  const [customerModalOpen, setCustomerModalOpen] = useState(false);
 
   const cartSubtotal = cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
   const existingSubtotal = existingOrder?.total ?? 0;
@@ -64,6 +68,7 @@ export function OrderOverview() {
 
   const orderType = existingOrder?.orderType ?? newOrderInfo?.orderType;
   const isDelivery = orderType === 'delivery';
+  const customerName = existingOrder?.customerName ?? newOrderInfo?.customerDisplay?.name;
 
   const tenPct = Math.round(subtotal * TIP_PERCENTAGES.ten);
   const twentyPct = Math.round(subtotal * TIP_PERCENTAGES.twenty);
@@ -78,6 +83,7 @@ export function OrderOverview() {
 
   const grossTotal = subtotal + pendingTip + (isDelivery ? pendingDeliveryFee : 0);
   const netTotal = grossTotal - pendingDiscount;
+  const showDiscountInput = pendingDiscount > 0 || discountOpen;
 
   const handlePercentClick = (mode: 'ten' | 'twenty') => {
     const turningOn = tipMode !== mode;
@@ -89,6 +95,15 @@ export function OrderOverview() {
     const turningOn = tipMode !== 'custom';
     setCustomTipOpen(turningOn);
     if (!turningOn) setPendingTip(0);
+  };
+
+  const handleToggleDiscount = () => {
+    if (showDiscountInput) {
+      setDiscountOpen(false);
+      setPendingDiscount(0);
+    } else {
+      setDiscountOpen(true);
+    }
   };
 
   const handleSubmitNewOrder = async () => {
@@ -145,6 +160,24 @@ export function OrderOverview() {
     }
   };
 
+  const handleCustomerSubmit = async (customerId: number, customerAddressId: number | undefined, display: CustomerDisplayInfo) => {
+    setCustomerModalOpen(false);
+    if (existingOrder) {
+      // Order already exists server-side - persist the attachment, not just the draft.
+      try {
+        const updated = await updateOrderCustomer(existingOrder.id, customerId, customerAddressId);
+        upsertActiveOrder(updated);
+        await mutate(`/orders/${existingOrder.id}`, updated, { revalidate: false });
+        pushToast('Cliente asignado a la mesa');
+      } catch (err) {
+        pushToast(err instanceof Error ? err.message : 'No se pudo asignar el cliente', 'error');
+      }
+      return;
+    }
+    // Not submitted yet - just update the draft, sent along with the order on Enviar orden.
+    setDraftCustomer(customerId, customerAddressId, display);
+  };
+
   const handlePaymentSuccess = (completedOrder: Order) => {
     setPaymentOpen(false);
     upsertActiveOrder(completedOrder); // status is COMPLETED, so this drops it out of activeOrders / Órdenes activas
@@ -160,8 +193,27 @@ export function OrderOverview() {
         <h2 className="font-semibold text-text-primary">
           {existingOrder ? orderTitle(existingOrder.orderType, existingOrder.tableNumber) : orderTitle(newOrderInfo?.orderType, newOrderInfo?.tableNumber)}
         </h2>
-        {(existingOrder?.customerName ?? newOrderInfo?.customerDisplay?.name) && (
-          <p className="text-xs text-text-secondary">{existingOrder?.customerName ?? newOrderInfo?.customerDisplay?.name}</p>
+        {orderType === 'dine_in' ? (
+          customerName ? (
+            <button
+              type="button"
+              onClick={() => setCustomerModalOpen(true)}
+              className="mt-0.5 flex cursor-pointer items-center gap-1 text-xs text-text-secondary hover:text-brand-600"
+            >
+              {customerName}
+              <Pencil size={11} className="shrink-0" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setCustomerModalOpen(true)}
+              className="mt-0.5 flex cursor-pointer items-center gap-1 text-xs font-medium text-brand-600 hover:text-brand-700"
+            >
+              <UserPlus size={12} className="shrink-0" /> Agregar cliente
+            </button>
+          )
+        ) : (
+          customerName && <p className="text-xs text-text-secondary">{customerName}</p>
         )}
       </div>
 
@@ -196,16 +248,32 @@ export function OrderOverview() {
           <span className="font-medium text-text-primary">{formatCOP(subtotal)}</span>
         </div>
 
-        <label className="flex items-center justify-between text-sm text-text-secondary">
-          <span>Descuento</span>
-          <input
-            type="number"
-            min={0}
-            value={pendingDiscount}
-            onChange={(e) => setPendingDiscount(Number(e.target.value) || 0)}
-            className="w-28 rounded-lg border border-border bg-surface px-2 py-1 text-right text-text-primary outline-none focus:border-brand-400"
-          />
-        </label>
+        {showDiscountInput ? (
+          <label className="flex items-center justify-between text-sm text-text-secondary">
+            <span>Descuento</span>
+            <span className="flex items-center gap-1.5">
+              <input
+                autoFocus
+                type="number"
+                min={0}
+                value={pendingDiscount}
+                onChange={(e) => setPendingDiscount(Number(e.target.value) || 0)}
+                className="w-28 rounded-lg border border-border bg-surface px-2 py-1 text-right text-text-primary outline-none focus:border-brand-400"
+              />
+              <button type="button" onClick={handleToggleDiscount} aria-label="Quitar descuento" className="cursor-pointer text-text-secondary hover:text-danger">
+                <X size={14} />
+              </button>
+            </span>
+          </label>
+        ) : (
+          <button
+            type="button"
+            onClick={handleToggleDiscount}
+            className="flex cursor-pointer items-center gap-1 text-sm text-text-secondary hover:text-brand-600"
+          >
+            <Percent size={12} className="shrink-0" /> Agregar descuento
+          </button>
+        )}
 
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between text-sm text-text-secondary">
@@ -217,7 +285,7 @@ export function OrderOverview() {
               type="button"
               onClick={() => handlePercentClick('ten')}
               className={classNames(
-                'flex-1 rounded-lg border py-1.5 text-sm font-semibold transition-colors duration-fast',
+                'flex-1 cursor-pointer rounded-lg border py-1.5 text-sm font-semibold transition-colors duration-fast',
                 tipMode === 'ten' ? 'border-brand-500 bg-brand-500 text-white' : 'border-border text-text-secondary hover:border-brand-400',
               )}
             >
@@ -227,7 +295,7 @@ export function OrderOverview() {
               type="button"
               onClick={() => handlePercentClick('twenty')}
               className={classNames(
-                'flex-1 rounded-lg border py-1.5 text-sm font-semibold transition-colors duration-fast',
+                'flex-1 cursor-pointer rounded-lg border py-1.5 text-sm font-semibold transition-colors duration-fast',
                 tipMode === 'twenty' ? 'border-brand-500 bg-brand-500 text-white' : 'border-border text-text-secondary hover:border-brand-400',
               )}
             >
@@ -237,7 +305,7 @@ export function OrderOverview() {
               type="button"
               onClick={handleCustomClick}
               className={classNames(
-                'flex-1 rounded-lg border py-1.5 text-sm font-semibold transition-colors duration-fast',
+                'flex-1 cursor-pointer rounded-lg border py-1.5 text-sm font-semibold transition-colors duration-fast',
                 tipMode === 'custom' ? 'border-brand-500 bg-brand-500 text-white' : 'border-border text-text-secondary hover:border-brand-400',
               )}
             >
@@ -287,7 +355,7 @@ export function OrderOverview() {
             type="button"
             onClick={handleAddToExistingOrder}
             disabled={cart.length === 0 || submitting}
-            className="mt-1 flex items-center justify-center gap-1.5 rounded-lg border border-brand-400 py-2 text-sm font-semibold text-brand-600 transition-colors duration-fast hover:bg-brand-500/10 disabled:opacity-50"
+            className="mt-1 flex cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-brand-400 py-2 text-sm font-semibold text-brand-600 transition-colors duration-fast hover:bg-brand-500/10 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Send size={15} /> Agregar productos
           </button>
@@ -296,7 +364,7 @@ export function OrderOverview() {
             type="button"
             onClick={handleSubmitNewOrder}
             disabled={cart.length === 0 || submitting}
-            className="mt-1 flex items-center justify-center gap-1.5 rounded-lg bg-brand-500 py-2 text-sm font-semibold text-white transition-colors duration-fast hover:bg-brand-600 disabled:opacity-50"
+            className="mt-1 flex cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-brand-500 py-2 text-sm font-semibold text-white transition-colors duration-fast hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Send size={15} /> Enviar orden
           </button>
@@ -306,7 +374,7 @@ export function OrderOverview() {
           <button
             type="button"
             onClick={() => setPaymentOpen(true)}
-            className="flex items-center justify-center gap-1.5 rounded-lg bg-success py-2 text-sm font-semibold text-white transition-colors duration-fast hover:opacity-90"
+            className="flex cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-success py-2 text-sm font-semibold text-white transition-colors duration-fast hover:opacity-90"
           >
             <CreditCard size={15} /> Cobrar orden
           </button>
@@ -315,6 +383,10 @@ export function OrderOverview() {
 
       {paymentOpen && existingOrder && (
         <PaymentModal open={paymentOpen} order={existingOrder} onClose={() => setPaymentOpen(false)} onSuccess={handlePaymentSuccess} />
+      )}
+
+      {orderType === 'dine_in' && (
+        <CustomerInfoModal open={customerModalOpen} orderType="dine_in" onClose={() => setCustomerModalOpen(false)} onSubmit={handleCustomerSubmit} />
       )}
     </aside>
   );
@@ -399,7 +471,7 @@ function CartRow({ group, onRemoveOne, onRemoveAll }: { group: GroupedCartItem; 
           onClick={handleClick}
           aria-label={group.quantity > 1 ? 'Quitar uno (mantén presionado para quitar todos)' : 'Quitar producto'}
           title={group.quantity > 1 ? 'Mantener para borrar todo' : undefined}
-          className="text-text-secondary hover:text-danger"
+          className="cursor-pointer text-text-secondary hover:text-danger"
         >
           <Trash2 size={15} />
         </button>

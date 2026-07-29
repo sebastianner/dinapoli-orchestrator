@@ -1,10 +1,19 @@
 import type {
+  AnalyticsRange,
   CashExpense,
   CashFlowDay,
   CashRegisterSettings,
   City,
   ClosingReport,
   Customer,
+  CustomersAnalytics,
+  EmployeePerformance,
+  HeatmapCell,
+  ProductsAnalytics,
+  PromoUsageSummary,
+  SalesBreakdown,
+  SalesSummary,
+  SalesTrendPoint,
   CustomerAddress,
   Employee,
   EmployeeRole,
@@ -19,6 +28,7 @@ import type {
   PropertyType,
   ProductSearchResult,
   AdminProduct,
+  AdminDrinkFlavor,
   RestaurantTableSummary,
   PizzaAdminData,
   AdminPizzaGroup,
@@ -121,7 +131,15 @@ export interface AdminProductInput {
 }
 export const createAdminProduct = (input: AdminProductInput) => post<AdminProduct>('/products', input);
 export const updateAdminProduct = (id: number, input: AdminProductInput) => put<AdminProduct>(`/products/${id}`, input);
+export const updateAdminProductSize = (id: number, sizeId: string, price: number) =>
+  put<AdminProduct>(`/products/${id}/sizes/${sizeId}`, { price });
 export const deleteAdminProduct = (id: number) => del<{ status: string; id: number }>(`/products/${id}`);
+
+// Shared drink-flavor library (e.g. "Coca-Cola") plus setting the exact set a
+// given product offers (0 to many) - see menuService.setProductDrinkFlavors.
+export const fetchDrinkFlavors = () => get<AdminDrinkFlavor[]>('/products/drink-flavors');
+export const updateProductDrinkFlavors = (id: number, flavors: string[]) =>
+  put<AdminProduct>(`/products/${id}/drink-flavors`, { flavors });
 
 // ---------- Pizza settings (admin) ----------
 
@@ -132,6 +150,7 @@ export const updatePizzaGroupSizePrice = (groupId: PizzaGroupId, sizeId: string,
 export interface PizzaFlavorInput {
   name?: string;
   description?: string | null;
+  isAvailable?: boolean;
   groupIds?: PizzaGroupId[];
 }
 export const createPizzaFlavor = (input: Required<Pick<PizzaFlavorInput, 'name' | 'groupIds'>> & PizzaFlavorInput) =>
@@ -269,6 +288,8 @@ export const reprintOrderDocument = (id: number, kind: 'kitchen_ticket' | 'bill'
 /** Admin only, irreversible - deletes the order and everything derived from it (items, payments, print jobs). */
 export const deleteOrder = (id: number) => del<{ status: string; orderId: number }>(`/orders/${id}`);
 export const updateOrderTable = (id: number, tableNumber: number) => put<Order>(`/orders/${id}/table`, { tableNumber });
+export const updateOrderCustomer = (id: number, customerId: number, customerAddressId?: number) =>
+  put<Order>(`/orders/${id}/customer`, { customerId, customerAddressId });
 
 // ---------- Cash flow ----------
 
@@ -286,5 +307,34 @@ export const closeDay = () => post<ClosingReport>('/end-of-day/close');
 export const fetchClosingReports = () => get<ClosingReport[]>('/end-of-day');
 export const fetchClosingReport = (id: number) => get<ClosingReport>(`/end-of-day/${id}`);
 export const reprintClosingReport = (id: number) => post<{ status: string; id: number }>(`/end-of-day/${id}/reprint`);
+
+// ---------- Analytics ----------
+
+/** Builds the shared `range=...&from=...&to=...` query string every analytics endpoint accepts. */
+function rangeQuery(range: AnalyticsRange, from?: string, to?: string): string {
+  const params = new URLSearchParams({ range });
+  if (range === 'custom' && from && to) {
+    params.set('from', from);
+    params.set('to', to);
+  }
+  return params.toString();
+}
+
+export const fetchAnalyticsSummary = (range: AnalyticsRange, from?: string, to?: string) =>
+  get<SalesSummary>(`/analytics/summary?${rangeQuery(range, from, to)}`);
+export const fetchSalesTrend = (range: AnalyticsRange, from?: string, to?: string) =>
+  get<SalesTrendPoint[]>(`/analytics/sales-trend?${rangeQuery(range, from, to)}`);
+export const fetchAnalyticsBreakdown = (range: AnalyticsRange, from?: string, to?: string) =>
+  get<SalesBreakdown>(`/analytics/breakdown?${rangeQuery(range, from, to)}`);
+export const fetchAnalyticsHeatmap = (range: AnalyticsRange, from?: string, to?: string) =>
+  get<HeatmapCell[]>(`/analytics/heatmap?${rangeQuery(range, from, to)}`);
+export const fetchAnalyticsProducts = (range: AnalyticsRange, from?: string, to?: string) =>
+  get<ProductsAnalytics>(`/analytics/products?${rangeQuery(range, from, to)}`);
+export const fetchAnalyticsCustomers = (range: AnalyticsRange, from?: string, to?: string) =>
+  get<CustomersAnalytics>(`/analytics/customers?${rangeQuery(range, from, to)}`);
+export const fetchAnalyticsEmployees = (range: AnalyticsRange, from?: string, to?: string) =>
+  get<EmployeePerformance[]>(`/analytics/employees?${rangeQuery(range, from, to)}`);
+export const fetchAnalyticsPromotions = (range: AnalyticsRange, from?: string, to?: string) =>
+  get<PromoUsageSummary>(`/analytics/promotions?${rangeQuery(range, from, to)}`);
 
 export { ApiError };

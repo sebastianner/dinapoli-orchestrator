@@ -152,12 +152,21 @@ CREATE TABLE IF NOT EXISTS product_sizes (
   UNIQUE (product_id, key)
 );
 
-CREATE TABLE IF NOT EXISTS product_options (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+-- Shared/reusable across products, same spirit as pizza_flavors below - e.g.
+-- "Coca-Cola" is one row that both Gaseosa 1.5L and Gaseosa Personal offer,
+-- rather than being duplicated per product like product_options used to be.
+CREATE TABLE IF NOT EXISTS drink_flavors (
+  id   INTEGER PRIMARY KEY AUTOINCREMENT,
+  key  TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL
+);
+
+-- Which products offer which drink flavors (0 to many) - a product with no
+-- rows here (e.g. Coca-Cola 3L) just doesn't show a flavor picker at all.
+CREATE TABLE IF NOT EXISTS product_drink_flavors (
   product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-  key        TEXT NOT NULL,
-  name       TEXT NOT NULL,
-  UNIQUE (product_id, key)
+  flavor_id  INTEGER NOT NULL REFERENCES drink_flavors(id) ON DELETE CASCADE,
+  PRIMARY KEY (product_id, flavor_id)
 );
 
 -- Same external-content trigram FTS5 setup as customers_fts above, over
@@ -264,7 +273,7 @@ CREATE TABLE IF NOT EXISTS order_items (
   item_type         TEXT NOT NULL CHECK (item_type IN ('pizza', 'product')),
   product_id        INTEGER REFERENCES products(id),
   product_size_id   INTEGER REFERENCES product_sizes(id),
-  product_option_id INTEGER REFERENCES product_options(id),
+  drink_flavor_id   INTEGER REFERENCES drink_flavors(id),
   pizza_group_id    INTEGER REFERENCES pizza_groups(id),
   pizza_size_id     INTEGER REFERENCES pizza_sizes(id),
   pizza_flavor_id   INTEGER REFERENCES pizza_flavors(id),
@@ -406,6 +415,7 @@ CREATE TABLE IF NOT EXISTS closing_reports (
   dine_in_order_count    INTEGER NOT NULL DEFAULT 0,
   takeaway_order_count   INTEGER NOT NULL DEFAULT 0,
   total_expenses         INTEGER NOT NULL,
+  cash_in_register       INTEGER NOT NULL DEFAULT 0,
   content                TEXT NOT NULL,
   created_at             TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
@@ -414,7 +424,11 @@ CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_orders_table_number ON orders(table_number);
 CREATE INDEX IF NOT EXISTS idx_orders_employee_id ON orders(employee_id);
 CREATE INDEX IF NOT EXISTS idx_orders_customer_id ON orders(customer_id);
+-- Analytics date-range filtering (analyticsService) scans this on every query.
+CREATE INDEX IF NOT EXISTS idx_orders_completed_at ON orders(completed_at);
 CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);
+-- Product/category revenue rollups (analyticsService.getProducts) group by this.
+CREATE INDEX IF NOT EXISTS idx_order_items_product_id ON order_items(product_id);
 CREATE INDEX IF NOT EXISTS idx_order_payments_order_id ON order_payments(order_id);
 CREATE INDEX IF NOT EXISTS idx_cash_expenses_cash_flow_id ON cash_expenses(cash_flow_id);
 CREATE INDEX IF NOT EXISTS idx_customer_addresses_customer_id ON customer_addresses(customer_id);

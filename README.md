@@ -235,7 +235,7 @@ to type `better-sqlite3` prepared statements live in `src/types/db.ts`.
   `Neighborhood` belongs to a `City`; both are seeded with a starting
   Cali/neighborhoods set (`db/seed.js`) - the only city seeded, which makes
   it the default in the delivery address form - and manageable afterward via
-  the admin-only `/ajustes/locations` page.
+  the admin-only `/ajustes/ubicaciones` page.
   Creating/updating a customer or their addresses needs no auth at all (this
   is staff entering a walk-in/calling customer's details, not a public
   account system) - only `DELETE /api/customers/:id` is admin-gated, and
@@ -332,6 +332,26 @@ to type `better-sqlite3` prepared statements live in `src/types/db.ts`.
   name+description+group-checkboxes, which never fits inline regardless of
   screen width, so there's no separate desktop-inline treatment to maintain.
   A search box filters the active group's flavor list client-side.
+- **Drink flavors** (`menuService.listDrinkFlavors`/`setProductDrinkFlavors`,
+  admin-only `GET /api/products/drink-flavors`/`PUT /api/products/:id/drink-flavors`):
+  a product's selectable, price-neutral flavors (e.g. Gaseosa 1.5L's Coca-Cola/
+  Premio/Quatro/...) used to be one `product_options` row per product per
+  flavor - "Coca-Cola" duplicated across every soda that offered it. Replaced
+  by `drink_flavors` (shared/reusable, same shape as `pizza_flavors`) plus
+  `product_drink_flavors` (which products offer which flavor, many-to-many) -
+  editing "Coca-Cola" once now updates it everywhere it's offered. A product
+  with zero flavor rows (Coca-Cola 3L, Leche) just doesn't show a picker at
+  all, same presence-based rendering as `sizes`/`options` elsewhere.
+  `setProductDrinkFlavors` takes the *exact* set a product should offer as an
+  array of names, find-or-creating each one in `drink_flavors` (so typing
+  "Coca-Cola" for a second product resolves to the same row, not a duplicate)
+  and reconciling `product_drink_flavors` membership to match - old links not
+  in the new set are dropped. `/ajustes/menu-settings`'s drinks category rows
+  gain a "N sabores"/"+ Sabores" button (desktop inline, or inside
+  `EditProductModal` on mobile/tablet) opening `DrinkFlavorsModal`: existing
+  flavors show as removable chips, typing filters the shared library for a
+  "select existing" suggestion list, and a name with no match offers "+ Crear
+  "…"" to create a new one on save.
 - **Tables**: `restaurant_tables.status` is derived automatically — busy while a
   table has any non-`COMPLETED` order, freed the moment its last open order is
   completed. New orders for a busy table are still accepted.
@@ -465,6 +485,13 @@ to type `better-sqlite3` prepared statements live in `src/types/db.ts`.
 - `PUT /api/products/:id` — **admin only.** Same body, all fields optional.
 - `DELETE /api/products/:id` — **admin only.** 409s if the product has existing
   order history.
+- `GET /api/products/drink-flavors` — **admin only.** The shared flavor
+  library (`{ id: number, key: string, name: string }[]`), for
+  `DrinkFlavorsModal`'s "select existing" suggestions.
+- `PUT /api/products/:id/drink-flavors` — **admin only.** `{ "flavors": string[] }` -
+  the exact set of flavor names this product should offer (0 to many);
+  find-or-creates each name in the shared library and reconciles membership
+  to match (see Drink flavors above).
 - `GET /api/pizza-admin` — **admin only.** `{ groups: AdminPizzaGroup[], flavors: AdminPizzaFlavor[] }`
   (see Pizza settings above).
 - `PUT /api/pizza-admin/groups/:groupId` — **admin only.** `{ "name": string }`.

@@ -147,25 +147,31 @@ function PizzaFlavorPage() {
                 const isSelected = selectedFlavors.includes(flavor.id);
                 const portion = portions.find((p) => p.flavor === flavor.id)?.portion;
                 const isExcluded = isDuoPromo && DUO_EXCLUDED_FLAVORS.has(flavor.id);
+                const disabled = isExcluded || !flavor.isAvailable;
                 return (
                   <button
                     key={flavor.id}
                     type="button"
-                    disabled={isExcluded}
-                    title={isExcluded ? 'No incluido en la promoción Dúo' : undefined}
+                    disabled={disabled}
+                    title={isExcluded ? 'No incluido en la promoción Dúo' : !flavor.isAvailable ? 'Agotado' : undefined}
                     onClick={() => toggleFlavor(flavor.id)}
                     className={classNames(
                       'relative rounded-xl border-2 p-3 text-left transition-colors duration-fast',
-                      isExcluded
+                      disabled
                         ? 'cursor-not-allowed border-border bg-surface opacity-40'
                         : isSelected
-                          ? 'border-brand-500 bg-brand-500/10'
-                          : 'border-border bg-surface hover:border-brand-300',
+                          ? 'cursor-pointer border-brand-500 bg-brand-500/10'
+                          : 'cursor-pointer border-border bg-surface hover:border-brand-300',
                     )}
                   >
                     {isSelected && selectedFlavors.length > 1 && portion != null && (
                       <span className="absolute right-2 top-2 rounded-full bg-brand-500 px-1.5 py-0.5 text-xs font-bold text-white">
                         {displayPortion(portion, selectedFlavors.length, pattern)}%
+                      </span>
+                    )}
+                    {!flavor.isAvailable && (
+                      <span className="absolute right-2 top-2 rounded-full bg-danger-bg px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-danger">
+                        Agotado
                       </span>
                     )}
                     <p className="text-sm font-semibold text-text-primary">{flavor.name}</p>
@@ -186,7 +192,7 @@ function PizzaFlavorPage() {
               type="button"
               onClick={() => setPattern('equal')}
               className={classNames(
-                'rounded-full border-2 px-3 py-1.5 text-xs font-semibold transition-colors duration-fast',
+                'cursor-pointer rounded-full border-2 px-3 py-1.5 text-xs font-semibold transition-colors duration-fast',
                 pattern === 'equal' ? 'border-brand-500 bg-brand-500/10 text-brand-700' : 'border-border text-text-secondary hover:border-brand-300',
               )}
             >
@@ -196,7 +202,7 @@ function PizzaFlavorPage() {
               type="button"
               onClick={() => setPattern('half')}
               className={classNames(
-                'rounded-full border-2 px-3 py-1.5 text-xs font-semibold transition-colors duration-fast',
+                'cursor-pointer rounded-full border-2 px-3 py-1.5 text-xs font-semibold transition-colors duration-fast',
                 pattern === 'half' ? 'border-brand-500 bg-brand-500/10 text-brand-700' : 'border-border text-text-secondary hover:border-brand-300',
               )}
             >
@@ -216,7 +222,7 @@ function PizzaFlavorPage() {
                     type="button"
                     onClick={() => setHalfFlavorId(flavorId)}
                     className={classNames(
-                      'rounded-full border-2 px-3 py-1 text-xs font-semibold transition-colors duration-fast',
+                      'cursor-pointer rounded-full border-2 px-3 py-1 text-xs font-semibold transition-colors duration-fast',
                       isHalf ? 'border-brand-500 bg-brand-500/10 text-brand-700' : 'border-border text-text-secondary hover:border-brand-300',
                     )}
                   >
@@ -245,7 +251,7 @@ function PizzaFlavorPage() {
         <button
           type="button"
           onClick={handleAdd}
-          className="flex items-center gap-1.5 rounded-lg bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white transition-colors duration-fast hover:bg-brand-600"
+          className="flex cursor-pointer items-center gap-1.5 rounded-lg bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white transition-colors duration-fast hover:bg-brand-600"
         >
           <Plus size={16} /> Agregar a la orden
         </button>
@@ -253,7 +259,7 @@ function PizzaFlavorPage() {
           type="button"
           onClick={() => setShowComment((v) => !v)}
           aria-label="Agregar comentario"
-          className="flex h-10 w-10 items-center justify-center rounded-lg border border-border text-text-secondary transition-colors duration-fast hover:border-brand-400 hover:text-brand-600"
+          className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-lg border border-border text-text-secondary transition-colors duration-fast hover:border-brand-400 hover:text-brand-600"
         >
           <MessageSquarePlus size={16} />
         </button>

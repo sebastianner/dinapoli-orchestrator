@@ -8,7 +8,7 @@ const router = Router();
 function parseReportId(param: string): number {
   const id = Number(param);
   if (!Number.isInteger(id) || id <= 0) {
-    throw new ValidationError(`invalid closing report id '${param}'`);
+    throw new ValidationError(`id de informe de cierre inválido '${param}'`);
   }
   return id;
 }

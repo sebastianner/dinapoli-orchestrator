@@ -10,7 +10,7 @@ import type { Customer, CustomerAddress } from '@/types/api';
 
 interface CustomerInfoModalProps {
   open: boolean;
-  orderType: 'takeaway' | 'delivery';
+  orderType: 'dine_in' | 'takeaway' | 'delivery';
   onClose: () => void;
   /**
    * `deliveryFee` is the address's neighborhood's fee (already known client-side, see
@@ -44,7 +44,14 @@ function formatAddressDisplay(address: CustomerAddress): string {
 
 type AddressFormState = { mode: 'create' } | { mode: 'edit'; address: CustomerAddress } | null;
 
-/** Takeaway needs a customer; delivery additionally needs one of that customer's saved addresses (or a brand new/edited one). See Customer Selection / Customer Address Form in Todo.MD. */
+/**
+ * Takeaway needs a customer; delivery additionally needs one of that
+ * customer's saved addresses (or a brand new/edited one). dine_in never
+ * requires a customer, but this same modal is reused to let staff attach one
+ * optionally (from the Order Overview panel) - identification only, no
+ * address step, same as takeaway. See Customer Selection / Customer Address
+ * Form in Todo.MD.
+ */
 export function CustomerInfoModal({ open, orderType, onClose, onSubmit }: CustomerInfoModalProps) {
   const [step, setStep] = useState<Step>({ kind: 'search' });
   const [addressForm, setAddressForm] = useState<AddressFormState>(null);
@@ -67,7 +74,7 @@ export function CustomerInfoModal({ open, orderType, onClose, onSubmit }: Custom
   };
 
   const handleSelectCustomer = (customer: Customer) => {
-    if (orderType === 'takeaway') {
+    if (orderType !== 'delivery') {
       finish(customer.id, undefined, { name: customer.name, phone: customer.phone, address: null }, null);
       return;
     }
@@ -105,7 +112,7 @@ export function CustomerInfoModal({ open, orderType, onClose, onSubmit }: Custom
     setSubmitting(true);
     try {
       const customer = await createCustomer(createName.trim(), createPhone.trim() || undefined, createEmail.trim() || undefined);
-      if (orderType === 'takeaway') {
+      if (orderType !== 'delivery') {
         finish(customer.id, undefined, { name: customer.name, phone: customer.phone, address: null }, null);
       } else {
         setStep({ kind: 'address', customer });
@@ -161,7 +168,9 @@ export function CustomerInfoModal({ open, orderType, onClose, onSubmit }: Custom
         ? 'Dirección de entrega'
         : orderType === 'delivery'
           ? 'Nuevo domicilio'
-          : 'Nuevo para llevar';
+          : orderType === 'takeaway'
+            ? 'Nuevo para llevar'
+            : 'Agregar cliente';
 
   return (
     <Modal open={open} onClose={handleClose} title={title}>

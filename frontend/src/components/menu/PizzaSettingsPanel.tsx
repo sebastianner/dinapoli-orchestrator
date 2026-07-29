@@ -171,8 +171,12 @@ function FlavorRow({ flavor, onOpenEdit }: FlavorRowProps) {
     <button
       type="button"
       onClick={onOpenEdit}
-      className="flex w-full items-center gap-3 rounded-xl border border-border bg-surface p-3 text-left"
+      className={classNames(
+        'flex w-full cursor-pointer items-center gap-3 rounded-xl border border-border bg-surface p-3 text-left transition-colors duration-fast hover:border-brand-400',
+        !flavor.isAvailable && 'opacity-60'
+      )}
     >
+      <span className={classNames('h-2 w-2 shrink-0 rounded-full', flavor.isAvailable ? 'bg-success' : 'bg-text-secondary')} />
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-semibold text-text-primary">{flavor.name}</p>
         {flavor.description && <p className="truncate text-xs text-text-secondary">{flavor.description}</p>}

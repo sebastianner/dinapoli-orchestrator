@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { createFileRoute } from '@tanstack/react-router';
 import { mutate } from 'swr';
-import { Settings } from 'lucide-react';
+import { Info, Settings } from 'lucide-react';
 import { useCashFlowExpenses, useCashFlowHistory, useCashFlowSettings, useCurrentCashFlow } from '@/lib/queries';
 import { addCashExpense, updateCurrentCash } from '@/lib/api';
 import { formatCOP } from '@/lib/format';
@@ -127,8 +127,19 @@ function CajaContent({ current }: { current: CashFlowDay }) {
 
       <div className="mb-6 grid gap-4 sm:grid-cols-3">
         <div className="flex flex-col gap-2 rounded-2xl border border-brand-300 bg-brand-500/10 p-4">
-          <span className="text-sm text-text-secondary">Efectivo en caja hoy</span>
-          <span className="text-2xl font-bold text-brand-700">{formatCOP(current.cashInRegister)}</span>
+          <span className="flex items-center gap-1 text-sm text-text-secondary">
+            Efectivo final en caja
+            <span
+              title="Base de caja de hoy + ventas en efectivo de hoy. Es el efectivo que debería haber físicamente en la caja en este momento."
+              className="cursor-help"
+            >
+              <Info size={13} className="shrink-0" />
+            </span>
+          </span>
+          <span className="text-2xl font-bold text-brand-700">{formatCOP(current.cashInRegister + (current.cashSalesToday ?? 0))}</span>
+          <span className="text-sm text-text-secondary">
+            Base {formatCOP(current.cashInRegister)} + ventas en efectivo {formatCOP(current.cashSalesToday ?? 0)}
+          </span>
           {openingDelta !== null && (
             <span className={`text-sm font-medium ${openingDelta >= 0 ? 'text-success' : 'text-danger'}`}>
               {openingDelta >= 0 ? '+' : ''}
@@ -141,7 +152,7 @@ function CajaContent({ current }: { current: CashFlowDay }) {
               min={0}
               value={cashInput}
               onChange={(e) => setCashInput(e.target.value)}
-              placeholder="Nuevo monto"
+              placeholder="Nueva base"
               className="w-32 rounded-lg border border-border bg-surface px-2 py-1.5 text-sm text-text-primary outline-none focus:border-brand-400"
             />
             <button

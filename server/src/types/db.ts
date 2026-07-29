@@ -35,9 +35,8 @@ export interface ProductSizeRow {
   price: number;
 }
 
-export interface ProductOptionRow {
+export interface DrinkFlavorRow {
   id: number;
-  product_id: number;
   key: string;
   name: string;
 }
@@ -172,7 +171,7 @@ export interface OrderItemRow {
   item_type: OrderItemType;
   product_id: number | null;
   product_size_id: number | null;
-  product_option_id: number | null;
+  drink_flavor_id: number | null;
   pizza_group_id: number | null;
   pizza_size_id: number | null;
   pizza_flavor_id: number | null;
@@ -237,6 +236,7 @@ export interface ClosingReportRow {
   dine_in_order_count: number;
   takeaway_order_count: number;
   total_expenses: number;
+  cash_in_register: number;
   content: string;
   created_at: string;
 }

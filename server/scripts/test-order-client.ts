@@ -46,7 +46,7 @@ const order: OrderRequest = {
       type: "product",
       category: "drinks",
       product: "juice",
-      option: "mango",
+      drinkFlavor: "mango",
       quantity: 2,
     },
   ],

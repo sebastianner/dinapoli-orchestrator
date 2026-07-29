@@ -20,13 +20,13 @@ function isPositiveInteger(n: unknown): n is number {
 
 function validatePhone(phone: unknown): asserts phone is string | null | undefined {
   if (phone != null && (typeof phone !== 'string' || !PHONE_REGEX.test(phone))) {
-    throw new ValidationError('phone must be a 10-digit Colombian mobile number starting with 3');
+    throw new ValidationError('el teléfono debe ser un número celular colombiano de 10 dígitos que empiece por 3');
   }
 }
 
 function validateEmail(email: unknown): asserts email is string | null | undefined {
   if (email != null && (typeof email !== 'string' || !EMAIL_REGEX.test(email))) {
-    throw new ValidationError('email must be a valid email address');
+    throw new ValidationError('el correo electrónico debe ser una dirección válida');
   }
 }
 
@@ -95,12 +95,12 @@ const deleteCustomerRow = db.prepare<[number]>('DELETE FROM customers WHERE id =
 
 export function getCustomerById(id: number): Customer {
   const row = getCustomerRow.get(id);
-  if (!row) throw new NotFoundError(`customer ${id} not found`);
+  if (!row) throw new NotFoundError(`cliente ${id} no encontrado`);
   return rowToCustomer(row);
 }
 
 export function createCustomer(name: unknown, phone: unknown, email: unknown): Customer {
-  if (typeof name !== 'string' || name.trim() === '') throw new ValidationError('name is required');
+  if (typeof name !== 'string' || name.trim() === '') throw new ValidationError('el nombre es obligatorio');
   validatePhone(phone);
   validateEmail(email);
   const { lastInsertRowid } = insertCustomer.run(name.trim(), phone || null, email || null);
@@ -109,8 +109,8 @@ export function createCustomer(name: unknown, phone: unknown, email: unknown): C
 
 export function updateCustomer(id: number, name: unknown, phone: unknown, email: unknown): Customer {
   const existing = getCustomerRow.get(id);
-  if (!existing) throw new NotFoundError(`customer ${id} not found`);
-  if (name != null && (typeof name !== 'string' || name.trim() === '')) throw new ValidationError('name must be a non-empty string');
+  if (!existing) throw new NotFoundError(`cliente ${id} no encontrado`);
+  if (name != null && (typeof name !== 'string' || name.trim() === '')) throw new ValidationError('el nombre debe ser una cadena de texto no vacía');
   if (phone !== undefined) validatePhone(phone);
   if (email !== undefined) validateEmail(email);
   updateCustomerRow.run(
@@ -128,7 +128,7 @@ export function deleteCustomer(id: number): void {
   try {
     deleteCustomerRow.run(id);
   } catch (err) {
-    if (isForeignKeyViolation(err)) throw new ConflictError(`customer ${id} has existing orders and can't be deleted`);
+    if (isForeignKeyViolation(err)) throw new ConflictError(`el cliente ${id} tiene órdenes asociadas y no se puede eliminar`);
     throw err;
   }
 }
@@ -147,16 +147,16 @@ interface AddressInput {
 function validateAddressInput(body: Record<string, unknown>, existing?: CustomerAddressRow): AddressInput {
   const streetAddress = body.streetAddress !== undefined ? body.streetAddress : existing?.street_address;
   if (typeof streetAddress !== 'string' || streetAddress.trim() === '') {
-    throw new ValidationError('streetAddress is required');
+    throw new ValidationError('streetAddress es obligatorio');
   }
 
   const propertyType = body.propertyType !== undefined ? body.propertyType : existing?.property_type;
   if (typeof propertyType !== 'string' || !PROPERTY_TYPES.has(propertyType as PropertyType)) {
-    throw new ValidationError(`propertyType must be one of ${[...PROPERTY_TYPES].join(', ')}`);
+    throw new ValidationError(`propertyType debe ser uno de ${[...PROPERTY_TYPES].join(', ')}`);
   }
 
   const neighborhoodId = body.neighborhoodId !== undefined ? body.neighborhoodId : existing?.neighborhood_id;
-  if (!isPositiveInteger(neighborhoodId)) throw new ValidationError('neighborhoodId must be a positive integer');
+  if (!isPositiveInteger(neighborhoodId)) throw new ValidationError('neighborhoodId debe ser un número entero positivo');
   getNeighborhoodById(neighborhoodId); // 404s if missing
 
   return {
@@ -204,7 +204,7 @@ export function updateAddress(customerId: number, addressId: number, body: unkno
   getCustomerById(customerId); // 404s if missing
   const existing = getAddressRawRow.get(addressId);
   if (!existing || existing.customer_id !== customerId) {
-    throw new NotFoundError(`address ${addressId} not found for customer ${customerId}`);
+    throw new NotFoundError(`dirección ${addressId} no encontrada para el cliente ${customerId}`);
   }
   const input = validateAddressInput((body ?? {}) as Record<string, unknown>, existing);
   updateAddressRow.run(
@@ -225,19 +225,19 @@ export function updateAddress(customerId: number, addressId: number, body: unkno
 export function deleteAddress(customerId: number, addressId: number): void {
   const existing = getAddressRawRow.get(addressId);
   if (!existing || existing.customer_id !== customerId) {
-    throw new NotFoundError(`address ${addressId} not found for customer ${customerId}`);
+    throw new NotFoundError(`dirección ${addressId} no encontrada para el cliente ${customerId}`);
   }
   try {
     deleteAddressRow.run(addressId);
   } catch (err) {
-    if (isForeignKeyViolation(err)) throw new ConflictError(`address ${addressId} is used by an existing order and can't be deleted`);
+    if (isForeignKeyViolation(err)) throw new ConflictError(`la dirección ${addressId} está siendo usada por una orden existente y no se puede eliminar`);
     throw err;
   }
 }
 
 /** Distinct previously-used building/conjunto names for a neighborhood - not a managed table, the autocomplete just grows organically so custom values are always allowed too. */
 export function suggestBuildingNames(neighborhoodId: unknown, query: unknown): string[] {
-  if (!isPositiveInteger(neighborhoodId)) throw new ValidationError('neighborhoodId must be a positive integer');
+  if (!isPositiveInteger(neighborhoodId)) throw new ValidationError('neighborhoodId debe ser un número entero positivo');
   getNeighborhoodById(neighborhoodId); // 404s if missing
   const like = `%${typeof query === 'string' ? query.trim() : ''}%`;
   const rows = db

@@ -93,7 +93,7 @@ function issueSession(row: EmployeeRow): SessionResult {
  */
 export async function login(employeeId: unknown, password: unknown): Promise<SessionResult> {
   if (typeof employeeId !== 'number' || !Number.isInteger(employeeId)) {
-    throw new ValidationError('employeeId is required');
+    throw new ValidationError('employeeId es obligatorio');
   }
   const row = getEmployeeRow.get(employeeId);
   if (!row || row.is_active !== 1) throw new AuthError('invalid employee');

@@ -29,6 +29,8 @@ const TABLES = [
   "pizza_group_sizes",
   "pizza_sizes",
   "pizza_groups",
+  "product_drink_flavors",
+  "drink_flavors",
   "product_options",
   "product_sizes",
   "products",
@@ -89,6 +91,11 @@ function migrate(): void {
     "takeaway_order_count",
     "INTEGER NOT NULL DEFAULT 0",
   );
+  // Snapshot of that business day's cash_flow.cash_in_register at closing
+  // time - added to cash_sales for "Efectivo final en caja" (the expected
+  // final cash count), same idea as total_expenses being a closing-time
+  // snapshot rather than a live join.
+  ensureColumn("closing_reports", "cash_in_register", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(
     "orders",
     "promo_type",
@@ -132,6 +139,7 @@ function migrate(): void {
   seedDefaultPromoSettings();
   backfillProductsFts();
   widenTableNumberBounds();
+  migrateProductOptionsToDrinkFlavors();
 }
 
 /**
@@ -202,6 +210,72 @@ function widenTableNumberBounds(): void {
     })();
     db.pragma("foreign_keys = ON");
   }
+}
+
+/**
+ * product_options used to hold one row per product (so "Coca-Cola" was
+ * duplicated across every soda/juice/etc. that offered it). Replaced by
+ * drink_flavors (shared/reusable, same shape as pizza_flavors) plus
+ * product_drink_flavors (which products offer which flavor) - see
+ * menuService.setProductDrinkFlavors. No real order history references the
+ * old column on any DB this shipped on, but this still rebuilds order_items
+ * properly (product_option_id -> drink_flavor_id) rather than just wiping it,
+ * same rebuild pattern as widenTableNumberBounds above. No-op once already
+ * migrated (guarded by product_options no longer existing).
+ */
+function migrateProductOptionsToDrinkFlavors(): void {
+  const hasOldTable = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'product_options'")
+    .get();
+  if (!hasOldTable) return;
+
+  db.pragma("foreign_keys = OFF");
+  db.transaction(() => {
+    const oldOptions = db.prepare("SELECT product_id, key, name FROM product_options ORDER BY id").all() as {
+      product_id: number;
+      key: string;
+      name: string;
+    }[];
+    const insertFlavor = db.prepare("INSERT OR IGNORE INTO drink_flavors (key, name) VALUES (?, ?)");
+    const getFlavorIdByKey = db.prepare("SELECT id FROM drink_flavors WHERE key = ?");
+    const insertLink = db.prepare("INSERT OR IGNORE INTO product_drink_flavors (product_id, flavor_id) VALUES (?, ?)");
+    for (const row of oldOptions) {
+      insertFlavor.run(row.key, row.name);
+      const flavor = getFlavorIdByKey.get(row.key) as { id: number };
+      insertLink.run(row.product_id, flavor.id);
+    }
+
+    db.exec(`
+      CREATE TABLE order_items_new (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id          INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+        item_type         TEXT NOT NULL CHECK (item_type IN ('pizza', 'product')),
+        product_id        INTEGER REFERENCES products(id),
+        product_size_id   INTEGER REFERENCES product_sizes(id),
+        drink_flavor_id   INTEGER REFERENCES drink_flavors(id),
+        pizza_group_id    INTEGER REFERENCES pizza_groups(id),
+        pizza_size_id     INTEGER REFERENCES pizza_sizes(id),
+        pizza_flavor_id   INTEGER REFERENCES pizza_flavors(id),
+        quantity          INTEGER NOT NULL CHECK (quantity > 0),
+        unit_price        INTEGER NOT NULL,
+        notes             TEXT,
+        printed_at        TEXT
+      );
+    `);
+    db.exec(`
+      INSERT INTO order_items_new (id, order_id, item_type, product_id, product_size_id, drink_flavor_id, pizza_group_id, pizza_size_id, pizza_flavor_id, quantity, unit_price, notes, printed_at)
+      SELECT oi.id, oi.order_id, oi.item_type, oi.product_id, oi.product_size_id,
+        (SELECT df.id FROM product_options po JOIN drink_flavors df ON df.key = po.key WHERE po.id = oi.product_option_id),
+        oi.pizza_group_id, oi.pizza_size_id, oi.pizza_flavor_id, oi.quantity, oi.unit_price, oi.notes, oi.printed_at
+      FROM order_items oi;
+    `);
+    db.exec("DROP TABLE order_items;");
+    db.exec("ALTER TABLE order_items_new RENAME TO order_items;");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);");
+
+    db.exec("DROP TABLE product_options;");
+  })();
+  db.pragma("foreign_keys = ON");
 }
 
 /**

@@ -35,7 +35,7 @@ import type {
   PizzaGroupSizeRow,
   PizzaSizeRow,
   PrintJobKind,
-  ProductOptionRow,
+  DrinkFlavorRow,
   ProductRow,
   ProductSizeRow,
   ProductWithCategoryRow,
@@ -60,8 +60,10 @@ const getProductByKey = db.prepare<[number, string], ProductRow>('SELECT * FROM 
 const getProductSizeByKey = db.prepare<[number, string], ProductSizeRow>(
   'SELECT * FROM product_sizes WHERE product_id = ? AND key = ?'
 );
-const getProductOptionByKey = db.prepare<[number, string], ProductOptionRow>(
-  'SELECT * FROM product_options WHERE product_id = ? AND key = ?'
+const getProductDrinkFlavorByKey = db.prepare<[number, string], DrinkFlavorRow>(
+  `SELECT df.* FROM drink_flavors df
+   JOIN product_drink_flavors pdf ON pdf.flavor_id = df.id
+   WHERE pdf.product_id = ? AND df.key = ?`
 );
 
 interface InsertOrderParams {
@@ -80,7 +82,7 @@ interface InsertOrderItemParams {
   itemType: 'pizza' | 'product';
   productId: number | null;
   productSizeId: number | null;
-  productOptionId: number | null;
+  drinkFlavorId: number | null;
   pizzaGroupId: number | null;
   pizzaSizeId: number | null;
   pizzaFlavorId: number | null;
@@ -95,10 +97,10 @@ const insertOrder = db.prepare<InsertOrderParams>(
 );
 const insertOrderItem = db.prepare<InsertOrderItemParams>(
   `INSERT INTO order_items
-     (order_id, item_type, product_id, product_size_id, product_option_id,
+     (order_id, item_type, product_id, product_size_id, drink_flavor_id,
       pizza_group_id, pizza_size_id, pizza_flavor_id, quantity, unit_price, notes)
    VALUES
-     (@orderId, @itemType, @productId, @productSizeId, @productOptionId,
+     (@orderId, @itemType, @productId, @productSizeId, @drinkFlavorId,
       @pizzaGroupId, @pizzaSizeId, @pizzaFlavorId, @quantity, @unitPrice, @notes)`
 );
 const insertOrderItemFlavor = db.prepare<[number, number, number]>(
@@ -117,7 +119,7 @@ interface ResolvedItem {
   itemType: 'pizza' | 'product';
   productId: number | null;
   productSizeId: number | null;
-  productOptionId: number | null;
+  drinkFlavorId: number | null;
   pizzaGroupId: number | null;
   pizzaSizeId: number | null;
   pizzaFlavorId: number | null;
@@ -129,26 +131,26 @@ interface ResolvedItem {
 
 function resolvePizzaItem(item: PizzaItemRequest, index: number): ResolvedItem {
   const size = getPizzaSizeByKey.get(item.size);
-  if (!size) throw new ValidationError(`items[${index}]: unknown pizza size '${item.size}'`);
+  if (!size) throw new ValidationError(`items[${index}]: tamaño de pizza desconocido '${item.size}'`);
 
   if (!Array.isArray(item.flavors) || item.flavors.length === 0) {
-    throw new ValidationError(`items[${index}]: at least one flavor is required`);
+    throw new ValidationError(`items[${index}]: se requiere al menos un sabor`);
   }
   if (item.flavors.length > size.max_flavors) {
-    throw new ValidationError(`items[${index}]: size '${item.size}' allows at most ${size.max_flavors} flavor(s)`);
+    throw new ValidationError(`items[${index}]: el tamaño '${item.size}' permite máximo ${size.max_flavors} sabor(es)`);
   }
   const uniqueFlavors = new Set(item.flavors.map((f) => f?.flavor));
   if (uniqueFlavors.size !== item.flavors.length) {
-    throw new ValidationError(`items[${index}]: duplicate flavors are not allowed`);
+    throw new ValidationError(`items[${index}]: no se permiten sabores duplicados`);
   }
   for (const f of item.flavors) {
     if (!isPositiveInt(f?.portion) || f.portion > 100) {
-      throw new ValidationError(`items[${index}]: each flavor's portion must be an integer between 1 and 100`);
+      throw new ValidationError(`items[${index}]: la porción de cada sabor debe ser un número entero entre 1 y 100`);
     }
   }
   const portionSum = item.flavors.reduce((sum, f) => sum + f.portion, 0);
   if (portionSum !== 100) {
-    throw new ValidationError(`items[${index}]: flavor portions must sum to 100, got ${portionSum}`);
+    throw new ValidationError(`items[${index}]: las porciones de los sabores deben sumar 100, se recibió ${portionSum}`);
   }
 
   // Group is not chosen by the client: it's derived from the flavors picked.
@@ -158,13 +160,13 @@ function resolvePizzaItem(item: PizzaItemRequest, index: number): ResolvedItem {
   const candidateGroups = new Map<number, PizzaGroupRow>();
   const flavors = item.flavors.map(({ flavor: flavorKey, portion }) => {
     const flavor = getPizzaFlavorByKey.get(flavorKey);
-    if (!flavor) throw new ValidationError(`items[${index}]: unknown pizza flavor '${flavorKey}'`);
+    if (!flavor) throw new ValidationError(`items[${index}]: sabor de pizza desconocido '${flavorKey}'`);
     if (!flavor.is_available) {
-      throw new ValidationError(`items[${index}]: flavor '${flavorKey}' is currently unavailable`);
+      throw new ValidationError(`items[${index}]: el sabor '${flavorKey}' no está disponible actualmente`);
     }
     const groups = getFlavorGroups.all(flavor.id);
     if (groups.length === 0) {
-      throw new ValidationError(`items[${index}]: flavor '${flavorKey}' is not offered as a pizza flavor`);
+      throw new ValidationError(`items[${index}]: el sabor '${flavorKey}' no está disponible como sabor de pizza`);
     }
     for (const g of groups) candidateGroups.set(g.id, g);
     return { ...flavor, portion };
@@ -181,11 +183,11 @@ function resolvePizzaItem(item: PizzaItemRequest, index: number): ResolvedItem {
     }
   }
   if (!resolvedGroup || !groupSize) {
-    throw new ValidationError(`items[${index}]: size '${item.size}' is not available for the selected flavor combination`);
+    throw new ValidationError(`items[${index}]: el tamaño '${item.size}' no está disponible para la combinación de sabores seleccionada`);
   }
 
   if (!isPositiveInt(item.quantity)) {
-    throw new ValidationError(`items[${index}]: quantity must be a positive integer`);
+    throw new ValidationError(`items[${index}]: la cantidad debe ser un número entero positivo`);
   }
 
   // Extra cost scales with each flavor's share of the pizza (e.g. a premium
@@ -197,7 +199,7 @@ function resolvePizzaItem(item: PizzaItemRequest, index: number): ResolvedItem {
     itemType: 'pizza',
     productId: null,
     productSizeId: null,
-    productOptionId: null,
+    drinkFlavorId: null,
     pizzaGroupId: resolvedGroup.id,
     pizzaSizeId: size.id,
     pizzaFlavorId: null,
@@ -210,56 +212,60 @@ function resolvePizzaItem(item: PizzaItemRequest, index: number): ResolvedItem {
 
 function resolveProductItem(item: ProductItemRequest, index: number): ResolvedItem {
   const category = getCategoryByKey.get(item.category);
-  if (!category) throw new ValidationError(`items[${index}]: unknown category '${item.category}'`);
+  if (!category) throw new ValidationError(`items[${index}]: categoría desconocida '${item.category}'`);
 
   const product = getProductByKey.get(category.id, item.product);
-  if (!product) throw new ValidationError(`items[${index}]: unknown product '${item.product}' in category '${item.category}'`);
-  if (!product.is_available) throw new ValidationError(`items[${index}]: product '${item.product}' is currently unavailable`);
+  if (!product) throw new ValidationError(`items[${index}]: producto desconocido '${item.product}' en la categoría '${item.category}'`);
+  if (!product.is_available) throw new ValidationError(`items[${index}]: el producto '${item.product}' no está disponible actualmente`);
 
   let unitPrice: number;
   let productSizeId: number | null = null;
   const productSizes = db.prepare<[number], ProductSizeRow>('SELECT * FROM product_sizes WHERE product_id = ?').all(product.id);
   if (productSizes.length > 0) {
-    if (!item.size) throw new ValidationError(`items[${index}]: 'size' is required for product '${item.product}'`);
+    if (!item.size) throw new ValidationError(`items[${index}]: 'size' es obligatorio para el producto '${item.product}'`);
     const size = getProductSizeByKey.get(product.id, item.size);
-    if (!size) throw new ValidationError(`items[${index}]: unknown size '${item.size}' for product '${item.product}'`);
+    if (!size) throw new ValidationError(`items[${index}]: tamaño desconocido '${item.size}' para el producto '${item.product}'`);
     unitPrice = size.price;
     productSizeId = size.id;
   } else {
     if (product.price == null) {
-      throw new ValidationError(`items[${index}]: product '${item.product}' has no price configured`);
+      throw new ValidationError(`items[${index}]: el producto '${item.product}' no tiene un precio configurado`);
     }
     unitPrice = product.price;
   }
 
-  let productOptionId: number | null = null;
-  const productOptions = db.prepare<[number], ProductOptionRow>('SELECT * FROM product_options WHERE product_id = ?').all(product.id);
-  if (productOptions.length > 0) {
-    if (!item.option) throw new ValidationError(`items[${index}]: 'option' is required for product '${item.product}'`);
-    const option = getProductOptionByKey.get(product.id, item.option);
-    if (!option) throw new ValidationError(`items[${index}]: unknown option '${item.option}' for product '${item.product}'`);
-    productOptionId = option.id;
+  let drinkFlavorId: number | null = null;
+  const productFlavors = db
+    .prepare<[number], DrinkFlavorRow>(
+      `SELECT df.* FROM drink_flavors df JOIN product_drink_flavors pdf ON pdf.flavor_id = df.id WHERE pdf.product_id = ?`
+    )
+    .all(product.id);
+  if (productFlavors.length > 0) {
+    if (!item.drinkFlavor) throw new ValidationError(`items[${index}]: 'drinkFlavor' es obligatorio para el producto '${item.product}'`);
+    const flavor = getProductDrinkFlavorByKey.get(product.id, item.drinkFlavor);
+    if (!flavor) throw new ValidationError(`items[${index}]: sabor de bebida desconocido '${item.drinkFlavor}' para el producto '${item.product}'`);
+    drinkFlavorId = flavor.id;
   }
 
   let pizzaFlavorId: number | null = null;
   if (product.requires_pizza_flavor) {
-    if (!item.pizzaFlavor) throw new ValidationError(`items[${index}]: 'pizzaFlavor' is required for product '${item.product}'`);
+    if (!item.pizzaFlavor) throw new ValidationError(`items[${index}]: 'pizzaFlavor' es obligatorio para el producto '${item.product}'`);
     const flavor = getPizzaFlavorByKey.get(item.pizzaFlavor);
-    if (!flavor) throw new ValidationError(`items[${index}]: unknown pizza flavor '${item.pizzaFlavor}'`);
-    if (!flavor.is_available) throw new ValidationError(`items[${index}]: pizza flavor '${item.pizzaFlavor}' is currently unavailable`);
+    if (!flavor) throw new ValidationError(`items[${index}]: sabor de pizza desconocido '${item.pizzaFlavor}'`);
+    if (!flavor.is_available) throw new ValidationError(`items[${index}]: el sabor de pizza '${item.pizzaFlavor}' no está disponible actualmente`);
     unitPrice += flavor.extra_cost;
     pizzaFlavorId = flavor.id;
   }
 
   if (!isPositiveInt(item.quantity)) {
-    throw new ValidationError(`items[${index}]: quantity must be a positive integer`);
+    throw new ValidationError(`items[${index}]: la cantidad debe ser un número entero positivo`);
   }
 
   return {
     itemType: 'product',
     productId: product.id,
     productSizeId,
-    productOptionId,
+    drinkFlavorId,
     pizzaGroupId: null,
     pizzaSizeId: null,
     pizzaFlavorId,
@@ -272,13 +278,13 @@ function resolveProductItem(item: ProductItemRequest, index: number): ResolvedIt
 
 function validateOrderRequest(input: unknown): OrderRequest {
   if (!input || typeof input !== 'object') {
-    throw new ValidationError('request body must be an object');
+    throw new ValidationError('el cuerpo de la solicitud debe ser un objeto');
   }
   const orderRequest = input as OrderRequest;
   const { orderType, employeeId, tableNumber, customerId, customerAddressId, items } = orderRequest;
 
   if (!ORDER_TYPES.has(orderType)) {
-    throw new ValidationError(`orderType must be one of ${[...ORDER_TYPES].join(', ')}`);
+    throw new ValidationError(`orderType debe ser uno de ${[...ORDER_TYPES].join(', ')}`);
   }
 
   // Every order must be attributable to whoever placed it, so a mis-clicked
@@ -286,34 +292,34 @@ function validateOrderRequest(input: unknown): OrderRequest {
   // "select an employee before anything else is reachable" guard in
   // __root.tsx.
   if (!isPositiveInt(employeeId)) {
-    throw new ValidationError('employeeId is required - orders must always be associated with an employee');
+    throw new ValidationError('employeeId es obligatorio - las órdenes siempre deben estar asociadas a un empleado');
   }
 
   if (orderType === 'dine_in') {
     if (!isPositiveInt(tableNumber) || !tableExists(tableNumber)) {
-      throw new ValidationError('tableNumber must match one of the current restaurant tables for dine_in orders');
+      throw new ValidationError('tableNumber debe coincidir con una de las mesas actuales del restaurante para órdenes dine_in');
     }
     if (customerId != null && !isPositiveInt(customerId)) {
-      throw new ValidationError('customerId must be a positive integer when provided');
+      throw new ValidationError('customerId debe ser un número entero positivo cuando se proporciona');
     }
   }
   // Customers can be attached to any order type, but takeaway/delivery
   // require one - existence/ownership is checked in createOrder (same
   // pattern as employeeId's active check below).
   if (orderType === 'takeaway') {
-    if (!isPositiveInt(customerId)) throw new ValidationError('customerId is required for takeaway orders');
+    if (!isPositiveInt(customerId)) throw new ValidationError('customerId es obligatorio para órdenes takeaway');
   }
   if (orderType === 'delivery') {
-    if (!isPositiveInt(customerId)) throw new ValidationError('customerId is required for delivery orders');
-    if (!isPositiveInt(customerAddressId)) throw new ValidationError('customerAddressId is required for delivery orders');
+    if (!isPositiveInt(customerId)) throw new ValidationError('customerId es obligatorio para órdenes delivery');
+    if (!isPositiveInt(customerAddressId)) throw new ValidationError('customerAddressId es obligatorio para órdenes delivery');
   }
 
   if (!Array.isArray(items) || items.length === 0) {
-    throw new ValidationError('items must be a non-empty array');
+    throw new ValidationError('items debe ser un arreglo no vacío');
   }
 
   if (orderRequest.promoType != null && !PROMO_TYPES.has(orderRequest.promoType)) {
-    throw new ValidationError(`promoType must be one of ${[...PROMO_TYPES].join(', ')}`);
+    throw new ValidationError(`promoType debe ser uno de ${[...PROMO_TYPES].join(', ')}`);
   }
 
   return orderRequest;
@@ -323,7 +329,7 @@ function resolveItems(items: OrderItemRequest[]): ResolvedItem[] {
   return items.map((item, index) => {
     if (item?.type === 'pizza') return resolvePizzaItem(item, index);
     if (item?.type === 'product') return resolveProductItem(item, index);
-    throw new ValidationError(`items[${index}]: type must be 'pizza' or 'product'`);
+    throw new ValidationError(`items[${index}]: type debe ser 'pizza' o 'product'`);
   });
 }
 
@@ -332,9 +338,9 @@ const PROMO_TYPES = new Set<PromoType>(['duo', 'pizza_xl']);
 // pizza's only flavor or as a gratinado's pizzaFlavor - these are the same 5
 // "special" flavors either way, so one set covers both checks below.
 const DUO_EXCLUDED_FLAVORS = new Set(['campesina', 'madrilena', 'atarraya', 'tricaccio', 'ardiente']);
-// Coca-Cola and Quatro are the two soft_drink options that cost extra inside
-// the 'pizza_xl' promo; every other option (Postobón's own brands, water) is free.
-const XL_SODA_SURCHARGE_OPTIONS = new Set(['coca_cola', 'quatro']);
+// Coca-Cola and Quatro are the two soft_drink flavors that cost extra inside
+// the 'pizza_xl' promo; every other flavor (Postobón's own brands, water) is free.
+const XL_SODA_SURCHARGE_FLAVORS = new Set(['coca_cola', 'quatro']);
 
 /**
  * Validates that `items` is exactly the required composition for `promoType`,
@@ -345,65 +351,65 @@ const XL_SODA_SURCHARGE_OPTIONS = new Set(['coca_cola', 'quatro']);
 function validatePromoItems(promoType: PromoType, items: OrderItemRequest[]): void {
   for (const [index, item] of items.entries()) {
     if (item.quantity !== 1) {
-      throw new ValidationError(`items[${index}]: promo items must have quantity 1`);
+      throw new ValidationError(`items[${index}]: los ítems de la promoción deben tener cantidad 1`);
     }
   }
 
   if (promoType === 'duo') {
     if (items.length !== 2) {
-      throw new ValidationError(`promo 'duo' requires exactly 2 items, got ${items.length}`);
+      throw new ValidationError(`la promoción 'duo' requiere exactamente 2 ítems, se recibieron ${items.length}`);
     }
     items.forEach((item, index) => {
       if (item.type === 'pizza') {
         if (item.size !== 'personal') {
-          throw new ValidationError(`items[${index}]: promo 'duo' only allows personal-size pizzas`);
+          throw new ValidationError(`items[${index}]: la promoción 'duo' solo permite pizzas tamaño personal`);
         }
         if (item.flavors.length !== 1 || item.flavors[0].portion !== 100) {
-          throw new ValidationError(`items[${index}]: promo 'duo' pizzas can't be split (mitad y mitad) - one flavor only`);
+          throw new ValidationError(`items[${index}]: las pizzas de la promoción 'duo' no pueden ser mitad y mitad - solo un sabor`);
         }
         if (DUO_EXCLUDED_FLAVORS.has(item.flavors[0].flavor)) {
-          throw new ValidationError(`items[${index}]: flavor '${item.flavors[0].flavor}' is not included in promo 'duo'`);
+          throw new ValidationError(`items[${index}]: el sabor '${item.flavors[0].flavor}' no está incluido en la promoción 'duo'`);
         }
         return;
       }
       if (item.type === 'product' && item.category === 'lasagnas') {
         if (item.product === 'mamma_mia') {
-          throw new ValidationError(`items[${index}]: lasaña Mamma Mia is not included in promo 'duo'`);
+          throw new ValidationError(`items[${index}]: la lasaña Mamma Mia no está incluida en la promoción 'duo'`);
         }
         return;
       }
       if (item.type === 'product' && item.category === 'pastas') {
         if (item.product === 'seafood') {
-          throw new ValidationError(`items[${index}]: pasta Marinera is not included in promo 'duo'`);
+          throw new ValidationError(`items[${index}]: la pasta Marinera no está incluida en la promoción 'duo'`);
         }
         return;
       }
       if (item.type === 'product' && item.category === 'gratinados') {
         if (item.pizzaFlavor && DUO_EXCLUDED_FLAVORS.has(item.pizzaFlavor)) {
-          throw new ValidationError(`items[${index}]: gratinado flavor '${item.pizzaFlavor}' is not included in promo 'duo'`);
+          throw new ValidationError(`items[${index}]: el sabor de gratinado '${item.pizzaFlavor}' no está incluido en la promoción 'duo'`);
         }
         return;
       }
-      throw new ValidationError(`items[${index}]: promo 'duo' only allows a personal pizza, lasaña, pasta, or gratinado`);
+      throw new ValidationError(`items[${index}]: la promoción 'duo' solo permite una pizza personal, lasaña, pasta o gratinado`);
     });
     return;
   }
 
   // pizza_xl
   if (items.length !== 3) {
-    throw new ValidationError(`promo 'pizza_xl' requires exactly 3 items (XL pizza, gaseosa, panes al gratín), got ${items.length}`);
+    throw new ValidationError(`la promoción 'pizza_xl' requiere exactamente 3 ítems (pizza XL, gaseosa, panes al gratín), se recibieron ${items.length}`);
   }
   const pizza = items.find((i) => i.type === 'pizza');
   if (!pizza || pizza.type !== 'pizza' || pizza.size !== 'xlarge') {
-    throw new ValidationError(`promo 'pizza_xl' requires one XL pizza`);
+    throw new ValidationError(`la promoción 'pizza_xl' requiere una pizza XL`);
   }
   const soda = items.find((i) => i.type === 'product' && i.category === 'drinks' && i.product === 'soft_drink');
   if (!soda) {
-    throw new ValidationError(`promo 'pizza_xl' requires one Gaseosa Personal`);
+    throw new ValidationError(`la promoción 'pizza_xl' requiere una Gaseosa Personal`);
   }
   const bread = items.find((i) => i.type === 'product' && i.category === 'appetizers' && i.product === 'garlic_bread');
   if (!bread) {
-    throw new ValidationError(`promo 'pizza_xl' requires one order of Panes al Gratín`);
+    throw new ValidationError(`la promoción 'pizza_xl' requiere una orden de Panes al Gratín`);
   }
 }
 
@@ -434,7 +440,7 @@ function applyPromoPricing(promoType: PromoType, items: OrderItemRequest[], reso
     if (item.type === 'pizza') {
       resolvedItems[index].unitPrice = settings.price;
     } else if (item.type === 'product' && item.category === 'drinks') {
-      const surcharge = item.option && XL_SODA_SURCHARGE_OPTIONS.has(item.option) ? settings.sodaSurcharge : 0;
+      const surcharge = item.drinkFlavor && XL_SODA_SURCHARGE_FLAVORS.has(item.drinkFlavor) ? settings.sodaSurcharge : 0;
       resolvedItems[index].unitPrice = surcharge;
       total += surcharge;
     } else {
@@ -444,22 +450,39 @@ function applyPromoPricing(promoType: PromoType, items: OrderItemRequest[], reso
   return total;
 }
 
+/**
+ * Confirms a customer exists and, for delivery, that customerAddressId is
+ * one of their own saved addresses - shared by createOrder and
+ * updateOrderCustomer so a dine_in/takeaway order attaching a customer after
+ * creation (see updateOrderCustomer) goes through the exact same check as
+ * attaching one at creation time.
+ */
+function resolveCustomerAttachment(
+  customerId: number,
+  orderType: OrderType,
+  customerAddressId: number | null | undefined
+): { customerId: number; customerAddressId: number | null } {
+  const customer = getCustomerById(customerId); // 404s if the customer doesn't exist
+  if (orderType === 'delivery') {
+    const address = customer.addresses.find((a) => a.id === customerAddressId);
+    if (!address) {
+      throw new ValidationError(`customerAddressId ${customerAddressId} no pertenece al cliente ${customerId}`);
+    }
+    return { customerId, customerAddressId: address.id };
+  }
+  return { customerId, customerAddressId: null };
+}
+
 export function createOrder(input: unknown): Order {
   const orderRequest = validateOrderRequest(input);
 
   const employee = getEmployeeById(orderRequest.employeeId as number); // 404s if the employee doesn't exist - always set, validateOrderRequest already required it
   if (!employee.isActive) {
-    throw new ValidationError(`employee ${employee.id} is not active`);
+    throw new ValidationError(`el empleado ${employee.id} no está activo`);
   }
 
   if (orderRequest.customerId != null) {
-    const customer = getCustomerById(orderRequest.customerId); // 404s if the customer doesn't exist
-    if (orderRequest.orderType === 'delivery') {
-      const address = customer.addresses.find((a) => a.id === orderRequest.customerAddressId);
-      if (!address) {
-        throw new ValidationError(`customerAddressId ${orderRequest.customerAddressId} does not belong to customer ${orderRequest.customerId}`);
-      }
-    }
+    resolveCustomerAttachment(orderRequest.customerId, orderRequest.orderType, orderRequest.customerAddressId);
   }
 
   const resolvedItems = resolveItems(orderRequest.items);
@@ -491,7 +514,7 @@ export function createOrder(input: unknown): Order {
         itemType: item.itemType,
         productId: item.productId,
         productSizeId: item.productSizeId,
-        productOptionId: item.productOptionId,
+        drinkFlavorId: item.drinkFlavorId,
         pizzaGroupId: item.pizzaGroupId,
         pizzaSizeId: item.pizzaSizeId,
         pizzaFlavorId: item.pizzaFlavorId,
@@ -593,7 +616,7 @@ const getProductById = db.prepare<[number], ProductWithCategoryRow>(
   'SELECT p.*, c.key AS category_key FROM products p JOIN categories c ON c.id = p.category_id WHERE p.id = ?'
 );
 const getProductSizeById = db.prepare<[number], ProductSizeRow>('SELECT * FROM product_sizes WHERE id = ?');
-const getProductOptionById = db.prepare<[number], ProductOptionRow>('SELECT * FROM product_options WHERE id = ?');
+const getDrinkFlavorById = db.prepare<[number], DrinkFlavorRow>('SELECT * FROM drink_flavors WHERE id = ?');
 const getPizzaGroupById = db.prepare<[number], PizzaGroupRow>('SELECT * FROM pizza_groups WHERE id = ?');
 const getPizzaSizeById = db.prepare<[number], PizzaSizeRow>('SELECT * FROM pizza_sizes WHERE id = ?');
 const getPizzaFlavorById = db.prepare<[number], PizzaFlavorRow>('SELECT * FROM pizza_flavors WHERE id = ?');
@@ -621,7 +644,7 @@ function rowToOrderItem(row: OrderItemRow): OrderItem {
 
   const product = getProductById.get(row.product_id!)!;
   const size = row.product_size_id ? getProductSizeById.get(row.product_size_id) : null;
-  const option = row.product_option_id ? getProductOptionById.get(row.product_option_id) : null;
+  const drinkFlavor = row.drink_flavor_id ? getDrinkFlavorById.get(row.drink_flavor_id) : null;
   const pizzaFlavor = row.pizza_flavor_id ? getPizzaFlavorById.get(row.pizza_flavor_id) : null;
 
   return {
@@ -629,7 +652,7 @@ function rowToOrderItem(row: OrderItemRow): OrderItem {
     menuItemRef: {
       category: product.category_key as ProductCategoryId,
       product: product.key,
-      ...(option ? { option: option.key } : {}),
+      ...(drinkFlavor ? { drinkFlavor: drinkFlavor.key } : {}),
       ...(size ? { size: size.key } : {}),
       ...(pizzaFlavor ? { pizzaFlavor: pizzaFlavor.key } : {}),
     },
@@ -653,7 +676,7 @@ function rowToOrderPayment(row: OrderPaymentRow): OrderPayment {
 
 export function getOrderById(id: number): Order {
   const row = getOrderRow.get(id);
-  if (!row) throw new NotFoundError(`order ${id} not found`);
+  if (!row) throw new NotFoundError(`orden ${id} no encontrada`);
 
   const items = getOrderItemRows.all(id).map(rowToOrderItem);
   const payments = getOrderPaymentRows.all(id).map(rowToOrderPayment);
@@ -734,16 +757,16 @@ const MAX_PAGE_SIZE = 200;
 
 export function listOrders({ status, date, orderType, page, pageSize }: ListOrdersFilter = {}): ListOrdersResult {
   if (date != null && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    throw new ValidationError("date must be in 'YYYY-MM-DD' format");
+    throw new ValidationError("date debe tener el formato 'YYYY-MM-DD'");
   }
   if (orderType != null && !ORDER_TYPES.has(orderType as OrderType)) {
-    throw new ValidationError(`orderType must be one of ${[...ORDER_TYPES].join(', ')}`);
+    throw new ValidationError(`orderType debe ser uno de ${[...ORDER_TYPES].join(', ')}`);
   }
   if (page != null && !isPositiveInt(page)) {
-    throw new ValidationError('page must be a positive integer');
+    throw new ValidationError('page debe ser un número entero positivo');
   }
   if (pageSize != null && (!isPositiveInt(pageSize) || pageSize > MAX_PAGE_SIZE)) {
-    throw new ValidationError(`pageSize must be a positive integer up to ${MAX_PAGE_SIZE}`);
+    throw new ValidationError(`pageSize debe ser un número entero positivo de hasta ${MAX_PAGE_SIZE}`);
   }
 
   const conditions: string[] = [];
@@ -799,11 +822,11 @@ export function addOrderItems(id: number, items: unknown): Order {
   const order = getOrderById(id);
   if (!ADDABLE_ITEM_STATUSES.has(order.status)) {
     throw new ConflictError(
-      `order ${id} cannot accept new items from status ${order.status} (must be PENDING, PRINTING, or ACTIVE)`
+      `la orden ${id} no puede aceptar nuevos ítems desde el estado ${order.status} (debe ser PENDING, PRINTING o ACTIVE)`
     );
   }
   if (!Array.isArray(items) || items.length === 0) {
-    throw new ValidationError('items must be a non-empty array');
+    throw new ValidationError('items debe ser un arreglo no vacío');
   }
 
   const resolvedItems = resolveItems(items as OrderItemRequest[]);
@@ -816,7 +839,7 @@ export function addOrderItems(id: number, items: unknown): Order {
         itemType: item.itemType,
         productId: item.productId,
         productSizeId: item.productSizeId,
-        productOptionId: item.productOptionId,
+        drinkFlavorId: item.drinkFlavorId,
         pizzaGroupId: item.pizzaGroupId,
         pizzaSizeId: item.pizzaSizeId,
         pizzaFlavorId: item.pizzaFlavorId,
@@ -852,13 +875,13 @@ const updateTableNumber = db.prepare<[number, number]>('UPDATE orders SET table_
 export function updateOrderTable(id: number, tableNumber: unknown): Order {
   const order = getOrderById(id);
   if (order.orderType !== 'dine_in') {
-    throw new ValidationError(`order ${id} is a ${order.orderType} order, not dine_in - it has no table to reassign`);
+    throw new ValidationError(`la orden ${id} es una orden ${order.orderType}, no dine_in - no tiene mesa para reasignar`);
   }
   if (order.status === 'COMPLETED') {
-    throw new ConflictError(`order ${id} is already completed`);
+    throw new ConflictError(`la orden ${id} ya está completada`);
   }
   if (!isPositiveInt(tableNumber) || !tableExists(tableNumber)) {
-    throw new ValidationError('tableNumber must match one of the current restaurant tables');
+    throw new ValidationError('tableNumber debe coincidir con una de las mesas actuales del restaurante');
   }
 
   const previousTable = order.tableNumber as number;
@@ -867,6 +890,36 @@ export function updateOrderTable(id: number, tableNumber: unknown): Order {
   updateTableNumber.run(tableNumber, id);
   markTableBusy(tableNumber);
   refreshTableStatus(previousTable);
+  broadcastOrderUpdate(id);
+
+  return getOrderById(id);
+}
+
+const updateOrderCustomerStmt = db.prepare<[number, number | null, number]>(
+  'UPDATE orders SET customer_id = ?, customer_address_id = ? WHERE id = ?'
+);
+
+/**
+ * Attaches or changes the customer on an already-created order. The common
+ * case is dine_in: customerId is never required at creation time (see
+ * validateOrderRequest), so this is how staff identify a table's customer
+ * from the Order Overview panel after the fact, without having to have known
+ * it up front. Not restricted to dine_in - any non-completed order can have
+ * its customer corrected, same "fix it after the fact" spirit as
+ * updateOrderTable, and open to any employee (unlike updateOrderTable) since
+ * attaching a customer at order-creation time isn't admin-gated either.
+ */
+export function updateOrderCustomer(id: number, customerId: unknown, customerAddressId: unknown): Order {
+  const order = getOrderById(id);
+  if (order.status === 'COMPLETED') {
+    throw new ConflictError(`la orden ${id} ya está completada`);
+  }
+  if (!isPositiveInt(customerId)) {
+    throw new ValidationError('customerId debe ser un número entero positivo');
+  }
+
+  const resolved = resolveCustomerAttachment(customerId, order.orderType, isPositiveInt(customerAddressId) ? customerAddressId : undefined);
+  updateOrderCustomerStmt.run(resolved.customerId, resolved.customerAddressId, id);
   broadcastOrderUpdate(id);
 
   return getOrderById(id);
@@ -888,7 +941,7 @@ export function updateOrderTable(id: number, tableNumber: unknown): Order {
  */
 function resolvePayments(input: unknown, order: Order): PaymentSplit[] {
   if (!Array.isArray(input) || input.length === 0) {
-    throw new ValidationError('payments must be a non-empty array of { method, grossAmount, tipAmount?, deliveryFee?, discount? }');
+    throw new ValidationError('payments debe ser un arreglo no vacío de { method, grossAmount, tipAmount?, deliveryFee?, discount? }');
   }
 
   const splits = input.map((p: unknown, index: number) => {
@@ -898,32 +951,32 @@ function resolvePayments(input: unknown, order: Order): PaymentSplit[] {
     const deliveryFee = (p as { deliveryFee?: unknown })?.deliveryFee ?? 0;
     const discount = (p as { discount?: unknown })?.discount ?? 0;
     if (!PAYMENT_METHODS.has(method as PaymentMethod)) {
-      throw new ValidationError(`payments[${index}].method must be one of ${[...PAYMENT_METHODS].join(', ')}`);
+      throw new ValidationError(`payments[${index}].method debe ser uno de ${[...PAYMENT_METHODS].join(', ')}`);
     }
     if (!isPositiveInt(grossAmount)) {
-      throw new ValidationError(`payments[${index}].grossAmount must be a positive integer amount in COP`);
+      throw new ValidationError(`payments[${index}].grossAmount debe ser un monto entero positivo en COP`);
     }
     if (!isNonNegativeInt(tipAmount)) {
-      throw new ValidationError(`payments[${index}].tipAmount must be a non-negative integer amount in COP`);
+      throw new ValidationError(`payments[${index}].tipAmount debe ser un monto entero no negativo en COP`);
     }
     if (tipAmount > grossAmount) {
-      throw new ValidationError(`payments[${index}].tipAmount cannot exceed payments[${index}].grossAmount`);
+      throw new ValidationError(`payments[${index}].tipAmount no puede superar payments[${index}].grossAmount`);
     }
     if (!isNonNegativeInt(deliveryFee)) {
-      throw new ValidationError(`payments[${index}].deliveryFee must be a non-negative integer amount in COP`);
+      throw new ValidationError(`payments[${index}].deliveryFee debe ser un monto entero no negativo en COP`);
     }
     if (deliveryFee > grossAmount) {
-      throw new ValidationError(`payments[${index}].deliveryFee cannot exceed payments[${index}].grossAmount`);
+      throw new ValidationError(`payments[${index}].deliveryFee no puede superar payments[${index}].grossAmount`);
     }
     const netAmount = grossAmount - tipAmount - deliveryFee;
     if (netAmount < 0) {
-      throw new ValidationError(`payments[${index}].tipAmount + deliveryFee cannot exceed payments[${index}].grossAmount`);
+      throw new ValidationError(`payments[${index}].tipAmount + deliveryFee no puede superar payments[${index}].grossAmount`);
     }
     if (!isNonNegativeInt(discount)) {
-      throw new ValidationError(`payments[${index}].discount must be a non-negative integer amount in COP`);
+      throw new ValidationError(`payments[${index}].discount debe ser un monto entero no negativo en COP`);
     }
     if (discount > netAmount) {
-      throw new ValidationError(`payments[${index}].discount cannot exceed payments[${index}]'s product amount (grossAmount minus tip and delivery fee)`);
+      throw new ValidationError(`payments[${index}].discount no puede superar el monto de productos de payments[${index}] (grossAmount menos propina y domicilio)`);
     }
     return { method: method as PaymentMethod, grossAmount, tipAmount, deliveryFee, netAmount, discount };
   });
@@ -931,13 +984,13 @@ function resolvePayments(input: unknown, order: Order): PaymentSplit[] {
   const tipTotal = splits.reduce((s, p) => s + p.tipAmount, 0);
   const deliveryFeeTotal = splits.reduce((s, p) => s + p.deliveryFee, 0);
   if (deliveryFeeTotal > 0 && order.orderType !== 'delivery') {
-    throw new ValidationError('deliveryFee can only be set on delivery orders');
+    throw new ValidationError('deliveryFee solo puede establecerse en órdenes delivery');
   }
 
   const owed = order.total + tipTotal + deliveryFeeTotal;
   const sum = splits.reduce((s, p) => s + p.grossAmount, 0);
   if (sum !== owed) {
-    throw new ValidationError(`payments[].grossAmount must sum to ${owed} (order total + tip + delivery fee), got ${sum}`);
+    throw new ValidationError(`payments[].grossAmount debe sumar ${owed} (total de la orden + propina + domicilio), se recibió ${sum}`);
   }
 
   return splits;
@@ -953,7 +1006,7 @@ export async function completeOrder(id: number, { payments }: { payments?: unkno
   const order = getOrderById(id);
 
   if (order.status !== 'ACTIVE') {
-    throw new ConflictError(`order ${id} cannot be completed from status ${order.status} (must be ACTIVE)`);
+    throw new ConflictError(`la orden ${id} no puede completarse desde el estado ${order.status} (debe estar ACTIVE)`);
   }
 
   const resolvedPayments = resolvePayments(payments, order);
@@ -996,7 +1049,7 @@ const PRINT_JOB_KINDS = new Set<PrintJobKind>(['kitchen_ticket', 'bill']);
 /** Re-sends the previously saved kitchen ticket or bill for an order to the printer. */
 export async function reprintOrderDocument(id: number, kind: string): Promise<void> {
   if (!PRINT_JOB_KINDS.has(kind as PrintJobKind)) {
-    throw new ValidationError(`kind must be one of ${[...PRINT_JOB_KINDS].join(', ')}`);
+    throw new ValidationError(`kind debe ser uno de ${[...PRINT_JOB_KINDS].join(', ')}`);
   }
   getOrderById(id); // 404s if the order doesn't exist
   await reprintJob(id, kind as PrintJobKind);

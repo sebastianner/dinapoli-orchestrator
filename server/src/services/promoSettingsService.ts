@@ -30,31 +30,31 @@ export function listPromoSettings(): PromoSettings[] {
 /** Used by orderService.applyPromoPricing to read the current price at order-creation time - 404s only if migrate.ts's default-row seed was somehow skipped. */
 export function getPromoSettings(promoType: PromoType): PromoSettings {
   const row = getPromoSettingsRow.get(promoType);
-  if (!row) throw new NotFoundError(`promo settings for '${promoType}' not found`);
+  if (!row) throw new NotFoundError(`no se encontró la configuración de promoción para '${promoType}'`);
   return rowToPromoSettings(row);
 }
 
 /** Admin only (see routes/promos.ts). `sodaSurcharge` is only meaningful for 'pizza_xl' - rejected for 'duo', and left unchanged if omitted. */
 export function updatePromoSettings(promoType: unknown, price: unknown, sodaSurcharge: unknown): PromoSettings {
   if (typeof promoType !== 'string' || !PROMO_TYPES.has(promoType as PromoType)) {
-    throw new ValidationError(`promoType must be one of ${[...PROMO_TYPES].join(', ')}`);
+    throw new ValidationError(`promoType debe ser uno de ${[...PROMO_TYPES].join(', ')}`);
   }
   const existing = getPromoSettingsRow.get(promoType);
-  if (!existing) throw new NotFoundError(`promo settings for '${promoType}' not found`);
+  if (!existing) throw new NotFoundError(`no se encontró la configuración de promoción para '${promoType}'`);
 
   if (!isPositiveInteger(price)) {
-    throw new ValidationError('price must be a positive integer');
+    throw new ValidationError('el precio debe ser un número entero positivo');
   }
 
   if (promoType === 'duo') {
     if (sodaSurcharge != null) {
-      throw new ValidationError("soda_surcharge only applies to 'pizza_xl'");
+      throw new ValidationError("soda_surcharge solo aplica a 'pizza_xl'");
     }
     updatePromoSettingsRow.run(price, 0, promoType);
   } else {
     const resolvedSurcharge = sodaSurcharge != null ? sodaSurcharge : existing.soda_surcharge;
     if (!isNonNegativeInteger(resolvedSurcharge)) {
-      throw new ValidationError('sodaSurcharge must be a non-negative integer');
+      throw new ValidationError('sodaSurcharge debe ser un número entero no negativo');
     }
     updatePromoSettingsRow.run(price, resolvedSurcharge, promoType);
   }

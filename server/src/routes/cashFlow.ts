@@ -16,7 +16,7 @@ const router = Router();
 function parseCashFlowId(param: string): number {
   const id = Number(param);
   if (!Number.isInteger(id) || id <= 0) {
-    throw new ValidationError(`invalid cash flow id '${param}'`);
+    throw new ValidationError(`id de caja inválido '${param}'`);
   }
   return id;
 }

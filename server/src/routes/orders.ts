@@ -1,5 +1,14 @@
 import { Router } from 'express';
-import { getOrderById, listOrders, completeOrder, reprintOrderDocument, addOrderItems, deleteOrder, updateOrderTable } from '../services/orderService.js';
+import {
+  getOrderById,
+  listOrders,
+  completeOrder,
+  reprintOrderDocument,
+  addOrderItems,
+  deleteOrder,
+  updateOrderTable,
+  updateOrderCustomer,
+} from '../services/orderService.js';
 import { notifyPrintQueue } from '../services/queueService.js';
 import { ValidationError } from '../utils/errors.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
@@ -9,7 +18,7 @@ const router = Router();
 function parseOrderId(param: string): number {
   const id = Number(param);
   if (!Number.isInteger(id) || id <= 0) {
-    throw new ValidationError(`invalid order id '${param}'`);
+    throw new ValidationError(`id de orden inválido '${param}'`);
   }
   return id;
 }
@@ -62,6 +71,18 @@ router.put('/:id/table', requireAuth, requireAdmin, (req, res, next) => {
   }
 });
 
+// Open to any employee, same as attaching a customer at order-creation time -
+// mainly used for dine_in orders, which never require a customer up front
+// (see Order Overview's "Agregar cliente").
+router.put('/:id/customer', requireAuth, (req, res, next) => {
+  try {
+    const order = updateOrderCustomer(parseOrderId(req.params.id), req.body?.customerId, req.body?.customerAddressId);
+    res.json(order);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Irreversible - admin only. The frontend gates this behind an explicit
 // confirmation dialog (see order-history), but the server enforces it too.
 router.delete('/:id', requireAuth, requireAdmin, (req, res, next) => {
@@ -77,7 +98,7 @@ router.post('/:id/reprint', async (req, res, next) => {
   try {
     const kind = req.body?.kind;
     if (typeof kind !== 'string') {
-      throw new ValidationError("body must include kind: 'kitchen_ticket' | 'bill'");
+      throw new ValidationError("el cuerpo debe incluir kind: 'kitchen_ticket' | 'bill'");
     }
     await reprintOrderDocument(parseOrderId(req.params.id), kind);
     res.json({ status: 'reprinted', orderId: parseOrderId(req.params.id), kind });

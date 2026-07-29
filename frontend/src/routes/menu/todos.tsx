@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, Link } from '@tanstack/react-router';
 import { Search } from 'lucide-react';
 import { useMenu, useProductSearch } from '@/lib/queries';
 import { useDebouncedValue } from '@/lib/useDebouncedValue';
@@ -7,6 +7,8 @@ import { allPizzaFlavors, getPizzaCategory } from '@/lib/pricing';
 import { ProductCard } from '@/components/menu/ProductCard';
 import { useOrderStore } from '@/store/useOrderStore';
 import { DUO_EXCLUDED_FLAVORS, PROMO_ALLOWED_CATEGORIES, eligibleProductsForPromo, isProductEligibleForPromo } from '@/lib/promos';
+import { categoryIcon } from '@/lib/menuIcons';
+import { formatCOP } from '@/lib/format';
 import { isPizzaCategory } from '@/types/api';
 import type { Product, ProductCategory, ProductCategoryId } from '@/types/api';
 
@@ -109,20 +111,58 @@ function TodosPage() {
             <section key={group.categoryId}>
               <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-text-secondary">{group.categoryName}</h2>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {group.items.map(({ categoryId, product }) => (
-                  <ProductCard
-                    key={`${categoryId}-${product.id}`}
-                    categoryId={categoryId}
-                    product={product}
-                    pizzaFlavors={flavors}
-                    excludedFlavorIds={promoDraft?.type === 'duo' && categoryId === 'gratinados' ? DUO_EXCLUDED_FLAVORS : undefined}
-                  />
-                ))}
+                {group.items.map(({ categoryId, product }) =>
+                  // Calzone ("Pantalón") is priced per size, not per product - ProductCard has
+                  // no size picker (that's the dedicated /menu/calzone flow's job), so rendering
+                  // it here directly would show $0 and let it be added with no size chosen at
+                  // all. Route to that flow instead of adding straight from the card.
+                  categoryId === 'calzones' ? (
+                    <SizedProductLink key={`${categoryId}-${product.id}`} product={product} />
+                  ) : (
+                    <ProductCard
+                      key={`${categoryId}-${product.id}`}
+                      categoryId={categoryId}
+                      product={product}
+                      pizzaFlavors={flavors}
+                      excludedFlavorIds={promoDraft?.type === 'duo' && categoryId === 'gratinados' ? DUO_EXCLUDED_FLAVORS : undefined}
+                    />
+                  )
+                )}
               </div>
             </section>
           ))}
         </div>
       )}
     </div>
+  );
+}
+
+/** Card shell matches ProductCard's, but for a product priced per size (only calzone today) - clicking it goes to /menu/calzone's size picker instead of adding straight to the cart, since there's no size to snapshot a price from here. */
+function SizedProductLink({ product }: { product: Product }) {
+  const Icon = categoryIcon('calzones');
+  const sizes = product.sizes ?? [];
+  const fromPrice = Math.min(...sizes.map((s) => s.price));
+
+  return (
+    <Link
+      to="/menu/calzone"
+      className="anim-scale-in flex cursor-pointer flex-col gap-2 rounded-2xl border border-border bg-surface p-4 shadow-sm transition-colors duration-fast hover:border-brand-400"
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-start gap-2.5">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-500/10 text-brand-600">
+            <Icon size={18} />
+          </span>
+          <div>
+            <h3 className="font-semibold text-text-primary">{product.name}</h3>
+            <p className="mt-0.5 text-sm text-text-secondary">{sizes.map((s) => `${s.name} ${formatCOP(s.price)}`).join(' · ')}</p>
+          </div>
+        </div>
+        <span className="shrink-0 whitespace-nowrap font-semibold text-brand-700">Desde {formatCOP(fromPrice)}</span>
+      </div>
+      <span className="mt-1 flex items-center justify-center rounded-lg bg-brand-500 py-2 text-sm font-semibold text-white transition-colors duration-fast hover:bg-brand-600">
+        Elegir tamaño
+      </span>
+    </Link>
   );
 }

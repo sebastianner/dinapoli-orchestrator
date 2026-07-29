@@ -18,7 +18,7 @@ export const Route = createFileRoute('/ajustes')({
 
 const tabs = [
   { to: '/ajustes/employees', label: 'Empleados' },
-  { to: '/ajustes/locations', label: 'Ciudades y barrios' },
+  { to: '/ajustes/ubicaciones', label: 'Ciudades y barrios' },
   { to: '/ajustes/promos', label: 'Promociones' },
   { to: '/ajustes/table-assignments', label: 'Editar mesas' },
   { to: '/ajustes/menu-settings', label: 'Ajustes de menú' },

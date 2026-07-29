@@ -210,8 +210,11 @@ const getProductName = db.prepare<[string, string], { name: string }>(
 const getProductSizeName = db.prepare<[string, string], { name: string }>(
   `SELECT ps.name FROM product_sizes ps JOIN products p ON p.id = ps.product_id WHERE p.key = ? AND ps.key = ?`,
 );
-const getProductOptionName = db.prepare<[string, string], { name: string }>(
-  `SELECT po.name FROM product_options po JOIN products p ON p.id = po.product_id WHERE p.key = ? AND po.key = ?`,
+// Unlike product sizes/options used to be, a flavor key is globally unique
+// (shared across products, see schema.sql's drink_flavors), so no product
+// join is needed to look it up.
+const getDrinkFlavorName = db.prepare<[string], { name: string }>(
+  "SELECT name FROM drink_flavors WHERE key = ?",
 );
 const getPizzaGroupName = db.prepare<[string], { name: string }>(
   "SELECT name FROM pizza_groups WHERE key = ?",
@@ -302,9 +305,9 @@ export function describeItem(item: OrderItem): string {
     bits.push(
       `(${getProductSizeName.get(ref.product, ref.size)?.name ?? ref.size})`,
     );
-  if (ref.option)
+  if (ref.drinkFlavor)
     bits.push(
-      `- ${getProductOptionName.get(ref.product, ref.option)?.name ?? ref.option}`,
+      `- ${getDrinkFlavorName.get(ref.drinkFlavor)?.name ?? ref.drinkFlavor}`,
     );
   if (ref.pizzaFlavor)
     bits.push(
@@ -648,7 +651,7 @@ export async function reprintJob(
   const row = getPrintJob.get(orderId, kind);
   if (!row) {
     throw new NotFoundError(
-      `no saved '${kind}' to reprint for order ${orderId}`,
+      `no hay un '${kind}' guardado para reimprimir de la orden ${orderId}`,
     );
   }
   if (kind === "kitchen_ticket") {

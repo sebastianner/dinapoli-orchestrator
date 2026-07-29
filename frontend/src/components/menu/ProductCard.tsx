@@ -21,8 +21,8 @@ interface ProductCardProps {
 
 export function ProductCard({ categoryId, product, pizzaFlavors, excludedFlavorIds }: ProductCardProps) {
   const availableFlavors = excludedFlavorIds ? pizzaFlavors.filter((f) => !excludedFlavorIds.has(f.id)) : pizzaFlavors;
-  const [optionId, setOptionId] = useState(product.options?.[0]?.id ?? '');
-  const [flavorId, setFlavorId] = useState(availableFlavors[0]?.id ?? '');
+  const [drinkFlavorId, setDrinkFlavorId] = useState(product.drinkFlavors?.[0]?.id ?? '');
+  const [flavorId, setFlavorId] = useState(availableFlavors.find((f) => f.isAvailable)?.id ?? availableFlavors[0]?.id ?? '');
   const [showComment, setShowComment] = useState(false);
   const [notes, setNotes] = useState('');
 
@@ -39,18 +39,22 @@ export function ProductCard({ categoryId, product, pizzaFlavors, excludedFlavorI
       pushToast('Este producto está agotado', 'warning');
       return;
     }
-    if (product.options && !optionId) {
-      pushToast('Elige una opción', 'warning');
+    if (product.drinkFlavors && !drinkFlavorId) {
+      pushToast('Elige un sabor', 'warning');
       return;
     }
     if (product.pizzaFlavor && !flavorId) {
       pushToast('Elige un sabor', 'warning');
       return;
     }
+    if (product.pizzaFlavor && availableFlavors.find((f) => f.id === flavorId)?.isAvailable === false) {
+      pushToast('Ese sabor está agotado', 'warning');
+      return;
+    }
 
-    const option = product.options?.find((o) => o.id === optionId);
+    const drinkFlavor = product.drinkFlavors?.find((f) => f.id === drinkFlavorId);
     const flavor = availableFlavors.find((f) => f.id === flavorId);
-    const labelParts = [product.name, option?.name, flavor?.name].filter(Boolean);
+    const labelParts = [product.name, drinkFlavor?.name, flavor?.name].filter(Boolean);
 
     const item = {
       clientId: crypto.randomUUID(),
@@ -58,7 +62,7 @@ export function ProductCard({ categoryId, product, pizzaFlavors, excludedFlavorI
         type: 'product' as const,
         category: categoryId,
         product: product.id,
-        option: optionId || undefined,
+        drinkFlavor: drinkFlavorId || undefined,
         pizzaFlavor: flavorId || undefined,
         quantity: 1,
         notes: notes.trim() || undefined,
@@ -115,16 +119,16 @@ export function ProductCard({ categoryId, product, pizzaFlavors, excludedFlavorI
         )}
       </div>
 
-      {product.options && product.options.length > 0 && (
+      {product.drinkFlavors && product.drinkFlavors.length > 0 && (
         <select
-          value={optionId}
-          onChange={(e) => setOptionId(e.target.value)}
+          value={drinkFlavorId}
+          onChange={(e) => setDrinkFlavorId(e.target.value)}
           disabled={disabled}
           className="rounded-lg border border-border bg-surface px-2 py-1.5 text-sm text-text-primary outline-none focus:border-brand-400 disabled:cursor-not-allowed"
         >
-          {product.options.map((option) => (
-            <option key={option.id} value={option.id}>
-              {option.name}
+          {product.drinkFlavors.map((flavor) => (
+            <option key={flavor.id} value={flavor.id}>
+              {flavor.name}
             </option>
           ))}
         </select>
@@ -138,8 +142,8 @@ export function ProductCard({ categoryId, product, pizzaFlavors, excludedFlavorI
           className="rounded-lg border border-border bg-surface px-2 py-1.5 text-sm text-text-primary outline-none focus:border-brand-400 disabled:cursor-not-allowed"
         >
           {availableFlavors.map((flavor) => (
-            <option key={flavor.id} value={flavor.id}>
-              {flavor.name}
+            <option key={flavor.id} value={flavor.id} disabled={!flavor.isAvailable}>
+              {flavor.isAvailable ? flavor.name : `${flavor.name} (Agotado)`}
             </option>
           ))}
         </select>
@@ -161,7 +165,7 @@ export function ProductCard({ categoryId, product, pizzaFlavors, excludedFlavorI
           type="button"
           onClick={handleAdd}
           disabled={disabled}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-brand-500 py-2 text-sm font-semibold text-white transition-colors duration-fast hover:bg-brand-600 disabled:cursor-not-allowed disabled:bg-border disabled:text-text-secondary disabled:hover:bg-border"
+          className="flex flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-brand-500 py-2 text-sm font-semibold text-white transition-colors duration-fast hover:bg-brand-600 disabled:cursor-not-allowed disabled:bg-border disabled:text-text-secondary disabled:hover:bg-border"
         >
           <Plus size={16} /> {disabled ? 'Agotado' : 'Agregar'}
         </button>
@@ -170,7 +174,7 @@ export function ProductCard({ categoryId, product, pizzaFlavors, excludedFlavorI
           onClick={() => setShowComment((v) => !v)}
           disabled={disabled}
           aria-label="Agregar comentario"
-          className="flex h-9 w-9 items-center justify-center rounded-lg border border-border text-text-secondary transition-colors duration-fast hover:border-brand-400 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
+          className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg border border-border text-text-secondary transition-colors duration-fast hover:border-brand-400 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
         >
           <MessageSquarePlus size={16} />
         </button>

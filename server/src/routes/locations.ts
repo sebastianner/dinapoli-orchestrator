@@ -17,7 +17,7 @@ const router = Router();
 function parseId(param: string, label: string): number {
   const id = Number(param);
   if (!Number.isInteger(id) || id <= 0) {
-    throw new ValidationError(`invalid ${label} '${param}'`);
+    throw new ValidationError(`id de ${label} inválido '${param}'`);
   }
   return id;
 }
@@ -39,7 +39,7 @@ router.post('/cities', requireAuth, requireAdmin, (req, res, next) => {
 
 router.put('/cities/:id', requireAuth, requireAdmin, (req, res, next) => {
   try {
-    res.json(updateCity(parseId(req.params.id, 'city id'), req.body?.name, req.body?.department, req.body?.country));
+    res.json(updateCity(parseId(req.params.id, 'ciudad'), req.body?.name, req.body?.department, req.body?.country));
   } catch (err) {
     next(err);
   }
@@ -47,7 +47,7 @@ router.put('/cities/:id', requireAuth, requireAdmin, (req, res, next) => {
 
 router.delete('/cities/:id', requireAuth, requireAdmin, (req, res, next) => {
   try {
-    deleteCity(parseId(req.params.id, 'city id'));
+    deleteCity(parseId(req.params.id, 'ciudad'));
     res.json({ status: 'deleted' });
   } catch (err) {
     next(err);
@@ -56,7 +56,7 @@ router.delete('/cities/:id', requireAuth, requireAdmin, (req, res, next) => {
 
 router.get('/cities/:id/neighborhoods', (req, res, next) => {
   try {
-    res.json(listNeighborhoods(parseId(req.params.id, 'city id')));
+    res.json(listNeighborhoods(parseId(req.params.id, 'ciudad')));
   } catch (err) {
     next(err);
   }
@@ -72,7 +72,7 @@ router.post('/neighborhoods', requireAuth, requireAdmin, (req, res, next) => {
 
 router.put('/neighborhoods/:id', requireAuth, requireAdmin, (req, res, next) => {
   try {
-    res.json(updateNeighborhood(parseId(req.params.id, 'neighborhood id'), req.body?.name, req.body?.deliveryFee));
+    res.json(updateNeighborhood(parseId(req.params.id, 'barrio'), req.body?.name, req.body?.deliveryFee));
   } catch (err) {
     next(err);
   }
@@ -80,7 +80,7 @@ router.put('/neighborhoods/:id', requireAuth, requireAdmin, (req, res, next) => 
 
 router.delete('/neighborhoods/:id', requireAuth, requireAdmin, (req, res, next) => {
   try {
-    deleteNeighborhood(parseId(req.params.id, 'neighborhood id'));
+    deleteNeighborhood(parseId(req.params.id, 'barrio'));
     res.json({ status: 'deleted' });
   } catch (err) {
     next(err);

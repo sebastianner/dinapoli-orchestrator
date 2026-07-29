@@ -15,21 +15,21 @@ export const REFRESH_COOKIE = 'refresh_token';
 export function requireAuth(req: Request, res: Response, next: NextFunction): void {
   const token = req.cookies?.[ACCESS_COOKIE];
   if (!token) {
-    res.status(401).json({ error: 'not authenticated' });
+    res.status(401).json({ error: 'no autenticado' });
     return;
   }
   try {
     req.employeeId = verifyAccessToken(token).employeeId;
     next();
   } catch {
-    res.status(401).json({ error: 'session expired' });
+    res.status(401).json({ error: 'sesión expirada' });
   }
 }
 
 /** Must run after requireAuth. Checks the employee's CURRENT role in the DB, not the token's claim - see authService.isCurrentlyAdmin. */
 export function requireAdmin(req: Request, res: Response, next: NextFunction): void {
   if (req.employeeId == null || !isCurrentlyAdmin(req.employeeId)) {
-    res.status(403).json({ error: 'admin access required' });
+    res.status(403).json({ error: 'se requiere acceso de administrador' });
     return;
   }
   next();

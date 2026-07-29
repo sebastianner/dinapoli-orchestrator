@@ -56,6 +56,8 @@ export interface PizzaFlavor {
   id: string;
   name: string;
   description: string;
+  /** False for a sold-out flavor - still present (not filtered out of the menu) so it can render disabled instead of disappearing, same as Product.isAvailable. */
+  isAvailable: boolean;
 }
 
 export interface ProductCategory {
@@ -73,7 +75,8 @@ export interface Product {
   /** Absent when the product is priced per size (e.g. calzone). */
   price?: number;
   sizes?: ProductSize[];
-  options?: ProductOption[];
+  /** Selectable flavors that don't affect price (drinks) - absent/empty means this product doesn't ask for one (e.g. Coca-Cola 3L). */
+  drinkFlavors?: DrinkFlavor[];
   /** True when the product takes a pizza flavor (gratinados, calzones). */
   pizzaFlavor?: boolean;
 }
@@ -94,12 +97,19 @@ export interface AdminProduct {
   price: number | null;
   isAvailable: boolean;
   sizes: ProductSize[];
-  options: ProductOption[];
+  drinkFlavors: DrinkFlavor[];
   pizzaFlavor: boolean;
 }
 
-export interface ProductOption {
+export interface DrinkFlavor {
   id: string;
+  name: string;
+}
+
+/** A drink flavor as seen from the admin menu-settings flavor library (/ajustes/menu-settings, see AddProductModal/DrinkFlavorsModal) - id here is numeric (the DB row), unlike DrinkFlavor.id which is the string key. */
+export interface AdminDrinkFlavor {
+  id: number;
+  key: string;
   name: string;
 }
 
@@ -136,6 +146,7 @@ export interface AdminPizzaFlavor {
   key: string;
   name: string;
   description: string | null;
+  isAvailable: boolean;
   groupIds: PizzaGroupId[];
 }
 
@@ -236,7 +247,7 @@ export interface ProductItemRequest {
   type: 'product';
   category: ProductCategoryId;
   product: string;
-  option?: string;
+  drinkFlavor?: string;
   size?: string;
   pizzaFlavor?: string;
   quantity: number;
@@ -277,7 +288,7 @@ export interface OrderRequest {
 export interface ProductRef {
   category: ProductCategoryId;
   product: string;
-  option?: string;
+  drinkFlavor?: string;
   size?: string;
   pizzaFlavor?: string;
 }
@@ -362,6 +373,8 @@ export interface CashFlowDay {
   cashInRegister: number;
   expenses: number;
   createdAt: string;
+  /** COP. Sum of cash payments across today's COMPLETED orders so far - add to cashInRegister for the drawer's expected current cash. Only present on the *current* period (useCurrentCashFlow), absent from useCashFlowHistory's rows. */
+  cashSalesToday?: number;
 }
 
 export interface CashExpense {
@@ -384,10 +397,11 @@ export interface ClosingReport {
   orderCount: number;
   deliverySales: number;
   dineInTakeawaySales: number;
+  /** COP. Net of discounts already (real cash collected via this method) and tips (see tips below). */
   cashSales: number;
   cardSales: number;
   transferSales: number;
-  /** Tips and discounts excluded - see tips/discounts below. */
+  /** COP. Net of discounts already, tips excluded (see tips below) - the real money sold. */
   totalSales: number;
   tips: number;
   discounts: number;
@@ -399,7 +413,136 @@ export interface ClosingReport {
   dineInOrderCount: number;
   takeawayOrderCount: number;
   totalExpenses: number;
+  /** COP. Snapshot of that day's cash_flow.cash_in_register at closing time - add cashSales for "Efectivo final en caja", the expected final cash count. */
+  cashInRegister: number;
+  /** The exact plain-text thermal-receipt content generated at closing time - what a reprint re-sends verbatim. */
+  content: string;
   createdAt: string;
+}
+
+// ---------- Analytics (/dashboard/analytics, analyticsService on the server) ----------
+// Every figure below is computed live over a date range, never read from
+// ClosingReport - see server/src/services/analyticsService.ts. Sales figures
+// are net of tips and discounts (unlike ClosingReport's stale "tips excluded"
+// wording above, which predates that fix - see cashSales/totalSales here).
+
+export type AnalyticsRange = 'today' | 'week' | 'month' | 'custom';
+
+export interface SalesSummary {
+  /** COP. Net of tips and discounts - the real money sold in the selected range. */
+  totalSales: number;
+  /** Percent change vs. the immediately preceding period of equal length. null when the prior period had zero sales (no baseline to compare against). */
+  totalSalesGrowthPct: number | null;
+  orderCount: number;
+  orderCountGrowthPct: number | null;
+  /** COP. totalSales / orderCount, 0 when orderCount is 0. */
+  avgOrderValue: number;
+  avgOrderValueGrowthPct: number | null;
+  /** Sum of item quantities / orderCount, 0 when orderCount is 0. */
+  itemsPerOrder: number;
+  /** Distinct customers across the range's completed orders - the same customer ordering twice still counts once. */
+  customersServed: number;
+  customersServedGrowthPct: number | null;
+}
+
+export interface SalesTrendPoint {
+  /** Bucket key: 'HH' (00-23) when the range spans a single day, otherwise 'YYYY-MM-DD'. */
+  date: string;
+  /** Human-readable label for the same bucket, e.g. '14:00' or 'lun 21'. */
+  bucketLabel: string;
+  /** COP. Net of tips and discounts, same formula as SalesSummary.totalSales. */
+  totalSales: number;
+  orderCount: number;
+}
+
+export interface PaymentMethodBreakdown {
+  method: PaymentMethod;
+  /** COP. Net of tips and discounts. */
+  sales: number;
+}
+
+export interface OrderTypeBreakdown {
+  orderType: OrderType;
+  /** COP. Net of tips and discounts. */
+  sales: number;
+  orderCount: number;
+}
+
+export interface SalesBreakdown {
+  /** Always all 3 methods, 0 for any unused in the range. */
+  paymentMethods: PaymentMethodBreakdown[];
+  /** Always all 3 order types, 0 for any unused in the range. */
+  orderTypes: OrderTypeBreakdown[];
+}
+
+export interface HeatmapCell {
+  /** 0 (Sunday) - 6 (Saturday). */
+  dow: number;
+  /** 0-23, Bogota local hour. */
+  hour: number;
+  orderCount: number;
+}
+
+export interface ProductRanking {
+  /** Product name, or for pizzas "{flavor} {size}" (single-flavor) / "Pizza mitad y mitad {size}" (split across >1 flavor - not fractionally attributed per flavor). */
+  name: string;
+  category: string;
+  quantity: number;
+  /** COP. */
+  revenue: number;
+}
+
+export interface CategoryRevenue {
+  /** A real category name, or the synthetic "Pizzas" bucket - pizzas aren't modeled under any category. */
+  category: string;
+  quantity: number;
+  /** COP. */
+  revenue: number;
+}
+
+export interface ProductsAnalytics {
+  /** Sorted by revenue descending - slice/re-sort client-side for top/bottom-N by either metric. */
+  products: ProductRanking[];
+  categories: CategoryRevenue[];
+}
+
+export interface CustomerSpend {
+  id: number;
+  name: string;
+  phone: string | null;
+  orderCount: number;
+  /** COP. Net of tips and discounts. */
+  spend: number;
+}
+
+export interface CustomerGrowth {
+  newCustomers: number;
+  returningCustomers: number;
+}
+
+export interface CustomersAnalytics {
+  /** Top spenders in the range, capped server-side. */
+  topCustomers: CustomerSpend[];
+  growth: CustomerGrowth;
+}
+
+export interface EmployeePerformance {
+  id: number;
+  name: string;
+  isActive: boolean;
+  orderCount: number;
+  /** COP. Net of tips and discounts. */
+  sales: number;
+}
+
+export interface PromoUsageSummary {
+  promoCounts: { promoType: PromoType; orderCount: number }[];
+  /** COP. */
+  totalDiscount: number;
+  totalOrders: number;
+  ordersWithDiscount: number;
+  /** ordersWithDiscount / totalOrders * 100, 0 when totalOrders is 0. */
+  discountedOrderPct: number;
 }
 
 // ---------- WebSocket order intake protocol ----------

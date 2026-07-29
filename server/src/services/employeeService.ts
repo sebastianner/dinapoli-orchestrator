@@ -28,7 +28,7 @@ const setRole = db.prepare<[string, string | null, number]>('UPDATE employees SE
 function resolveRole(role: unknown): EmployeeRole {
   if (role == null) return 'staff';
   if (role !== 'staff' && role !== 'admin') {
-    throw new ValidationError("role must be 'staff' or 'admin'");
+    throw new ValidationError("role debe ser 'staff' o 'admin'");
   }
   return role;
 }
@@ -43,25 +43,25 @@ function resolveRole(role: unknown): EmployeeRole {
  */
 async function resolvePasswordHash(role: EmployeeRole, password: unknown, existingHash: string | null): Promise<string | null> {
   if (role === 'staff') {
-    if (password != null) throw new ValidationError('only admins can have a password');
+    if (password != null) throw new ValidationError('solo los administradores pueden tener contraseña');
     return null;
   }
   if (password == null) {
     if (existingHash) return existingHash;
-    throw new ValidationError(`admin accounts require a password (min ${MIN_PASSWORD_LENGTH} characters)`);
+    throw new ValidationError(`las cuentas de administrador requieren una contraseña (mínimo ${MIN_PASSWORD_LENGTH} caracteres)`);
   }
   if (typeof password !== 'string' || password.length < MIN_PASSWORD_LENGTH) {
-    throw new ValidationError(`password must be at least ${MIN_PASSWORD_LENGTH} characters`);
+    throw new ValidationError(`la contraseña debe tener al menos ${MIN_PASSWORD_LENGTH} caracteres`);
   }
   return hashPassword(password);
 }
 
 export async function addEmployee(name: unknown, pictureUrl: unknown, role?: unknown, password?: unknown): Promise<Employee> {
   if (typeof name !== 'string' || name.trim() === '') {
-    throw new ValidationError('name is required');
+    throw new ValidationError('el nombre es obligatorio');
   }
   if (pictureUrl != null && typeof pictureUrl !== 'string') {
-    throw new ValidationError('pictureUrl must be a string');
+    throw new ValidationError('pictureUrl debe ser una cadena de texto');
   }
   const resolvedRole = resolveRole(role);
   const passwordHash = await resolvePasswordHash(resolvedRole, password, null);
@@ -72,7 +72,7 @@ export async function addEmployee(name: unknown, pictureUrl: unknown, role?: unk
 /** Promotes/demotes an employee. Promoting to admin (or rotating an existing admin's password) requires `password`; demoting to staff clears any stored hash. */
 export async function setEmployeeRole(id: number, role: unknown, password?: unknown): Promise<Employee> {
   const row = getEmployeeRow.get(id);
-  if (!row) throw new NotFoundError(`employee ${id} not found`);
+  if (!row) throw new NotFoundError(`empleado ${id} no encontrado`);
   const resolvedRole = resolveRole(role);
   const existingHash = resolvedRole === row.role ? row.password_hash : null;
   const passwordHash = await resolvePasswordHash(resolvedRole, password, existingHash);
@@ -82,7 +82,7 @@ export async function setEmployeeRole(id: number, role: unknown, password?: unkn
 
 export function getEmployeeById(id: number): Employee {
   const row = getEmployeeRow.get(id);
-  if (!row) throw new NotFoundError(`employee ${id} not found`);
+  if (!row) throw new NotFoundError(`empleado ${id} no encontrado`);
   return rowToEmployee(row);
 }
 

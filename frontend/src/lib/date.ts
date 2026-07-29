@@ -6,7 +6,15 @@ export function shiftDate(dateStr: string, days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
+/** Shifts a YYYY-MM string by a number of months (may be negative). */
+export function shiftMonth(monthStr: string, months: number): string {
+  const [year, month] = monthStr.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1 + months, 1));
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
 const DAY_FORMATTER = new Intl.DateTimeFormat('es-CO', { day: '2-digit', month: 'long', year: 'numeric', timeZone: 'UTC' });
+const MONTH_FORMATTER = new Intl.DateTimeFormat('es-CO', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 const TIME_FORMATTER = new Intl.DateTimeFormat('es-CO', { hour: '2-digit', minute: '2-digit', hour12: true });
 const DATETIME_FORMATTER = new Intl.DateTimeFormat('es-CO', {
   day: '2-digit',
@@ -20,6 +28,12 @@ const DATETIME_FORMATTER = new Intl.DateTimeFormat('es-CO', {
 export function formatDateLong(dateStr: string): string {
   const [year, month, day] = dateStr.split('-').map(Number);
   return DAY_FORMATTER.format(new Date(Date.UTC(year, month - 1, day)));
+}
+
+/** "julio de 2026" from a YYYY-MM string. */
+export function formatMonthLong(monthStr: string): string {
+  const [year, month] = monthStr.split('-').map(Number);
+  return MONTH_FORMATTER.format(new Date(Date.UTC(year, month - 1, 1)));
 }
 
 export function formatTime(isoString: string): string {

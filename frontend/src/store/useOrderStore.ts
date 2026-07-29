@@ -70,6 +70,8 @@ interface OrderState {
   activePromoType: PromoType | null;
 
   startDraft: (input: NewOrderInfo) => void;
+  /** Attaches a customer to the in-progress draft (see CustomerInfoModal, invoked from OrderOverview for dine_in). No-op if there's no draft to attach to. */
+  setDraftCustomer: (customerId: number, customerAddressId: number | undefined, display: CustomerDisplayInfo) => void;
   openExistingOrder: (orderId: number) => void;
   /** Like openExistingOrder, but for a draft that just got submitted and became this same order - keeps pendingTip/DeliveryFee/Discount instead of resetting them. */
   promoteDraftToOrder: (orderId: number) => void;
@@ -114,6 +116,8 @@ export const useOrderStore = create<OrderState>((set) => ({
   // draft being started rather than get silently wiped.
   startDraft: (info) =>
     set({ currentOrderId: null, newOrderInfo: info, pendingTip: 0, pendingDeliveryFee: 0, pendingDiscount: 0, promoDraft: null, activePromoType: null }),
+  setDraftCustomer: (customerId, customerAddressId, display) =>
+    set((state) => (state.newOrderInfo ? { newOrderInfo: { ...state.newOrderInfo, customerId, customerAddressId, customerDisplay: display } } : state)),
   openExistingOrder: (orderId) =>
     set({
       currentOrderId: orderId,

@@ -15,12 +15,13 @@ interface EditPizzaFlavorModalProps {
 /**
  * Admin-only (see routes/pizzaAdmin.ts PUT /flavors/:id). No delete in this
  * pass - a flavor can be referenced by order history, same "mark unavailable
- * instead" reasoning as products (not wired up here yet since flavors have no
- * isAvailable toggle exposed by the backend either - out of scope for now).
+ * instead" reasoning as products - which is exactly what the Disponible
+ * toggle below is for.
  */
 export function EditPizzaFlavorModal({ flavor, onClose, groups }: EditPizzaFlavorModalProps) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [isAvailable, setIsAvailable] = useState(true);
   const [groupIds, setGroupIds] = useState<PizzaGroupId[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,6 +31,7 @@ export function EditPizzaFlavorModal({ flavor, onClose, groups }: EditPizzaFlavo
     if (!flavor) return;
     setName(flavor.name);
     setDescription(flavor.description ?? '');
+    setIsAvailable(flavor.isAvailable);
     setGroupIds(flavor.groupIds);
     setError(null);
   }, [flavor]);
@@ -55,10 +57,11 @@ export function EditPizzaFlavorModal({ flavor, onClose, groups }: EditPizzaFlavo
       return;
     }
 
-    const input: { name?: string; description?: string | null; groupIds?: PizzaGroupId[] } = {};
+    const input: { name?: string; description?: string | null; isAvailable?: boolean; groupIds?: PizzaGroupId[] } = {};
     if (name.trim() !== flavor.name) input.name = name.trim();
     const nextDescription = description.trim() || null;
     if (nextDescription !== flavor.description) input.description = nextDescription;
+    if (isAvailable !== flavor.isAvailable) input.isAvailable = isAvailable;
     if (groupIds.length !== flavor.groupIds.length || groupIds.some((g) => !flavor.groupIds.includes(g))) {
       input.groupIds = groupIds;
     }
@@ -105,6 +108,27 @@ export function EditPizzaFlavorModal({ flavor, onClose, groups }: EditPizzaFlavo
               rows={2}
               className="w-full resize-none rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary outline-none focus:border-brand-400"
             />
+          </label>
+
+          <label className="flex items-center justify-between rounded-lg border border-border px-3 py-2.5">
+            <span className="text-sm font-medium text-text-primary">Disponible</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={isAvailable}
+              onClick={() => setIsAvailable((v) => !v)}
+              className={classNames('relative h-6 w-10 shrink-0 rounded-full transition-colors duration-fast', isAvailable ? 'bg-success' : 'bg-border')}
+            >
+              {/* left-0 pins the knob's static position to the track's left edge - without it, the
+                  button's default `text-align: center` skews the absolutely-positioned span's base
+                  position before `translate-x` is even applied, causing it to overflow the track. */}
+              <span
+                className={classNames(
+                  'absolute top-0.5 left-0 h-5 w-5 rounded-full bg-white shadow-sm transition-transform duration-fast',
+                  isAvailable ? 'translate-x-[1.125rem]' : 'translate-x-0.5'
+                )}
+              />
+            </button>
           </label>
 
           <div className="flex flex-col gap-1.5">

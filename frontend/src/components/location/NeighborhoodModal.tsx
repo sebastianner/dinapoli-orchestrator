@@ -14,7 +14,7 @@ interface NeighborhoodModalProps {
   neighborhood?: Neighborhood;
 }
 
-/** Admin only (see routes/locations.ts) - reachable only from the /ajustes/locations panel. */
+/** Admin only (see routes/locations.ts) - reachable only from the /ajustes/ubicaciones panel. */
 export function NeighborhoodModal({ open, onClose, cityId, neighborhood }: NeighborhoodModalProps) {
   const isEdit = neighborhood != null;
   const [name, setName] = useState(neighborhood?.name ?? '');

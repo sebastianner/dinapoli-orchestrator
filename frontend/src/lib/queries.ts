@@ -2,6 +2,13 @@ import useSWR from 'swr';
 import {
   fetchActiveEmployees,
   fetchAdminProducts,
+  fetchAnalyticsBreakdown,
+  fetchAnalyticsCustomers,
+  fetchAnalyticsEmployees,
+  fetchAnalyticsHeatmap,
+  fetchAnalyticsProducts,
+  fetchAnalyticsPromotions,
+  fetchAnalyticsSummary,
   fetchCashFlowExpenses,
   fetchCashFlowHistory,
   fetchCashFlowSettings,
@@ -10,6 +17,7 @@ import {
   fetchClosingReports,
   fetchCurrentCashFlow,
   fetchCustomer,
+  fetchDrinkFlavors,
   fetchInactiveEmployees,
   fetchMenu,
   fetchNeighborhoods,
@@ -18,12 +26,14 @@ import {
   fetchOrdersPage,
   fetchPizzaAdminData,
   fetchPromoSettings,
+  fetchSalesTrend,
   fetchTables,
   searchCustomers,
   searchProducts,
   suggestBuildingNames,
   type FetchOrdersFilter,
 } from '@/lib/api';
+import type { AnalyticsRange } from '@/types/api';
 
 // Rarely-changing data: cached with SWR instead of re-fetched on every mount.
 // Active orders are handled separately (see useOrderStore) since they change
@@ -47,6 +57,11 @@ export function useAdminProducts() {
 /** Admin only (see routes/pizzaAdmin.ts) - pizza groups/sizes/flavors for /ajustes/menu-settings. */
 export function usePizzaAdminData() {
   return useSWR('/pizza-admin', fetchPizzaAdminData);
+}
+
+/** Admin only (see routes/products.ts GET /drink-flavors) - the shared flavor library, for DrinkFlavorsModal's "pick an existing one" list. */
+export function useDrinkFlavors() {
+  return useSWR('/products/drink-flavors', fetchDrinkFlavors);
 }
 
 export function useActiveEmployees() {
@@ -133,4 +148,45 @@ export function useBuildingSuggestions(neighborhoodId: number | null, query: str
   return useSWR(neighborhoodId != null ? `/customers/addresses/buildings?neighborhoodId=${neighborhoodId}&q=${trimmed}` : null, () =>
     suggestBuildingNames(neighborhoodId as number, trimmed)
   );
+}
+
+// ---------- Analytics (/dashboard/analytics) ----------
+// Admin-only on the backend (see routes/analytics.ts) - no enabled flag here
+// since the route itself is admin-gated (see dashboard/analytics/index.tsx),
+// same division of responsibility as useClosingReports.
+
+function analyticsKey(endpoint: string, range: AnalyticsRange, from?: string, to?: string): string {
+  return `/analytics/${endpoint}?range=${range}${range === 'custom' ? `&from=${from}&to=${to}` : ''}`;
+}
+
+export function useAnalyticsSummary(range: AnalyticsRange, from?: string, to?: string) {
+  return useSWR(analyticsKey('summary', range, from, to), () => fetchAnalyticsSummary(range, from, to));
+}
+
+export function useSalesTrend(range: AnalyticsRange, from?: string, to?: string) {
+  return useSWR(analyticsKey('sales-trend', range, from, to), () => fetchSalesTrend(range, from, to));
+}
+
+export function useAnalyticsBreakdown(range: AnalyticsRange, from?: string, to?: string) {
+  return useSWR(analyticsKey('breakdown', range, from, to), () => fetchAnalyticsBreakdown(range, from, to));
+}
+
+export function useAnalyticsHeatmap(range: AnalyticsRange, from?: string, to?: string) {
+  return useSWR(analyticsKey('heatmap', range, from, to), () => fetchAnalyticsHeatmap(range, from, to));
+}
+
+export function useAnalyticsProducts(range: AnalyticsRange, from?: string, to?: string) {
+  return useSWR(analyticsKey('products', range, from, to), () => fetchAnalyticsProducts(range, from, to));
+}
+
+export function useAnalyticsCustomers(range: AnalyticsRange, from?: string, to?: string) {
+  return useSWR(analyticsKey('customers', range, from, to), () => fetchAnalyticsCustomers(range, from, to));
+}
+
+export function useAnalyticsEmployees(range: AnalyticsRange, from?: string, to?: string) {
+  return useSWR(analyticsKey('employees', range, from, to), () => fetchAnalyticsEmployees(range, from, to));
+}
+
+export function useAnalyticsPromotions(range: AnalyticsRange, from?: string, to?: string) {
+  return useSWR(analyticsKey('promotions', range, from, to), () => fetchAnalyticsPromotions(range, from, to));
 }

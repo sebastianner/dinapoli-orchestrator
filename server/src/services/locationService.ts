@@ -36,13 +36,13 @@ export function listCities(): City[] {
 
 export function getCityById(id: number): City {
   const row = getCityRow.get(id);
-  if (!row) throw new NotFoundError(`city ${id} not found`);
+  if (!row) throw new NotFoundError(`ciudad ${id} no encontrada`);
   return rowToCity(row);
 }
 
 export function createCity(name: unknown, department: unknown, country: unknown): City {
-  if (typeof name !== 'string' || name.trim() === '') throw new ValidationError('name is required');
-  if (department != null && typeof department !== 'string') throw new ValidationError('department must be a string');
+  if (typeof name !== 'string' || name.trim() === '') throw new ValidationError('el nombre es obligatorio');
+  if (department != null && typeof department !== 'string') throw new ValidationError('el departamento debe ser una cadena de texto');
   const countryValue = typeof country === 'string' && country.trim() !== '' ? country.trim() : 'Colombia';
   const { lastInsertRowid } = insertCity.run(name.trim(), department || null, countryValue);
   return getCityById(Number(lastInsertRowid));
@@ -50,9 +50,9 @@ export function createCity(name: unknown, department: unknown, country: unknown)
 
 export function updateCity(id: number, name: unknown, department: unknown, country: unknown): City {
   const existing = getCityRow.get(id);
-  if (!existing) throw new NotFoundError(`city ${id} not found`);
-  if (name != null && (typeof name !== 'string' || name.trim() === '')) throw new ValidationError('name must be a non-empty string');
-  if (department !== undefined && department != null && typeof department !== 'string') throw new ValidationError('department must be a string');
+  if (!existing) throw new NotFoundError(`ciudad ${id} no encontrada`);
+  if (name != null && (typeof name !== 'string' || name.trim() === '')) throw new ValidationError('el nombre debe ser una cadena de texto no vacía');
+  if (department !== undefined && department != null && typeof department !== 'string') throw new ValidationError('el departamento debe ser una cadena de texto');
   updateCityRow.run(
     typeof name === 'string' ? name.trim() : existing.name,
     department !== undefined ? ((department as string | null) || null) : existing.department,
@@ -68,7 +68,7 @@ export function deleteCity(id: number): void {
   try {
     deleteCityRow.run(id);
   } catch (err) {
-    if (isForeignKeyViolation(err)) throw new ConflictError(`city ${id} has neighborhoods and can't be deleted`);
+    if (isForeignKeyViolation(err)) throw new ConflictError(`la ciudad ${id} tiene barrios y no se puede eliminar`);
     throw err;
   }
 }
@@ -86,25 +86,25 @@ export function listNeighborhoods(cityId: number): Neighborhood[] {
 
 export function getNeighborhoodById(id: number): Neighborhood {
   const row = getNeighborhoodRow.get(id);
-  if (!row) throw new NotFoundError(`neighborhood ${id} not found`);
+  if (!row) throw new NotFoundError(`barrio ${id} no encontrado`);
   return rowToNeighborhood(row);
 }
 
 export function createNeighborhood(name: unknown, cityId: unknown, deliveryFee: unknown): Neighborhood {
-  if (typeof name !== 'string' || name.trim() === '') throw new ValidationError('name is required');
-  if (!isPositiveInteger(cityId)) throw new ValidationError('cityId must be a positive integer');
+  if (typeof name !== 'string' || name.trim() === '') throw new ValidationError('el nombre es obligatorio');
+  if (!isPositiveInteger(cityId)) throw new ValidationError('cityId debe ser un número entero positivo');
   getCityById(cityId); // 404s if missing
   const fee = deliveryFee == null ? 0 : deliveryFee;
-  if (!isNonNegativeInteger(fee)) throw new ValidationError('deliveryFee must be a non-negative integer');
+  if (!isNonNegativeInteger(fee)) throw new ValidationError('deliveryFee debe ser un número entero no negativo');
   const { lastInsertRowid } = insertNeighborhood.run(name.trim(), cityId, fee);
   return getNeighborhoodById(Number(lastInsertRowid));
 }
 
 export function updateNeighborhood(id: number, name: unknown, deliveryFee: unknown): Neighborhood {
   const existing = getNeighborhoodRow.get(id);
-  if (!existing) throw new NotFoundError(`neighborhood ${id} not found`);
-  if (name != null && (typeof name !== 'string' || name.trim() === '')) throw new ValidationError('name must be a non-empty string');
-  if (deliveryFee != null && !isNonNegativeInteger(deliveryFee)) throw new ValidationError('deliveryFee must be a non-negative integer');
+  if (!existing) throw new NotFoundError(`barrio ${id} no encontrado`);
+  if (name != null && (typeof name !== 'string' || name.trim() === '')) throw new ValidationError('el nombre debe ser una cadena de texto no vacía');
+  if (deliveryFee != null && !isNonNegativeInteger(deliveryFee)) throw new ValidationError('deliveryFee debe ser un número entero no negativo');
   updateNeighborhoodRow.run(
     typeof name === 'string' ? name.trim() : existing.name,
     deliveryFee != null ? deliveryFee : existing.delivery_fee,
@@ -119,7 +119,7 @@ export function deleteNeighborhood(id: number): void {
   try {
     deleteNeighborhoodRow.run(id);
   } catch (err) {
-    if (isForeignKeyViolation(err)) throw new ConflictError(`neighborhood ${id} has addresses and can't be deleted`);
+    if (isForeignKeyViolation(err)) throw new ConflictError(`el barrio ${id} tiene direcciones y no se puede eliminar`);
     throw err;
   }
 }

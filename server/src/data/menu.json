@@ -430,7 +430,7 @@
           "id": "soft_drink_1_5l",
           "name": "Gaseosa 1.5L",
           "price": 9000,
-          "options": [
+          "drinkFlavors": [
             {
               "id": "coca_cola",
               "name": "Coca-Cola"
@@ -465,7 +465,7 @@
           "id": "soft_drink",
           "name": "Gaseosa Personal",
           "price": 5000,
-          "options": [
+          "drinkFlavors": [
             {
               "id": "coca_cola",
               "name": "Coca-Cola"
@@ -504,7 +504,7 @@
           "id": "beer",
           "name": "Cerveza",
           "price": 6000,
-          "options": [
+          "drinkFlavors": [
             {
               "id": "poker",
               "name": "Poker"
@@ -523,7 +523,7 @@
           "id": "juice",
           "name": "Jugos",
           "price": 8500,
-          "options": [
+          "drinkFlavors": [
             {
               "id": "mango",
               "name": "Mango"
@@ -595,7 +595,7 @@
           "id": "italian_soda",
           "name": "Sodas Italianas",
           "price": 12000,
-          "options": [
+          "drinkFlavors": [
             {
               "id": "frutos_rojos",
               "name": "Frutos Rojos"
@@ -626,7 +626,7 @@
           "id": "milkshake",
           "name": "Malteadas",
           "price": 12000,
-          "options": [
+          "drinkFlavors": [
             {
               "id": "oreo",
               "name": "Oreo"

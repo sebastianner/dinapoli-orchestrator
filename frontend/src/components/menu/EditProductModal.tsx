@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
 import { mutate } from 'swr';
-import { Trash2 } from 'lucide-react';
+import { Martini, Trash2 } from 'lucide-react';
 import { Modal } from '@/components/common/Modal';
-import { updateAdminProduct } from '@/lib/api';
-import { formatCOP } from '@/lib/format';
+import { updateAdminProduct, updateAdminProductSize } from '@/lib/api';
 import { useToastStore } from '@/store/useToastStore';
 import type { AdminProduct } from '@/types/api';
 
@@ -12,11 +11,14 @@ interface EditProductModalProps {
   onClose: () => void;
   /** Hands off to DeleteProductModal instead of deleting inline, so there's one delete flow/confirmation for the whole page (see menu-settings/index.tsx). */
   onRequestDelete: (product: AdminProduct) => void;
+  /** Hands off to DrinkFlavorsModal - only rendered for drinks, same "one flow, not two" reasoning as onRequestDelete. */
+  onRequestFlavors: (product: AdminProduct) => void;
 }
 
-/** Mobile/tablet edit surface for a single product (price + availability) - below the `lg` breakpoint, ProductSettingsRow's inline controls are replaced by a read-only row that opens this instead, since there's no longer room to cram price/toggle/delete into one line without the name collapsing. Desktop keeps the inline row and never opens this. */
-export function EditProductModal({ product, onClose, onRequestDelete }: EditProductModalProps) {
+/** Edit surface for a single product (price + availability). Below the `lg` breakpoint, ProductSettingsRow's inline controls are replaced by a read-only row that opens this instead, since there's no longer room to cram price/toggle/delete into one line without the name collapsing. Products priced per size (e.g. calzone) also open this on desktop, since ProductSettingsRow has no room for one price input per size either. */
+export function EditProductModal({ product, onClose, onRequestDelete, onRequestFlavors }: EditProductModalProps) {
   const [priceInput, setPriceInput] = useState('');
+  const [sizeInputs, setSizeInputs] = useState<Record<string, string>>({});
   const [isAvailable, setIsAvailable] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -25,6 +27,7 @@ export function EditProductModal({ product, onClose, onRequestDelete }: EditProd
   useEffect(() => {
     if (!product) return;
     setPriceInput(product.price != null ? String(product.price) : '');
+    setSizeInputs(Object.fromEntries(product.sizes.map((s) => [s.id, String(s.price)])));
     setIsAvailable(product.isAvailable);
     setError(null);
   }, [product]);
@@ -49,7 +52,17 @@ export function EditProductModal({ product, onClose, onRequestDelete }: EditProd
     }
     if (isAvailable !== product.isAvailable) input.isAvailable = isAvailable;
 
-    if (Object.keys(input).length === 0) {
+    const changedSizes: { id: string; price: number }[] = [];
+    for (const size of product.sizes) {
+      const parsed = Number(sizeInputs[size.id]);
+      if (!Number.isInteger(parsed) || parsed <= 0) {
+        setError('El precio debe ser un número entero mayor a 0');
+        return;
+      }
+      if (parsed !== size.price) changedSizes.push({ id: size.id, price: parsed });
+    }
+
+    if (Object.keys(input).length === 0 && changedSizes.length === 0) {
       handleClose();
       return;
     }
@@ -57,7 +70,8 @@ export function EditProductModal({ product, onClose, onRequestDelete }: EditProd
     setSubmitting(true);
     setError(null);
     try {
-      await updateAdminProduct(product.id, input);
+      if (Object.keys(input).length > 0) await updateAdminProduct(product.id, input);
+      for (const size of changedSizes) await updateAdminProductSize(product.id, size.id, size.price);
       await mutate('/products');
       pushToast(`${product.name} actualizado`);
       handleClose();
@@ -85,11 +99,21 @@ export function EditProductModal({ product, onClose, onRequestDelete }: EditProd
               />
             </label>
           ) : (
-            <div className="flex flex-col gap-1">
-              <span className="text-xs font-medium text-text-secondary">Precio</span>
-              <p className="text-sm text-text-secondary">
-                {product.sizes.map((s) => `${s.name} ${formatCOP(s.price)}`).join(' · ')} - se precia por tamaño, no aquí.
-              </p>
+            <div className="flex flex-col gap-2">
+              <span className="text-xs font-medium text-text-secondary">Precio por tamaño</span>
+              {product.sizes.map((size, i) => (
+                <label key={size.id} className="flex items-center justify-between gap-2">
+                  <span className="text-sm text-text-primary">{size.name}</span>
+                  <input
+                    autoFocus={i === 0}
+                    type="number"
+                    min={1}
+                    value={sizeInputs[size.id] ?? ''}
+                    onChange={(e) => setSizeInputs((prev) => ({ ...prev, [size.id]: e.target.value }))}
+                    className="w-28 rounded-lg border border-border bg-surface px-3 py-2 text-right text-sm text-text-primary outline-none focus:border-brand-400"
+                  />
+                </label>
+              ))}
             </div>
           )}
 
@@ -110,6 +134,22 @@ export function EditProductModal({ product, onClose, onRequestDelete }: EditProd
               />
             </button>
           </label>
+
+          {product.categoryId === 'drinks' && (
+            <button
+              type="button"
+              onClick={() => {
+                handleClose();
+                onRequestFlavors(product);
+              }}
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-border py-2.5 text-sm font-semibold text-text-secondary transition-colors duration-fast hover:border-brand-400 hover:text-brand-600"
+            >
+              <Martini size={15} />
+              {product.drinkFlavors.length > 0
+                ? `Sabores (${product.drinkFlavors.length})`
+                : 'Agregar sabores'}
+            </button>
+          )}
 
           {error && <p className="text-sm text-danger">{error}</p>}
 

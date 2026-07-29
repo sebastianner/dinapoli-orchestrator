@@ -74,12 +74,23 @@ function CalzoneFlavorPage() {
           <button
             key={flavor.id}
             type="button"
+            disabled={!flavor.isAvailable}
+            title={!flavor.isAvailable ? 'Agotado' : undefined}
             onClick={() => setFlavorId(flavor.id)}
             className={classNames(
-              'rounded-xl border-2 p-3 text-left transition-colors duration-fast',
-              flavorId === flavor.id ? 'border-brand-500 bg-brand-500/10' : 'border-border bg-surface hover:border-brand-300',
+              'relative rounded-xl border-2 p-3 text-left transition-colors duration-fast',
+              !flavor.isAvailable
+                ? 'cursor-not-allowed border-border bg-surface opacity-40'
+                : flavorId === flavor.id
+                  ? 'cursor-pointer border-brand-500 bg-brand-500/10'
+                  : 'cursor-pointer border-border bg-surface hover:border-brand-300',
             )}
           >
+            {!flavor.isAvailable && (
+              <span className="absolute right-2 top-2 rounded-full bg-danger-bg px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-danger">
+                Agotado
+              </span>
+            )}
             <p className="text-sm font-semibold text-text-primary">{flavor.name}</p>
             <p className="mt-0.5 text-xs text-text-secondary">{flavor.description}</p>
           </button>
@@ -102,7 +113,7 @@ function CalzoneFlavorPage() {
         <button
           type="button"
           onClick={handleAdd}
-          className="flex items-center gap-1.5 rounded-lg bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white transition-colors duration-fast hover:bg-brand-600"
+          className="flex cursor-pointer items-center gap-1.5 rounded-lg bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white transition-colors duration-fast hover:bg-brand-600"
         >
           <Plus size={16} /> Agregar a la orden
         </button>
@@ -110,7 +121,7 @@ function CalzoneFlavorPage() {
           type="button"
           onClick={() => setShowComment((v) => !v)}
           aria-label="Agregar comentario"
-          className="flex h-10 w-10 items-center justify-center rounded-lg border border-border text-text-secondary transition-colors duration-fast hover:border-brand-400 hover:text-brand-600"
+          className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-lg border border-border text-text-secondary transition-colors duration-fast hover:border-brand-400 hover:text-brand-600"
         >
           <MessageSquarePlus size={16} />
         </button>

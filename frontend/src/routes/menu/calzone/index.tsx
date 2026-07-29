@@ -26,7 +26,7 @@ function CalzoneSizePage() {
             key={size.id}
             type="button"
             onClick={() => navigate({ to: '/menu/calzone/$size', params: { size: size.id } })}
-            className="anim-scale-in flex w-36 flex-col items-center gap-1 rounded-2xl border border-border bg-surface p-5 shadow-sm transition-transform duration-fast hover:scale-105 hover:border-brand-400 active:scale-95"
+            className="anim-scale-in flex w-36 cursor-pointer flex-col items-center gap-1 rounded-2xl border border-border bg-surface p-5 shadow-sm transition-transform duration-fast hover:scale-105 hover:border-brand-400 active:scale-95"
           >
             <span className="text-lg font-semibold text-text-primary">{size.name}</span>
             <span className="mt-1 font-semibold text-brand-700">{formatCOP(size.price)}</span>

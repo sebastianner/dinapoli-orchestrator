@@ -67,6 +67,8 @@ export interface PizzaFlavor {
   id: string;
   name: string;
   description: string;
+  /** False for a sold-out flavor - still present (not filtered out of the menu) so it can render disabled instead of disappearing, same as Product.isAvailable. */
+  isAvailable: boolean;
 }
 
 export interface ProductCategory {
@@ -84,8 +86,8 @@ export interface Product {
   price?: number;
   /** Present when the product comes in sizes with their own price (calzone). */
   sizes?: ProductSize[];
-  /** Selectable variants that don't affect price (drinks). */
-  options?: ProductOption[];
+  /** Selectable flavors that don't affect price (drinks) - absent/empty means this product doesn't ask for one (e.g. Coca-Cola 3L). */
+  drinkFlavors?: DrinkFlavor[];
   /** True when the product takes a pizza flavor (gratinados, calzones). */
   pizzaFlavor?: boolean;
 }
@@ -95,7 +97,7 @@ export interface ProductSearchResult extends Product {
   categoryId: ProductCategoryId;
 }
 
-export interface ProductOption {
+export interface DrinkFlavor {
   id: string;
   name: string;
 }
@@ -123,8 +125,15 @@ export interface AdminProduct {
   price: number | null;
   isAvailable: boolean;
   sizes: ProductSize[];
-  options: ProductOption[];
+  drinkFlavors: DrinkFlavor[];
   pizzaFlavor: boolean;
+}
+
+/** A drink flavor as seen from the admin menu-settings library - id/key/name, plus which products currently offer it. Not otherwise exposed to the public /menu endpoint (see Product.drinkFlavors for that shape). */
+export interface AdminDrinkFlavor {
+  id: number;
+  key: string;
+  name: string;
 }
 
 // ============================================================
@@ -152,6 +161,7 @@ export interface AdminPizzaFlavor {
   key: string;
   name: string;
   description: string | null;
+  isAvailable: boolean;
   groupIds: PizzaGroupId[];
 }
 
@@ -299,8 +309,8 @@ export interface ProductItemRequest {
   category: ProductCategoryId;
   /** Product id within that category. */
   product: string;
-  /** id of one of the product's options (drinks), e.g. 'coca_cola'. */
-  option?: string;
+  /** id of one of the product's drink flavors, e.g. 'coca_cola'. */
+  drinkFlavor?: string;
   /** ProductSize id when the product is priced per size (calzone). */
   size?: string;
   /** Pizza flavor id when the product has pizzaFlavor: true. */
@@ -430,7 +440,7 @@ export interface OrderItem {
 export interface ProductRef {
   category: ProductCategoryId;
   product: string;
-  option?: string;
+  drinkFlavor?: string;
   size?: string;
   pizzaFlavor?: string;
 }
@@ -461,6 +471,15 @@ export interface CashFlowDay {
   /** Running total of all expenses recorded against this period. */
   expenses: number;
   createdAt: string;
+  /**
+   * COP. Sum of cash payments across this period's COMPLETED orders so far
+   * (see endOfDayService.aggregateSales) - add to cashInRegister to get the
+   * drawer's expected current cash. Only computed for the *current* period
+   * (getCurrentCashFlow/updateCurrentCash/addExpense) - absent on
+   * listCashFlowHistory's rows, which would otherwise re-aggregate every past
+   * day's orders on every calendar load for no reason.
+   */
+  cashSalesToday?: number;
 }
 
 export interface CashExpense {
@@ -511,7 +530,140 @@ export interface ClosingReport {
   takeawayOrderCount: number;
   /** COP. Total cash_expenses recorded against this business day. */
   totalExpenses: number;
+  /** COP. Snapshot of cash_flow.cash_in_register for this business day, taken at closing time - add cashSales to get "Efectivo final en caja", the expected final cash count. */
+  cashInRegister: number;
+  /** The exact plain-text thermal-receipt content generated at closing time - what a reprint re-sends verbatim (see reprintClosingReport). */
+  content: string;
   createdAt: string;
+}
+
+// ---------- Analytics (analyticsService) ----------
+// Every figure below is computed live over a date range, never read from
+// closing_reports - see analyticsService.ts. Sales figures use the same
+// net-of-discount formula as SalesAggregate (gross_amount - tip_amount -
+// discount, summed from order_payments): tips excluded, discounts already
+// subtracted, unlike ClosingReport's stale "tips excluded" wording above
+// which predates that fix.
+
+export type AnalyticsRange = "today" | "week" | "month" | "custom";
+
+export interface SalesSummary {
+  /** COP. Net of tips and discounts - the real money sold in the selected range. */
+  totalSales: number;
+  /** Percent change vs. the immediately preceding period of equal length. null when the prior period had zero sales (no baseline to compare against). */
+  totalSalesGrowthPct: number | null;
+  orderCount: number;
+  orderCountGrowthPct: number | null;
+  /** COP. totalSales / orderCount, 0 when orderCount is 0. */
+  avgOrderValue: number;
+  avgOrderValueGrowthPct: number | null;
+  /** Sum of order_items.quantity / orderCount, 0 when orderCount is 0. */
+  itemsPerOrder: number;
+  /** Distinct customers across the range's COMPLETED orders - the same customer ordering twice still counts once. */
+  customersServed: number;
+  customersServedGrowthPct: number | null;
+}
+
+export interface SalesTrendPoint {
+  /** Bucket key: 'HH' (00-23) when the range spans a single day, otherwise 'YYYY-MM-DD'. */
+  date: string;
+  /** Human-readable label for the same bucket, e.g. '14:00' or 'lun 21'. */
+  bucketLabel: string;
+  /** COP. Net of tips and discounts, same formula as SalesSummary.totalSales. */
+  totalSales: number;
+  orderCount: number;
+}
+
+export interface PaymentMethodBreakdown {
+  method: PaymentMethod;
+  /** COP. Net of tips and discounts. */
+  sales: number;
+}
+
+export interface OrderTypeBreakdown {
+  orderType: OrderType;
+  /** COP. Net of tips and discounts. */
+  sales: number;
+  orderCount: number;
+}
+
+export interface SalesBreakdown {
+  /** Always all 3 methods, 0 for any unused in the range. */
+  paymentMethods: PaymentMethodBreakdown[];
+  /** Always all 3 order types, 0 for any unused in the range. */
+  orderTypes: OrderTypeBreakdown[];
+}
+
+export interface HeatmapCell {
+  /** 0 (Sunday) - 6 (Saturday), SQLite strftime('%w') convention. */
+  dow: number;
+  /** 0-23, Bogota local hour. */
+  hour: number;
+  orderCount: number;
+}
+
+export interface ProductRanking {
+  /** Product name, or for pizzas "{flavor} {size}" (single-flavor) / "Pizza mitad y mitad {size}" (split across >1 flavor - not fractionally attributed per flavor). */
+  name: string;
+  category: string;
+  quantity: number;
+  /** COP. Sum of order_items.quantity * unit_price for this product/pizza grouping. */
+  revenue: number;
+}
+
+export interface CategoryRevenue {
+  /** A real categories.name, or the synthetic "Pizzas" bucket - pizzas have no categories row of their own (modeled via pizza_groups/pizza_sizes/pizza_flavors instead). */
+  category: string;
+  quantity: number;
+  /** COP. */
+  revenue: number;
+}
+
+export interface ProductsAnalytics {
+  /** Sorted by revenue descending - slice/re-sort client-side for top/bottom-N by either metric, small enough (menu-sized) to not need separate queries. */
+  products: ProductRanking[];
+  categories: CategoryRevenue[];
+}
+
+export interface CustomerSpend {
+  id: number;
+  name: string;
+  phone: string | null;
+  orderCount: number;
+  /** COP. Net of tips and discounts. */
+  spend: number;
+}
+
+export interface CustomerGrowth {
+  /** customers.created_at falls inside the selected range. */
+  newCustomers: number;
+  /** Distinct customers who ordered inside the range but were created before it started. */
+  returningCustomers: number;
+}
+
+export interface CustomersAnalytics {
+  /** Top spenders in the range, capped server-side (see analyticsService.getCustomers). */
+  topCustomers: CustomerSpend[];
+  growth: CustomerGrowth;
+}
+
+export interface EmployeePerformance {
+  id: number;
+  name: string;
+  isActive: boolean;
+  orderCount: number;
+  /** COP. Net of tips and discounts. */
+  sales: number;
+}
+
+export interface PromoUsageSummary {
+  promoCounts: { promoType: PromoType; orderCount: number }[];
+  /** COP. Sum of order_payments.discount across the range. */
+  totalDiscount: number;
+  totalOrders: number;
+  ordersWithDiscount: number;
+  /** ordersWithDiscount / totalOrders * 100, 0 when totalOrders is 0. */
+  discountedOrderPct: number;
 }
 
 // ---------- Type guards ----------

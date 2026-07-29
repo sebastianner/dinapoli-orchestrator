@@ -143,7 +143,7 @@ export function describeOrderItem(menu: Menu | undefined, item: OrderItem): stri
   const product = menu ? getProduct(menu, ref.category, ref.product) : undefined;
   const bits = [product?.name ?? ref.product];
   if (ref.size) bits.push(product?.sizes?.find((s) => s.id === ref.size)?.name ?? ref.size);
-  if (ref.option) bits.push(product?.options?.find((o) => o.id === ref.option)?.name ?? ref.option);
+  if (ref.drinkFlavor) bits.push(product?.drinkFlavors?.find((f) => f.id === ref.drinkFlavor)?.name ?? ref.drinkFlavor);
   if (ref.pizzaFlavor) bits.push(flavorName(ref.pizzaFlavor));
   return bits.join(' - ');
 }

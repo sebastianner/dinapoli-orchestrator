@@ -16,6 +16,8 @@ import type {
   AdminProduct,
   ProductSearchResult,
   ProductSize,
+  DrinkFlavor,
+  AdminDrinkFlavor,
   AdminPizzaGroup,
   AdminPizzaFlavor,
   PizzaAdminData,
@@ -39,6 +41,7 @@ interface PizzaGroupFlavorRow {
   id: string;
   name: string;
   description: string | null;
+  is_available: 0 | 1;
 }
 
 interface CategoryRow {
@@ -65,11 +68,14 @@ const getGroupSizes = db.prepare<[number], PizzaGroupSizeRow>(
    WHERE gs.group_id = ?
    ORDER BY s.id`
 );
+// Not filtered to is_available = 1 - a sold-out flavor stays visible (as a
+// disabled tile, see the pizza/calzone flavor pickers) instead of
+// disappearing outright, same as products (see getCategoryProducts above).
 const getGroupFlavors = db.prepare<[number], PizzaGroupFlavorRow>(
-  `SELECT f.key AS id, f.name, f.description
+  `SELECT f.key AS id, f.name, f.description, f.is_available
    FROM pizza_group_flavors gf
    JOIN pizza_flavors f ON f.id = gf.flavor_id
-   WHERE gf.group_id = ? AND f.is_available = 1
+   WHERE gf.group_id = ?
    ORDER BY f.id`
 );
 
@@ -87,8 +93,12 @@ const getCategoryProducts = db.prepare<[number], CategoryProductRow>(
 const getProductSizes = db.prepare<[number], ProductSize>(
   `SELECT key AS id, name, price FROM product_sizes WHERE product_id = ? ORDER BY product_sizes.id`
 );
-const getProductOptions = db.prepare<[number], { id: string; name: string }>(
-  `SELECT key AS id, name FROM product_options WHERE product_id = ? ORDER BY id`
+const getProductDrinkFlavors = db.prepare<[number], DrinkFlavor>(
+  `SELECT df.key AS id, df.name
+   FROM product_drink_flavors pdf
+   JOIN drink_flavors df ON df.id = pdf.flavor_id
+   WHERE pdf.product_id = ?
+   ORDER BY df.id`
 );
 
 function buildPizzaCategory(): PizzaCategory {
@@ -104,6 +114,7 @@ function buildPizzaCategory(): PizzaCategory {
       id: f.id,
       name: f.name,
       description: f.description ?? '',
+      isAvailable: f.is_available === 1,
     }));
     return { id: group.key, name: group.name, sizes, flavors };
   });
@@ -114,7 +125,7 @@ function buildPizzaCategory(): PizzaCategory {
 /** Shared by buildProductCategory and searchProducts so a product looks the same however it was found. */
 function rowToProduct(p: CategoryProductRow): Product {
   const sizes = getProductSizes.all(p.id);
-  const options = getProductOptions.all(p.id);
+  const drinkFlavors = getProductDrinkFlavors.all(p.id);
 
   return {
     id: p.id_key,
@@ -122,7 +133,7 @@ function rowToProduct(p: CategoryProductRow): Product {
     isAvailable: p.is_available === 1,
     ...(p.price != null ? { price: p.price } : {}),
     ...(sizes.length ? { sizes } : {}),
-    ...(options.length ? { options } : {}),
+    ...(drinkFlavors.length ? { drinkFlavors } : {}),
     ...(p.requires_pizza_flavor ? { pizzaFlavor: true } : {}),
   };
 }
@@ -227,7 +238,7 @@ function rowToAdminProduct(row: AdminProductRow): AdminProduct {
     price: row.price,
     isAvailable: row.is_available === 1,
     sizes: getProductSizes.all(row.id),
-    options: getProductOptions.all(row.id),
+    drinkFlavors: getProductDrinkFlavors.all(row.id),
     pizzaFlavor: row.requires_pizza_flavor === 1,
   };
 }
@@ -263,47 +274,47 @@ function slugifyProductKey(name: string): string {
 export function createProduct(input: unknown): AdminProduct {
   const { categoryId, name, description, price, isAvailable } = (input ?? {}) as Record<string, unknown>;
 
-  if (typeof categoryId !== 'string') throw new ValidationError('categoryId is required');
+  if (typeof categoryId !== 'string') throw new ValidationError('categoryId es obligatorio');
   const category = getCategoryIdByKey.get(categoryId);
-  if (!category) throw new ValidationError(`unknown categoryId '${categoryId}'`);
+  if (!category) throw new ValidationError(`categoryId desconocido '${categoryId}'`);
 
-  if (typeof name !== 'string' || name.trim() === '') throw new ValidationError('name is required');
+  if (typeof name !== 'string' || name.trim() === '') throw new ValidationError('el nombre es obligatorio');
   if (description !== undefined && description !== null && typeof description !== 'string') {
-    throw new ValidationError('description must be a string or null');
+    throw new ValidationError('la descripción debe ser una cadena de texto o nula');
   }
-  if (!isPositiveInt(price)) throw new ValidationError('price must be a positive integer');
+  if (!isPositiveInt(price)) throw new ValidationError('el precio debe ser un número entero positivo');
 
   const key = slugifyProductKey(name);
-  if (!key) throw new ValidationError('name must contain at least one letter or number');
+  if (!key) throw new ValidationError('el nombre debe contener al menos una letra o un número');
 
   try {
     const result = insertProduct.run(category.id, key, name.trim(), (description as string | null) ?? null, price, isAvailable === false ? 0 : 1);
     return rowToAdminProduct(getProductRowById.get(Number(result.lastInsertRowid))!);
   } catch (err) {
-    if (isConstraintViolation(err, 'UNIQUE')) throw new ValidationError(`a product named like "${name}" already exists in this category`);
+    if (isConstraintViolation(err, 'UNIQUE')) throw new ValidationError(`ya existe un producto con un nombre similar a "${name}" en esta categoría`);
     throw err;
   }
 }
 
 /** Admin-only. Every field optional - only what's passed changes. Can't retarget category/rename the key, or touch per-size pricing/options in this pass. */
 export function updateProduct(id: unknown, input: unknown): AdminProduct {
-  if (!isPositiveInt(id)) throw new ValidationError('invalid product id');
+  if (!isPositiveInt(id)) throw new ValidationError('id de producto inválido');
   const existing = getProductRowById.get(id);
-  if (!existing) throw new NotFoundError(`product ${id} not found`);
+  if (!existing) throw new NotFoundError(`producto ${id} no encontrado`);
 
   const { name, description, price, isAvailable } = (input ?? {}) as Record<string, unknown>;
 
   const nextName = name !== undefined ? name : existing.name;
-  if (typeof nextName !== 'string' || nextName.trim() === '') throw new ValidationError('name must be a non-empty string');
+  if (typeof nextName !== 'string' || nextName.trim() === '') throw new ValidationError('el nombre debe ser una cadena de texto no vacía');
 
   const nextDescription = description !== undefined ? description : existing.description;
-  if (nextDescription !== null && typeof nextDescription !== 'string') throw new ValidationError('description must be a string or null');
+  if (nextDescription !== null && typeof nextDescription !== 'string') throw new ValidationError('la descripción debe ser una cadena de texto o nula');
 
   if (existing.price == null && price !== undefined) {
-    throw new ValidationError(`product ${id} is priced per size, not with a flat price`);
+    throw new ValidationError(`el producto ${id} tiene precio por tamaño, no un precio fijo`);
   }
   const nextPrice = price !== undefined ? price : existing.price;
-  if (nextPrice != null && !isPositiveInt(nextPrice)) throw new ValidationError('price must be a positive integer');
+  if (nextPrice != null && !isPositiveInt(nextPrice)) throw new ValidationError('el precio debe ser un número entero positivo');
 
   const nextAvailable = isAvailable !== undefined ? Boolean(isAvailable) : existing.is_available === 1;
 
@@ -311,15 +322,76 @@ export function updateProduct(id: unknown, input: unknown): AdminProduct {
   return rowToAdminProduct(getProductRowById.get(id)!);
 }
 
+const getProductSizeRow = db.prepare<[number, string], { id: number }>('SELECT id FROM product_sizes WHERE product_id = ? AND key = ?');
+const updateProductSizePriceRow = db.prepare<[number, number]>('UPDATE product_sizes SET price = ? WHERE id = ?');
+
+/** Admin-only. Sets the price of one size (e.g. 'small'/'large' on the calzone) of a product that's priced per size, not flat - see updateProduct. */
+export function updateProductSize(productId: unknown, sizeKey: unknown, input: unknown): AdminProduct {
+  if (!isPositiveInt(productId)) throw new ValidationError('id de producto inválido');
+  if (typeof sizeKey !== 'string') throw new ValidationError('id de tamaño inválido');
+  if (!getProductRowById.get(productId)) throw new NotFoundError(`producto ${productId} no encontrado`);
+  const size = getProductSizeRow.get(productId, sizeKey);
+  if (!size) throw new NotFoundError(`el tamaño '${sizeKey}' no está disponible para el producto ${productId}`);
+
+  const { price } = (input ?? {}) as Record<string, unknown>;
+  if (!isPositiveInt(price)) throw new ValidationError('el precio debe ser un número entero positivo');
+
+  updateProductSizePriceRow.run(price, size.id);
+  return rowToAdminProduct(getProductRowById.get(productId)!);
+}
+
+const getAllDrinkFlavorRows = db.prepare<[], { id: number; key: string; name: string }>('SELECT id, key, name FROM drink_flavors ORDER BY name');
+const getDrinkFlavorByKey = db.prepare<[string], { id: number }>('SELECT id FROM drink_flavors WHERE key = ?');
+const insertDrinkFlavorRow = db.prepare<[string, string]>('INSERT INTO drink_flavors (key, name) VALUES (?, ?)');
+const deleteProductDrinkFlavorsRow = db.prepare<[number]>('DELETE FROM product_drink_flavors WHERE product_id = ?');
+const insertProductDrinkFlavorRow = db.prepare<[number, number]>('INSERT OR IGNORE INTO product_drink_flavors (product_id, flavor_id) VALUES (?, ?)');
+
+/** Admin-only. The full shared flavor library (see routes/products.ts GET /drink-flavors) - powers the "select existing" half of the per-product flavors dialog. */
+export function listDrinkFlavors(): AdminDrinkFlavor[] {
+  return getAllDrinkFlavorRows.all();
+}
+
+/**
+ * Admin-only. Sets the exact set of drink flavors a product offers (0 to
+ * many) - each name is found-or-created in the shared drink_flavors library
+ * (so e.g. "Coca-Cola" typed for two different products resolves to the same
+ * row, same spirit as pizza flavors), then the product's associations are
+ * reconciled to match exactly (old links not in the new set are dropped).
+ */
+export function setProductDrinkFlavors(productId: unknown, input: unknown): AdminProduct {
+  if (!isPositiveInt(productId)) throw new ValidationError('id de producto inválido');
+  if (!getProductRowById.get(productId)) throw new NotFoundError(`producto ${productId} no encontrado`);
+
+  const { flavors } = (input ?? {}) as Record<string, unknown>;
+  if (!Array.isArray(flavors) || !flavors.every((f) => typeof f === 'string')) {
+    throw new ValidationError('flavors debe ser un arreglo de cadenas de texto');
+  }
+  const names = [...new Set(flavors.map((f) => (f as string).trim()).filter((f) => f !== ''))];
+
+  const flavorIds = names.map((name) => {
+    const key = slugifyProductKey(name); // shared helper, not actually product-specific despite the name
+    if (!key) throw new ValidationError(`el nombre del sabor "${name}" debe contener al menos una letra o un número`);
+    const found = getDrinkFlavorByKey.get(key);
+    if (found) return found.id;
+    const result = insertDrinkFlavorRow.run(key, name);
+    return Number(result.lastInsertRowid);
+  });
+
+  deleteProductDrinkFlavorsRow.run(productId);
+  for (const flavorId of flavorIds) insertProductDrinkFlavorRow.run(productId, flavorId);
+
+  return rowToAdminProduct(getProductRowById.get(productId)!);
+}
+
 /** Admin-only. Fails (409) if the product has existing order history - same "don't corrupt order history" reasoning as customerService.deleteCustomer. Mark it unavailable instead if it just shouldn't be orderable anymore. */
 export function deleteProduct(id: unknown): void {
-  if (!isPositiveInt(id)) throw new ValidationError('invalid product id');
-  if (!getProductRowById.get(id)) throw new NotFoundError(`product ${id} not found`);
+  if (!isPositiveInt(id)) throw new ValidationError('id de producto inválido');
+  if (!getProductRowById.get(id)) throw new NotFoundError(`producto ${id} no encontrado`);
   try {
     deleteProductRow.run(id);
   } catch (err) {
     if (isConstraintViolation(err, 'FOREIGN KEY')) {
-      throw new ConflictError(`product ${id} has existing orders and can't be deleted - mark it unavailable instead`);
+      throw new ConflictError(`el producto ${id} tiene órdenes asociadas y no se puede eliminar - márcalo como no disponible en su lugar`);
     }
     throw err;
   }
@@ -350,28 +422,35 @@ const updateGroupSizePriceRow = db.prepare<[number | null, number, number]>(
   'UPDATE pizza_group_sizes SET price = ? WHERE group_id = ? AND size_id = ?'
 );
 
-const getAllFlavorRows = db.prepare<[], { id: number; key: string; name: string; description: string | null }>(
-  'SELECT id, key, name, description FROM pizza_flavors ORDER BY id'
-);
-const getFlavorRowById = db.prepare<[number], { id: number; key: string; name: string; description: string | null }>(
-  'SELECT id, key, name, description FROM pizza_flavors WHERE id = ?'
-);
+interface FlavorRow {
+  id: number;
+  key: string;
+  name: string;
+  description: string | null;
+  is_available: 0 | 1;
+}
+
+const getAllFlavorRows = db.prepare<[], FlavorRow>('SELECT id, key, name, description, is_available FROM pizza_flavors ORDER BY id');
+const getFlavorRowById = db.prepare<[number], FlavorRow>('SELECT id, key, name, description, is_available FROM pizza_flavors WHERE id = ?');
 const getFlavorGroupKeys = db.prepare<[number], { key: PizzaGroupId }>(
   `SELECT g.key FROM pizza_group_flavors gf JOIN pizza_groups g ON g.id = gf.group_id WHERE gf.flavor_id = ? ORDER BY g.id`
 );
 const insertFlavorRow = db.prepare<[string, string, string | null]>(
   'INSERT INTO pizza_flavors (key, name, description, extra_cost, is_available) VALUES (?, ?, ?, 0, 1)'
 );
-const updateFlavorRow = db.prepare<[string, string | null, number]>('UPDATE pizza_flavors SET name = ?, description = ? WHERE id = ?');
+const updateFlavorRow = db.prepare<[string, string | null, number, number]>(
+  'UPDATE pizza_flavors SET name = ?, description = ?, is_available = ? WHERE id = ?'
+);
 const deleteFlavorGroupsRow = db.prepare<[number]>('DELETE FROM pizza_group_flavors WHERE flavor_id = ?');
 const insertFlavorGroupRow = db.prepare<[number, number]>('INSERT OR IGNORE INTO pizza_group_flavors (group_id, flavor_id) VALUES (?, ?)');
 
-function rowToAdminPizzaFlavor(row: { id: number; key: string; name: string; description: string | null }): AdminPizzaFlavor {
+function rowToAdminPizzaFlavor(row: FlavorRow): AdminPizzaFlavor {
   return {
     id: row.id,
     key: row.key,
     name: row.name,
     description: row.description,
+    isAvailable: row.is_available === 1,
     groupIds: getFlavorGroupKeys.all(row.id).map((g) => g.key),
   };
 }
@@ -388,12 +467,12 @@ export function listPizzaAdminData(): PizzaAdminData {
 
 /** Admin-only. Renames a pizza category (classic/special) - the group's key/sizes/flavors are unchanged. */
 export function updatePizzaGroup(groupId: unknown, input: unknown): AdminPizzaGroup {
-  if (typeof groupId !== 'string') throw new ValidationError('invalid group id');
+  if (typeof groupId !== 'string') throw new ValidationError('id de grupo inválido');
   const group = getGroupByKey.get(groupId);
-  if (!group) throw new NotFoundError(`pizza group '${groupId}' not found`);
+  if (!group) throw new NotFoundError(`grupo de pizza '${groupId}' no encontrado`);
 
   const { name } = (input ?? {}) as Record<string, unknown>;
-  if (typeof name !== 'string' || name.trim() === '') throw new ValidationError('name is required');
+  if (typeof name !== 'string' || name.trim() === '') throw new ValidationError('el nombre es obligatorio');
 
   updateGroupNameRow.run(name.trim(), group.id);
   return { id: group.key, name: name.trim(), sizes: getGroupSizes.all(group.id) };
@@ -401,17 +480,17 @@ export function updatePizzaGroup(groupId: unknown, input: unknown): AdminPizzaGr
 
 /** Admin-only. Sets the price a given size sells for within a given category - null keeps it not flat-priced (e.g. 'slice', priced via portion splitting). */
 export function updatePizzaGroupSize(groupId: unknown, sizeId: unknown, input: unknown): AdminPizzaGroup {
-  if (typeof groupId !== 'string') throw new ValidationError('invalid group id');
-  if (typeof sizeId !== 'string') throw new ValidationError('invalid size id');
+  if (typeof groupId !== 'string') throw new ValidationError('id de grupo inválido');
+  if (typeof sizeId !== 'string') throw new ValidationError('id de tamaño inválido');
   const group = getGroupByKey.get(groupId);
-  if (!group) throw new NotFoundError(`pizza group '${groupId}' not found`);
+  if (!group) throw new NotFoundError(`grupo de pizza '${groupId}' no encontrado`);
   const size = getSizeByKey.get(sizeId);
-  if (!size) throw new NotFoundError(`pizza size '${sizeId}' not found`);
-  if (!getGroupSizeRow.get(group.id, size.id)) throw new NotFoundError(`size '${sizeId}' isn't offered in group '${groupId}'`);
+  if (!size) throw new NotFoundError(`tamaño de pizza '${sizeId}' no encontrado`);
+  if (!getGroupSizeRow.get(group.id, size.id)) throw new NotFoundError(`el tamaño '${sizeId}' no está disponible en el grupo '${groupId}'`);
 
   const { price } = (input ?? {}) as Record<string, unknown>;
   if (price !== null && price !== undefined && !isPositiveInt(price)) {
-    throw new ValidationError('price must be a positive integer or null');
+    throw new ValidationError('el precio debe ser un número entero positivo o nulo');
   }
 
   updateGroupSizePriceRow.run(price === undefined ? null : (price as number | null), group.id, size.id);
@@ -420,11 +499,11 @@ export function updatePizzaGroupSize(groupId: unknown, sizeId: unknown, input: u
 
 function normalizeGroupIds(groupIds: unknown): { id: number; key: PizzaGroupId; name: string }[] {
   if (!Array.isArray(groupIds) || groupIds.length === 0 || !groupIds.every((g) => typeof g === 'string')) {
-    throw new ValidationError('groupIds must be a non-empty array of pizza group ids');
+    throw new ValidationError('groupIds debe ser un arreglo no vacío de ids de grupos de pizza');
   }
   return groupIds.map((key) => {
     const group = getGroupByKey.get(key as string);
-    if (!group) throw new ValidationError(`unknown pizza group '${key}'`);
+    if (!group) throw new ValidationError(`grupo de pizza desconocido '${key}'`);
     return group;
   });
 }
@@ -433,14 +512,14 @@ function normalizeGroupIds(groupIds: unknown): { id: number; key: PizzaGroupId; 
 export function createPizzaFlavor(input: unknown): AdminPizzaFlavor {
   const { name, description, groupIds } = (input ?? {}) as Record<string, unknown>;
 
-  if (typeof name !== 'string' || name.trim() === '') throw new ValidationError('name is required');
+  if (typeof name !== 'string' || name.trim() === '') throw new ValidationError('el nombre es obligatorio');
   if (description !== undefined && description !== null && typeof description !== 'string') {
-    throw new ValidationError('description must be a string or null');
+    throw new ValidationError('la descripción debe ser una cadena de texto o nula');
   }
   const groups = normalizeGroupIds(groupIds);
 
   const key = slugifyProductKey(name); // shared helper, not actually product-specific despite the name
-  if (!key) throw new ValidationError('name must contain at least one letter or number');
+  if (!key) throw new ValidationError('el nombre debe contener al menos una letra o un número');
 
   try {
     const result = insertFlavorRow.run(key, name.trim(), (description as string | null) ?? null);
@@ -448,26 +527,28 @@ export function createPizzaFlavor(input: unknown): AdminPizzaFlavor {
     for (const group of groups) insertFlavorGroupRow.run(group.id, flavorId);
     return rowToAdminPizzaFlavor(getFlavorRowById.get(flavorId)!);
   } catch (err) {
-    if (isConstraintViolation(err, 'UNIQUE')) throw new ValidationError(`a flavor named like "${name}" already exists`);
+    if (isConstraintViolation(err, 'UNIQUE')) throw new ValidationError(`ya existe un sabor con un nombre similar a "${name}"`);
     throw err;
   }
 }
 
 /** Admin-only. Every field optional - only what's passed changes. Can't rename the key or delete a flavor in this pass (see section header). */
 export function updatePizzaFlavor(id: unknown, input: unknown): AdminPizzaFlavor {
-  if (!isPositiveInt(id)) throw new ValidationError('invalid flavor id');
+  if (!isPositiveInt(id)) throw new ValidationError('id de sabor inválido');
   const existing = getFlavorRowById.get(id);
-  if (!existing) throw new NotFoundError(`pizza flavor ${id} not found`);
+  if (!existing) throw new NotFoundError(`sabor de pizza ${id} no encontrado`);
 
-  const { name, description, groupIds } = (input ?? {}) as Record<string, unknown>;
+  const { name, description, isAvailable, groupIds } = (input ?? {}) as Record<string, unknown>;
 
   const nextName = name !== undefined ? name : existing.name;
-  if (typeof nextName !== 'string' || nextName.trim() === '') throw new ValidationError('name must be a non-empty string');
+  if (typeof nextName !== 'string' || nextName.trim() === '') throw new ValidationError('el nombre debe ser una cadena de texto no vacía');
 
   const nextDescription = description !== undefined ? description : existing.description;
-  if (nextDescription !== null && typeof nextDescription !== 'string') throw new ValidationError('description must be a string or null');
+  if (nextDescription !== null && typeof nextDescription !== 'string') throw new ValidationError('la descripción debe ser una cadena de texto o nula');
 
-  updateFlavorRow.run(nextName.trim(), (nextDescription as string | null) ?? null, id);
+  const nextAvailable = isAvailable !== undefined ? Boolean(isAvailable) : existing.is_available === 1;
+
+  updateFlavorRow.run(nextName.trim(), (nextDescription as string | null) ?? null, nextAvailable ? 1 : 0, id);
 
   if (groupIds !== undefined) {
     const groups = normalizeGroupIds(groupIds);

@@ -57,7 +57,7 @@ export function tableExists(tableNumber: number): boolean {
 export function increaseTableCount(): RestaurantTableSummary[] {
   const count = getTableCount();
   if (count >= MAX_TABLES) {
-    throw new ValidationError(`the restaurant can't have more than ${MAX_TABLES} tables`);
+    throw new ValidationError(`el restaurante no puede tener más de ${MAX_TABLES} mesas`);
   }
   insertTable.run(count + 1);
   broadcastTablesUpdate();
@@ -68,11 +68,11 @@ export function increaseTableCount(): RestaurantTableSummary[] {
 export function decreaseTableCount(): RestaurantTableSummary[] {
   const count = getTableCount();
   if (count <= MIN_TABLES) {
-    throw new ValidationError(`the restaurant needs at least ${MIN_TABLES} table`);
+    throw new ValidationError(`el restaurante necesita al menos ${MIN_TABLES} mesa`);
   }
   const { c: openOrders } = countOpenOrdersForTable.get(count)!;
   if (openOrders > 0) {
-    throw new ConflictError(`table ${count} has an open order - complete or reassign it before removing this table`);
+    throw new ConflictError(`la mesa ${count} tiene una orden abierta - complétala o reasígnala antes de eliminar esta mesa`);
   }
   deleteTableByNumber.run(count);
   broadcastTablesUpdate();

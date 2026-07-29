@@ -12,6 +12,7 @@ import locationsRouter from './routes/locations.js';
 import promosRouter from './routes/promos.js';
 import productsRouter from './routes/products.js';
 import pizzaAdminRouter from './routes/pizzaAdmin.js';
+import analyticsRouter from './routes/analytics.js';
 
 export function createApp() {
   const app = express();
@@ -31,6 +32,7 @@ export function createApp() {
   app.use('/api/promos', promosRouter);
   app.use('/api/products', productsRouter);
   app.use('/api/pizza-admin', pizzaAdminRouter);
+  app.use('/api/analytics', analyticsRouter);
 
   app.use((req, res) => {
     res.status(404).json({ error: 'not found' });

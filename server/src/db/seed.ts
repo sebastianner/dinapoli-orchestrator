@@ -118,9 +118,15 @@ function seedProductCategory(category: ProductCategory): void {
     'INSERT INTO product_sizes (product_id, key, name, price) VALUES (?, ?, ?, ?) ' +
     'ON CONFLICT(product_id, key) DO UPDATE SET name = excluded.name, price = excluded.price'
   );
-  const insertOption = db.prepare<[number, string, string]>(
-    'INSERT INTO product_options (product_id, key, name) VALUES (?, ?, ?) ' +
-    'ON CONFLICT(product_id, key) DO UPDATE SET name = excluded.name'
+  // Shared across products (see schema.sql's drink_flavors comment) - the
+  // same flavor key seeded for two different products (e.g. "coca_cola" on
+  // both Gaseosa 1.5L and Gaseosa Personal) resolves to one row, not two.
+  const insertFlavor = db.prepare<[string, string]>(
+    'INSERT INTO drink_flavors (key, name) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET name = excluded.name'
+  );
+  const getFlavor = db.prepare<[string], { id: number }>('SELECT id FROM drink_flavors WHERE key = ?');
+  const insertProductFlavorLink = db.prepare<[number, number]>(
+    'INSERT OR IGNORE INTO product_drink_flavors (product_id, flavor_id) VALUES (?, ?)'
   );
 
   for (const product of category.products) {
@@ -130,8 +136,10 @@ function seedProductCategory(category: ProductCategory): void {
     for (const size of product.sizes ?? []) {
       insertSize.run(productId, size.id, size.name, size.price);
     }
-    for (const option of product.options ?? []) {
-      insertOption.run(productId, option.id, option.name);
+    for (const flavor of product.drinkFlavors ?? []) {
+      insertFlavor.run(flavor.id, flavor.name);
+      const flavorId = getFlavor.get(flavor.id)!.id;
+      insertProductFlavorLink.run(productId, flavorId);
     }
   }
 }

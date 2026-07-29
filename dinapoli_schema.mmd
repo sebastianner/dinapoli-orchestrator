@@ -11,7 +11,8 @@ erDiagram
 
   CATEGORIES ||--o{ PRODUCTS : contains
   PRODUCTS ||--o{ PRODUCT_SIZES : "priced as"
-  PRODUCTS ||--o{ PRODUCT_OPTIONS : "variant of"
+  PRODUCTS ||--o{ PRODUCT_DRINK_FLAVORS : offers
+  DRINK_FLAVORS ||--o{ PRODUCT_DRINK_FLAVORS : "offered by"
 
   PIZZA_GROUPS ||--o{ PIZZA_GROUP_SIZES : prices
   PIZZA_SIZES ||--o{ PIZZA_GROUP_SIZES : "priced in"
@@ -22,7 +23,7 @@ erDiagram
   ORDERS ||--o{ ORDER_PAYMENTS : "settled by"
   PRODUCTS ||--o{ ORDER_ITEMS : ordered_as
   PRODUCT_SIZES ||--o{ ORDER_ITEMS : sized_as
-  PRODUCT_OPTIONS ||--o{ ORDER_ITEMS : chosen_as
+  DRINK_FLAVORS ||--o{ ORDER_ITEMS : chosen_as
   PIZZA_GROUPS ||--o{ ORDER_ITEMS : grouped_as
   PIZZA_SIZES ||--o{ ORDER_ITEMS : sized_as
   PIZZA_FLAVORS ||--o{ ORDER_ITEMS : "single flavor of"
@@ -128,11 +129,19 @@ erDiagram
     text name
     int price
   }
-  PRODUCT_OPTIONS {
+  %% Shared/reusable across products, same spirit as PIZZA_FLAVORS below - a
+  %% flavor like "Coca-Cola" is one row that both Gaseosa 1.5L and Gaseosa
+  %% Personal offer, not duplicated per product (that was the old
+  %% PRODUCT_OPTIONS shape, replaced by this + PRODUCT_DRINK_FLAVORS). No
+  %% price impact.
+  DRINK_FLAVORS {
     int id PK
-    int product_id FK
-    text key "stable id within product, e.g. coca_cola. no price impact"
+    text key "unique, e.g. coca_cola"
     text name "e.g. Coca-Cola, Poker"
+  }
+  PRODUCT_DRINK_FLAVORS {
+    int product_id PK, FK
+    int flavor_id PK, FK
   }
 
   PIZZA_GROUPS {
@@ -187,7 +196,7 @@ erDiagram
     text item_type "pizza or product"
     int product_id FK "nullable. set when item_type = product"
     int product_size_id FK "nullable. set when the product is priced per size"
-    int product_option_id FK "nullable. set when the product has a chosen option"
+    int drink_flavor_id FK "nullable. set when the product has a chosen drink flavor"
     int pizza_group_id FK "nullable. set when item_type = pizza, or product requires_pizza_flavor"
     int pizza_size_id FK "nullable. set when item_type = pizza"
     int pizza_flavor_id FK "nullable. single flavor for gratin/calzone (requires_pizza_flavor products)"

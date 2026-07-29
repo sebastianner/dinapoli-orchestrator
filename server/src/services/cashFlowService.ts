@@ -1,6 +1,7 @@
 import db from '../db/index.js';
 import { ValidationError } from '../utils/errors.js';
 import { todayDateStrBogota } from '../utils/date.js';
+import { aggregateSales } from './endOfDayService.js';
 import type { CashFlowDay, CashExpense } from '../types/dinapoly-types.js';
 import type { CashRegisterSettingsRow, CashFlowRow, CashExpenseRow } from '../types/db.js';
 
@@ -12,6 +13,18 @@ function rowToCashFlowDay(row: CashFlowRow): CashFlowDay {
     expenses: row.expenses,
     createdAt: row.created_at,
   };
+}
+
+/**
+ * Adds cashSalesToday to a CashFlowDay - only meaningful (and only ever
+ * called) for the *current* period, so getCurrentCashFlow/updateCurrentCash/
+ * addExpense all route their return value through this instead of
+ * rowToCashFlowDay directly. listCashFlowHistory does not - re-aggregating
+ * every past day's orders on every calendar load would be wasted work for
+ * data nobody's asking to see live.
+ */
+function withCashSalesToday(day: CashFlowDay): CashFlowDay {
+  return { ...day, cashSalesToday: aggregateSales(day.date).cashSales };
 }
 
 function rowToCashExpense(row: CashExpenseRow): CashExpense {
@@ -46,7 +59,7 @@ export function getSettings(): CashRegisterSettings {
 
 export function updateDefaultOpeningCash(amount: unknown): CashRegisterSettings {
   if (!isNonNegativeInteger(amount)) {
-    throw new ValidationError('defaultOpeningCash must be a non-negative integer');
+    throw new ValidationError('defaultOpeningCash debe ser un número entero no negativo');
   }
   setDefaultOpeningCash.run(amount);
   return getSettings();
@@ -72,11 +85,11 @@ const setCurrentCash = db.prepare<[number, number]>('UPDATE cash_flow SET cash_i
 export function getCurrentCashFlow(): CashFlowDay {
   const today = todayDateStrBogota();
   const latest = getLatestRow.get();
-  if (latest && latest.date === today) return rowToCashFlowDay(latest);
+  if (latest && latest.date === today) return withCashSalesToday(rowToCashFlowDay(latest));
 
   const { defaultOpeningCash } = getSettings();
   const { lastInsertRowid } = insertCashFlow.run(today, defaultOpeningCash);
-  return rowToCashFlowDay(getCashFlowById.get(Number(lastInsertRowid))!);
+  return withCashSalesToday(rowToCashFlowDay(getCashFlowById.get(Number(lastInsertRowid))!));
 }
 
 export function listCashFlowHistory(): CashFlowDay[] {
@@ -85,11 +98,11 @@ export function listCashFlowHistory(): CashFlowDay[] {
 
 export function updateCurrentCash(amount: unknown): CashFlowDay {
   if (!isNonNegativeInteger(amount)) {
-    throw new ValidationError('amount must be a non-negative integer');
+    throw new ValidationError('amount debe ser un número entero no negativo');
   }
   const current = getCurrentCashFlow();
   setCurrentCash.run(amount, current.id);
-  return rowToCashFlowDay(getCashFlowById.get(current.id)!);
+  return withCashSalesToday(rowToCashFlowDay(getCashFlowById.get(current.id)!));
 }
 
 // ---------------------------------------------------------------------------
@@ -119,10 +132,10 @@ export interface AddExpenseResult {
 /** Records an expense against the current period, subtracting it from the available cash and adding it to the period's expense total. */
 export function addExpense(amount: unknown, justification: unknown): AddExpenseResult {
   if (!isNonNegativeInteger(amount) || amount === 0) {
-    throw new ValidationError('amount must be a positive integer');
+    throw new ValidationError('amount debe ser un número entero positivo');
   }
   if (typeof justification !== 'string' || justification.trim() === '') {
-    throw new ValidationError('justification is required');
+    throw new ValidationError('justification es obligatorio');
   }
 
   const result = db.transaction(() => {
@@ -130,7 +143,7 @@ export function addExpense(amount: unknown, justification: unknown): AddExpenseR
     const { lastInsertRowid } = insertExpense.run(current.id, amount, justification.trim());
     applyExpenseToCashFlow.run(amount, amount, current.id);
     return {
-      cashFlow: rowToCashFlowDay(getCashFlowById.get(current.id)!),
+      cashFlow: withCashSalesToday(rowToCashFlowDay(getCashFlowById.get(current.id)!)),
       expense: rowToCashExpense(getExpenseById.get(Number(lastInsertRowid))!),
     };
   })();

@@ -15,7 +15,7 @@ const router = Router();
 function parseEmployeeId(param: string): number {
   const id = Number(param);
   if (!Number.isInteger(id) || id <= 0) {
-    throw new ValidationError(`invalid employee id '${param}'`);
+    throw new ValidationError(`id de empleado inválido '${param}'`);
   }
   return id;
 }

@@ -18,7 +18,7 @@ const router = Router();
 function parseId(param: string, label: string): number {
   const id = Number(param);
   if (!Number.isInteger(id) || id <= 0) {
-    throw new ValidationError(`invalid ${label} '${param}'`);
+    throw new ValidationError(`id de ${label} inválido '${param}'`);
   }
   return id;
 }
@@ -43,7 +43,7 @@ router.get('/addresses/buildings', (req, res, next) => {
 // admin-gated.
 router.get('/:id', (req, res, next) => {
   try {
-    res.json(getCustomerById(parseId(req.params.id, 'customer id')));
+    res.json(getCustomerById(parseId(req.params.id, 'cliente')));
   } catch (err) {
     next(err);
   }
@@ -59,7 +59,7 @@ router.post('/', (req, res, next) => {
 
 router.put('/:id', (req, res, next) => {
   try {
-    res.json(updateCustomer(parseId(req.params.id, 'customer id'), req.body?.name, req.body?.phone, req.body?.email));
+    res.json(updateCustomer(parseId(req.params.id, 'cliente'), req.body?.name, req.body?.phone, req.body?.email));
   } catch (err) {
     next(err);
   }
@@ -67,7 +67,7 @@ router.put('/:id', (req, res, next) => {
 
 router.delete('/:id', requireAuth, requireAdmin, (req, res, next) => {
   try {
-    deleteCustomer(parseId(req.params.id, 'customer id'));
+    deleteCustomer(parseId(req.params.id, 'cliente'));
     res.json({ status: 'deleted' });
   } catch (err) {
     next(err);
@@ -76,7 +76,7 @@ router.delete('/:id', requireAuth, requireAdmin, (req, res, next) => {
 
 router.post('/:id/addresses', (req, res, next) => {
   try {
-    res.json(createAddress(parseId(req.params.id, 'customer id'), req.body));
+    res.json(createAddress(parseId(req.params.id, 'cliente'), req.body));
   } catch (err) {
     next(err);
   }
@@ -84,7 +84,7 @@ router.post('/:id/addresses', (req, res, next) => {
 
 router.put('/:id/addresses/:addressId', (req, res, next) => {
   try {
-    res.json(updateAddress(parseId(req.params.id, 'customer id'), parseId(req.params.addressId, 'address id'), req.body));
+    res.json(updateAddress(parseId(req.params.id, 'cliente'), parseId(req.params.addressId, 'dirección'), req.body));
   } catch (err) {
     next(err);
   }
@@ -92,7 +92,7 @@ router.put('/:id/addresses/:addressId', (req, res, next) => {
 
 router.delete('/:id/addresses/:addressId', (req, res, next) => {
   try {
-    deleteAddress(parseId(req.params.id, 'customer id'), parseId(req.params.addressId, 'address id'));
+    deleteAddress(parseId(req.params.id, 'cliente'), parseId(req.params.addressId, 'dirección'));
     res.json({ status: 'deleted' });
   } catch (err) {
     next(err);
