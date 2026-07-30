@@ -8,6 +8,7 @@ import {
   printBillHtml,
   LOGO_PLACEHOLDER,
   RECEIPT_WIDTH_PX,
+  groupItemsForBill,
 } from './printerService.js';
 import type { Order, OrderItem } from '../types/dinapoly-types.js';
 import type { Payment } from './paymentService.js';
@@ -31,7 +32,7 @@ function itemRow(item: OrderItem): string {
 }
 
 export function renderBillHtml(order: Order, payment: Payment): string {
-  const rows = order.items.map(itemRow).join('');
+  const rows = groupItemsForBill(order.items).map(itemRow).join('');
 
   return `<!doctype html>
 <html>

@@ -67,20 +67,33 @@ export function Sidebar() {
         )}
       </nav>
 
-      <Link
-        to="/select-employee"
-        title={employee ? employee.name : "Seleccionar empleado"}
-        className={classNames(
-          "flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border-2 border-border bg-surface-raised shadow-sm",
-          "transition-transform duration-fast hover:scale-105 active:scale-95",
-        )}
-      >
-        {employee ? (
-          <img src={avatarSrc(employee, overrideSeed)} alt={employee.name} className="h-full w-full" />
-        ) : (
-          <UserRound size={20} className="text-text-secondary" />
-        )}
-      </Link>
+      <div className="flex flex-col items-center gap-2">
+        <a
+          href="https://www.rappi.com.co"
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Rappi Colombia"
+          className="group flex w-16 flex-col items-center gap-1 rounded-xl px-2 py-3 text-text-secondary transition-colors duration-fast hover:bg-brand-500/10 hover:text-brand-600 sm:w-20"
+        >
+          <img src="/rappi-logo.svg" alt="Rappi" className="h-[22px] w-[22px] rounded-full" />
+          <span className="text-center text-[11px] font-medium leading-tight">Rappi</span>
+        </a>
+
+        <Link
+          to="/select-employee"
+          title={employee ? employee.name : "Seleccionar empleado"}
+          className={classNames(
+            "flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border-2 border-border bg-surface-raised shadow-sm",
+            "transition-transform duration-fast hover:scale-105 active:scale-95",
+          )}
+        >
+          {employee ? (
+            <img src={avatarSrc(employee, overrideSeed)} alt={employee.name} className="h-full w-full" />
+          ) : (
+            <UserRound size={20} className="text-text-secondary" />
+          )}
+        </Link>
+      </div>
     </aside>
   );
 }

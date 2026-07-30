@@ -95,7 +95,11 @@ function migrate(): void {
   // time - added to cash_sales for "Efectivo final en caja" (the expected
   // final cash count), same idea as total_expenses being a closing-time
   // snapshot rather than a live join.
-  ensureColumn("closing_reports", "cash_in_register", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(
+    "closing_reports",
+    "cash_in_register",
+    "INTEGER NOT NULL DEFAULT 0",
+  );
   ensureColumn(
     "orders",
     "promo_type",
@@ -155,9 +159,11 @@ function migrate(): void {
 function widenTableNumberBounds(): void {
   const oldBound = "BETWEEN 1 AND 9";
 
-  const tablesSql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'restaurant_tables'").get() as
-    | { sql: string }
-    | undefined;
+  const tablesSql = db
+    .prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'restaurant_tables'",
+    )
+    .get() as { sql: string } | undefined;
   if (tablesSql?.sql.includes(oldBound)) {
     db.pragma("foreign_keys = OFF");
     db.transaction(() => {
@@ -168,14 +174,20 @@ function widenTableNumberBounds(): void {
           status TEXT NOT NULL DEFAULT 'free' CHECK (status IN ('free', 'busy'))
         );
       `);
-      db.exec("INSERT INTO restaurant_tables_new (id, number, status) SELECT id, number, status FROM restaurant_tables;");
+      db.exec(
+        "INSERT INTO restaurant_tables_new (id, number, status) SELECT id, number, status FROM restaurant_tables;",
+      );
       db.exec("DROP TABLE restaurant_tables;");
       db.exec("ALTER TABLE restaurant_tables_new RENAME TO restaurant_tables;");
     })();
     db.pragma("foreign_keys = ON");
   }
 
-  const ordersSql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'orders'").get() as { sql: string } | undefined;
+  const ordersSql = db
+    .prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'orders'",
+    )
+    .get() as { sql: string } | undefined;
   if (ordersSql?.sql.includes(oldBound)) {
     db.pragma("foreign_keys = OFF");
     db.transaction(() => {
@@ -203,10 +215,18 @@ function widenTableNumberBounds(): void {
       `);
       db.exec("DROP TABLE orders;");
       db.exec("ALTER TABLE orders_new RENAME TO orders;");
-      db.exec("CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);");
-      db.exec("CREATE INDEX IF NOT EXISTS idx_orders_table_number ON orders(table_number);");
-      db.exec("CREATE INDEX IF NOT EXISTS idx_orders_employee_id ON orders(employee_id);");
-      db.exec("CREATE INDEX IF NOT EXISTS idx_orders_customer_id ON orders(customer_id);");
+      db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);",
+      );
+      db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_orders_table_number ON orders(table_number);",
+      );
+      db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_orders_employee_id ON orders(employee_id);",
+      );
+      db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_orders_customer_id ON orders(customer_id);",
+      );
     })();
     db.pragma("foreign_keys = ON");
   }
@@ -225,20 +245,30 @@ function widenTableNumberBounds(): void {
  */
 function migrateProductOptionsToDrinkFlavors(): void {
   const hasOldTable = db
-    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'product_options'")
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'product_options'",
+    )
     .get();
   if (!hasOldTable) return;
 
   db.pragma("foreign_keys = OFF");
   db.transaction(() => {
-    const oldOptions = db.prepare("SELECT product_id, key, name FROM product_options ORDER BY id").all() as {
+    const oldOptions = db
+      .prepare("SELECT product_id, key, name FROM product_options ORDER BY id")
+      .all() as {
       product_id: number;
       key: string;
       name: string;
     }[];
-    const insertFlavor = db.prepare("INSERT OR IGNORE INTO drink_flavors (key, name) VALUES (?, ?)");
-    const getFlavorIdByKey = db.prepare("SELECT id FROM drink_flavors WHERE key = ?");
-    const insertLink = db.prepare("INSERT OR IGNORE INTO product_drink_flavors (product_id, flavor_id) VALUES (?, ?)");
+    const insertFlavor = db.prepare(
+      "INSERT OR IGNORE INTO drink_flavors (key, name) VALUES (?, ?)",
+    );
+    const getFlavorIdByKey = db.prepare(
+      "SELECT id FROM drink_flavors WHERE key = ?",
+    );
+    const insertLink = db.prepare(
+      "INSERT OR IGNORE INTO product_drink_flavors (product_id, flavor_id) VALUES (?, ?)",
+    );
     for (const row of oldOptions) {
       insertFlavor.run(row.key, row.name);
       const flavor = getFlavorIdByKey.get(row.key) as { id: number };
@@ -271,7 +301,9 @@ function migrateProductOptionsToDrinkFlavors(): void {
     `);
     db.exec("DROP TABLE order_items;");
     db.exec("ALTER TABLE order_items_new RENAME TO order_items;");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);");
+    db.exec(
+      "CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);",
+    );
 
     db.exec("DROP TABLE product_options;");
   })();
@@ -292,9 +324,13 @@ function migrateProductOptionsToDrinkFlavors(): void {
  * indexed) is the real signal instead.
  */
 function backfillProductsFts(): void {
-  const { indexed } = db.prepare("SELECT COUNT(*) AS indexed FROM products_fts_docsize").get() as { indexed: number };
+  const { indexed } = db
+    .prepare("SELECT COUNT(*) AS indexed FROM products_fts_docsize")
+    .get() as { indexed: number };
   if (indexed > 0) return;
-  db.exec(`INSERT INTO products_fts (rowid, name, description) SELECT id, name, description FROM products;`);
+  db.exec(
+    `INSERT INTO products_fts (rowid, name, description) SELECT id, name, description FROM products;`,
+  );
 }
 
 // Seeded here rather than only in db/seed.ts, since `npm run dev` never runs
@@ -307,7 +343,7 @@ function seedDefaultPromoSettings(): void {
     "INSERT OR IGNORE INTO promo_settings (promo_type, price, soda_surcharge) VALUES (?, ?, ?)",
   );
   insert.run("duo", 37000, 0);
-  insert.run("pizza_xl", 76000, 2000);
+  insert.run("pizza_xl", 80000, 2000);
 }
 
 /** Adds a column to a table that predates it, without touching existing rows. No-op if already present. */

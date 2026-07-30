@@ -4,7 +4,7 @@ import { markTableBusy, refreshTableStatus, tableExists } from './tableService.j
 import { processPayment } from './paymentService.js';
 import type { PaymentSplit } from './paymentService.js';
 import { printBill } from './billingService.js';
-import { reprintJob } from './printerService.js';
+import { reprintJob, printDeliveryComandaCopy } from './printerService.js';
 import { getEmployeeById } from './employeeService.js';
 import { getCustomerById } from './customerService.js';
 import { getPromoSettings } from './promoSettingsService.js';
@@ -1028,6 +1028,30 @@ export async function completeOrder(id: number, { payments }: { payments?: unkno
 
   const orderForPayment = getOrderById(id);
   const payment = processPayment(orderForPayment, resolvedPayments);
+
+  // Delivery orders leave the building with the driver, unlike dine-in/takeaway
+  // where the kitchen ticket already printed at intake stays with the kitchen -
+  // a copy needs to go out with the order itself, so it's reprinted here
+  // alongside the bill (on counter_printer, not kitchen_printer - see
+  // printDeliveryComandaCopy). Every ACTIVE order already has a saved
+  // 'kitchen_ticket' print_jobs row (see queueService/printKitchenTicket), so
+  // this can't 404.
+  //
+  // Printed BEFORE the bill, not after: both land on the same physical
+  // counter_printer, and CUPS serializes jobs on a device in submission
+  // order. The bill is a Puppeteer-rendered raster image - slow to render
+  // and slow for a thermal printer to lay down row-by-row - while the
+  // comanda copy is plain text and prints almost instantly. Submitting the
+  // bill first left the comanda copy stuck behind it in the queue, making a
+  // fast document feel like it "took too long" to come out.
+  if (order.orderType === 'delivery') {
+    try {
+      await printDeliveryComandaCopy(id);
+    } catch (err) {
+      console.error(`[billing] failed to print delivery comanda copy for order ${id}:`, (err as Error).message);
+    }
+  }
+
   try {
     await printBill(orderForPayment, payment);
   } catch (err) {

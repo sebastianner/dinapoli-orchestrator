@@ -1,7 +1,7 @@
 import classNames from 'classnames';
 import { Link } from '@tanstack/react-router';
-import { Printer, Receipt, Trash2 } from 'lucide-react';
-import type { Order, OrderStatus } from '@/types/api';
+import { Bike, LayoutGrid, Printer, Receipt, ShoppingBag, Trash2 } from 'lucide-react';
+import type { Order, OrderStatus, OrderType } from '@/types/api';
 import { formatCOP } from '@/lib/format';
 import { formatTime } from '@/lib/date';
 import { reprintOrderDocument } from '@/lib/api';
@@ -27,6 +27,18 @@ function orderSubtitle(order: Order): string {
   return `Para llevar - ${order.customerName}`;
 }
 
+const orderTypeIcons: Record<OrderType, typeof Bike> = {
+  dine_in: LayoutGrid,
+  delivery: Bike,
+  takeaway: ShoppingBag,
+};
+
+const orderTypeLabels: Record<OrderType, string> = {
+  dine_in: 'En mesa',
+  delivery: 'Domicilio',
+  takeaway: 'Para llevar',
+};
+
 interface OrderHistoryCardProps {
   order: Order;
   /** Admin-only "remove mode" toggle (see order-history/index.tsx) - reveals the delete button below. */
@@ -46,6 +58,8 @@ export function OrderHistoryCard({ order, removeMode, onDelete }: OrderHistoryCa
     }
   };
 
+  const TypeIcon = orderTypeIcons[order.orderType];
+
   return (
     <Link
       to="/dashboard/order-history/$id"
@@ -54,6 +68,9 @@ export function OrderHistoryCard({ order, removeMode, onDelete }: OrderHistoryCa
     >
       <div>
         <div className="flex items-center gap-2">
+          <span title={orderTypeLabels[order.orderType]} className="shrink-0 text-text-secondary">
+            <TypeIcon size={22} />
+          </span>
           <span className="font-semibold text-text-primary">Orden #{order.id}</span>
           <span className={classNames('rounded-full px-2 py-0.5 text-xs font-medium', statusStyles[order.status])}>{statusLabels[order.status]}</span>
         </div>

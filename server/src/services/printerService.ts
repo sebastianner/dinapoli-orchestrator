@@ -23,14 +23,21 @@ export const RECEIPT_WIDTH = 48;
 export const RECEIPT_WIDTH_PX = RECEIPT_WIDTH * 12;
 const TICKET_TEXT_WIDTH = RECEIPT_WIDTH / 2;
 
-// Single physical printer for now, reached through its CUPS queue rather than
+// Two physical printers, each reached through its own CUPS queue rather than
 // a raw /dev/usb/lp* device: CUPS's own USB backend claims the device via
 // libusb (detaching the kernel's usblp driver) as soon as it probes it, which
-// makes the /dev/usb/lp0 device node come and go unpredictably. `-o raw`
-// tells CUPS to skip its filter chain (irrelevant here since the queue's PPD
-// doesn't match this printer anyway) and hand our ESC/POS bytes straight to
+// makes the /dev/usb/lp* device nodes come and go unpredictably. `-o raw`
+// tells CUPS to skip its filter chain (irrelevant here since neither queue's
+// PPD matches these printers anyway) and hand our ESC/POS bytes straight to
 // the backend.
-const CUPS_PRINTER_QUEUE = process.env.PRINTER_QUEUE ?? "POS-80";
+//
+// Routing: the kitchen comanda (and its addendum) goes to kitchen_printer.
+// The customer bill goes to counter_printer. A delivery order's comanda copy
+// printed again at close time also goes to counter_printer (it travels out
+// with the driver/bill, not back to the kitchen) - see
+// printDeliveryComandaCopy.
+const KITCHEN_PRINTER_QUEUE = process.env.KITCHEN_PRINTER_QUEUE ?? "kitchen_printer";
+const COUNTER_PRINTER_QUEUE = process.env.COUNTER_PRINTER_QUEUE ?? "counter_printer";
 
 const LOGO_PATH = path.resolve(__dirname, "../assets/dinapoli_pizza_logo.png");
 /** Placeholder swapped for a base64 data: URI right before rasterizing, so the
@@ -52,9 +59,18 @@ const CMD_SELECT_CODEPAGE = Buffer.from([ESC, 0x74, 16]); // ESC t 16
 // (TICKET_TEXT_WIDTH), which renderKitchenTicket wraps to.
 // GS ! n : low nibble = height multiplier - 1, high nibble = width multiplier - 1.
 const CMD_TEXT_DOUBLE = Buffer.from([GS, 0x21, 0x11]); // GS ! 0x11 -> 2x width, 2x height
+// Height-only double for the closing report: unlike the kitchen ticket, its
+// column layout (see endOfDayService's moneyRow/centerText) is padded to a
+// fixed 48-char width, so doubling width too would overflow the 80mm paper
+// and force the printer to hard-wrap mid-line, destroying the alignment.
+// Height-only keeps all 48 columns intact while still printing noticeably
+// bigger than normal size.
+const CMD_TEXT_DOUBLE_HEIGHT = Buffer.from([GS, 0x21, 0x01]); // GS ! 0x01 -> 1x width, 2x height
 const CMD_TEXT_NORMAL = Buffer.from([GS, 0x21, 0x00]); // GS ! 0
 const CMD_FEED_4 = Buffer.from([ESC, 0x64, 4]); // ESC d 4 : feed 4 lines
 const CMD_CUT_PARTIAL = Buffer.from([GS, 0x56, 1]); // GS V 1 : partial cut
+const CMD_BOLD_ON = Buffer.from([ESC, 0x45, 1]); // ESC E 1 : emphasized (bold) on
+const CMD_BOLD_OFF = Buffer.from([ESC, 0x45, 0]); // ESC E 0 : emphasized (bold) off
 // Cap each raster command's row count so a tall bill doesn't ask a cheap
 // controller to buffer the whole image in one GS v 0 chunk.
 const RASTER_BAND_ROWS = 200;
@@ -66,6 +82,35 @@ const RASTER_BAND_ROWS = 200;
  */
 function sanitizeForPrint(text: string): string {
   return text.replace(/[\x00-\x09\x0B-\x1F\x7F]/g, "");
+}
+
+// Bold-toggle markers embedded in ticket text by renderKitchenTicket/
+// renderKitchenTicketAddendum - only ever wrapped around server-computed
+// values (order type, table number), never user-supplied fields (customer
+// name, notes, address), so there's no injection path through order data.
+// Picked from the Unicode Private Use Area specifically so they (a) can
+// never collide with real menu/customer text and (b) fall outside
+// sanitizeForPrint's stripped range, so they survive it untouched - the
+// actual ESC E n bold bytes are only spliced in afterwards, in
+// encodeTicketText, downstream of sanitization rather than before it.
+const BOLD_ON_MARKER = "\uE000";
+const BOLD_OFF_MARKER = "\uE001";
+export function boldText(text: string): string {
+  return `${BOLD_ON_MARKER}${text}${BOLD_OFF_MARKER}`;
+}
+const BOLD_MARKER_SPLIT = new RegExp(`(${BOLD_ON_MARKER}|${BOLD_OFF_MARKER})`);
+
+/** Sanitizes text, then splices in real ESC E bold-toggle bytes wherever a
+ *  boldText() marker survived - see BOLD_ON_MARKER/BOLD_OFF_MARKER above. */
+function encodeTicketText(text: string): Buffer {
+  const parts = sanitizeForPrint(text).split(BOLD_MARKER_SPLIT);
+  const buffers: Buffer[] = [];
+  for (const part of parts) {
+    if (part === BOLD_ON_MARKER) buffers.push(CMD_BOLD_ON);
+    else if (part === BOLD_OFF_MARKER) buffers.push(CMD_BOLD_OFF);
+    else if (part) buffers.push(Buffer.from(part, "latin1"));
+  }
+  return Buffer.concat(buffers);
 }
 
 // Print output (ticket + bill) is Spanish but deliberately accent-free; only
@@ -93,8 +138,31 @@ export function toAsciiText(text: string): string {
   return text.replace(/[áéíóúñüÁÉÍÓÚÑÜ¿¡]/g, (ch) => ASCII_FOLD[ch]);
 }
 
-function writeToDevice(payload: Buffer): void {
-  execFileSync("lp", ["-d", CUPS_PRINTER_QUEUE, "-o", "raw"], {
+/**
+ * Either CUPS queue has been observed going into a `disabled` state on its
+ * own (backend/USB hiccup, reason unknown) - a disabled queue still
+ * *accepts* jobs (`lp` exits 0), it just leaves them stuck in the spool
+ * without ever sending them to the printer. That means nothing downstream
+ * (writeToDevice throwing, the kitchen-ticket retry queue, completeOrder's
+ * try/catch) ever notices the job didn't actually print - orders/receipts
+ * silently stop coming out with no error anywhere. Re-enabling before every
+ * job is a cheap no-op when already enabled, and self-heals the common case
+ * instead of requiring a manual `cupsenable`.
+ */
+function ensurePrinterEnabled(queue: string): void {
+  try {
+    execFileSync("cupsenable", [queue]);
+  } catch (err) {
+    console.error(
+      `[printer:thermal-80mm] failed to ensure '${queue}' is enabled:`,
+      (err as Error).message,
+    );
+  }
+}
+
+function writeToDevice(payload: Buffer, queue: string): void {
+  ensurePrinterEnabled(queue);
+  execFileSync("lp", ["-d", queue, "-o", "raw"], {
     input: payload,
   });
 }
@@ -108,6 +176,25 @@ const upsertPrintJob = db.prepare<[number, PrintJobKind, string]>(
   `INSERT INTO print_jobs (order_id, kind, content) VALUES (?, ?, ?)
    ON CONFLICT(order_id, kind) DO UPDATE SET content = excluded.content, created_at = excluded.created_at`,
 );
+
+// Delivery orders aren't given their own day-scoped sequence column
+// anywhere (orders.id is a single global AUTOINCREMENT, never reset) - so
+// the kitchen comanda's "delivery #N of the day" is derived here by
+// counting how many other delivery orders were created earlier the same
+// Bogota-local day. `-5 hours` mirrors the fixed-offset day-boundary
+// convention used elsewhere (see endOfDayService.ts, orderService.ts's
+// order-history filter) rather than a real timezone conversion, since
+// Colombia doesn't observe DST. `id < ?` (not `<=`) makes this 0-indexed,
+// per the request that the count reset to 0 each day.
+const countEarlierDeliveryOrdersToday = db.prepare<[number, string], { count: number }>(
+  `SELECT COUNT(*) AS count FROM orders
+   WHERE order_type = 'delivery' AND id < ? AND date(created_at, '-5 hours') = date(?, '-5 hours')`,
+);
+
+function deliveryOrderNumberOfDay(order: Order): number {
+  return countEarlierDeliveryOrdersToday.get(order.id, order.createdAt)!.count;
+}
+
 const getPrintJob = db.prepare<[number, PrintJobKind], PrintJobRow>(
   "SELECT * FROM print_jobs WHERE order_id = ? AND kind = ?",
 );
@@ -128,7 +215,7 @@ function buildTextPayload(text: string, copies: number): Buffer {
   const body = Buffer.concat([
     CMD_SELECT_CODEPAGE,
     CMD_TEXT_DOUBLE,
-    Buffer.from(sanitizeForPrint(text), "latin1"),
+    encodeTicketText(text),
     CMD_TEXT_NORMAL,
     CMD_FEED_4,
     CMD_CUT_PARTIAL,
@@ -140,30 +227,34 @@ function printText(
   orderId: number,
   kind: PrintJobKind,
   text: string,
+  queue: string,
   copies = 1,
 ): void {
-  writeToDevice(buildTextPayload(text, copies));
+  writeToDevice(buildTextPayload(text, copies), queue);
   console.log(
     `[printer:thermal-80mm] printed '${kind}' for order ${orderId} (${copies}x)`,
   );
 }
 
-// Normal size (unlike the double-size kitchen ticket): this is a dense
-// operational report read up close by whoever's closing the register, not a
-// ticket glanced at from across a kitchen, so it favors fitting more per line.
+// Height-only double (not the kitchen ticket's full 2x2) - this is a dense
+// operational report whose column layout depends on fitting all 48 chars
+// per line (see CMD_TEXT_DOUBLE_HEIGHT), so width stays normal while height
+// still prints noticeably bigger than the old fully-normal size.
 function buildPlainTextPayload(text: string): Buffer {
   return Buffer.concat([
     CMD_INIT,
     CMD_SELECT_CODEPAGE,
+    CMD_TEXT_DOUBLE_HEIGHT,
     Buffer.from(sanitizeForPrint(text), "latin1"),
+    CMD_TEXT_NORMAL,
     CMD_FEED_4,
     CMD_CUT_PARTIAL,
   ]);
 }
 
-/** Prints an arbitrary plain-text document not tied to a specific order (e.g. the End-of-Day closing receipt). */
+/** Prints an arbitrary plain-text document not tied to a specific order (e.g. the End-of-Day closing receipt) - a cashier/register document, so it goes to counter_printer like the bill. */
 export function printPlainText(text: string): void {
-  writeToDevice(buildPlainTextPayload(text));
+  writeToDevice(buildPlainTextPayload(text), COUNTER_PRINTER_QUEUE);
   console.log("[printer:thermal-80mm] printed plain-text document");
 }
 
@@ -370,6 +461,74 @@ function describeItemTicketLines(item: OrderItem, width: number): string[] {
   return wordWrap(describeItem(item), width);
 }
 
+/** Ticket-grouping key: items that are identical in every way the kitchen
+ *  cares about (same product/pizza, size, flavors, notes) share a key, so
+ *  they can be combined into one "Nx ..." line. Deliberately ignores
+ *  unitPrice (a promo item priced at 0 still needs the same prep as a
+ *  full-price one, and the ticket never prints prices anyway). */
+function ticketItemKey(item: OrderItem): string {
+  const notesKey = item.notes ?? "";
+  if (item.pizzaRef) {
+    const flavorsKey = item.pizzaRef.flavors
+      .map((f) => `${f.flavor}:${f.portion}`)
+      .sort()
+      .join(",");
+    return `pizza:${item.pizzaRef.group}:${item.pizzaRef.size}:${flavorsKey}:${notesKey}`;
+  }
+  const ref = item.menuItemRef!;
+  return `product:${ref.category}:${ref.product}:${ref.size ?? ""}:${ref.drinkFlavor ?? ""}:${ref.pizzaFlavor ?? ""}:${notesKey}`;
+}
+
+/**
+ * Merges order items that are identical in every ticket-relevant way into
+ * one line with a combined quantity, so ordering the same drink/pizza/
+ * product twice prints "2x ..." instead of two separate "1x ..." lines.
+ * Presentation-only: doesn't touch the underlying order_items rows, pricing,
+ * or any other order view - just what gets printed on the ticket.
+ */
+function groupItemsForTicket(items: OrderItem[]): OrderItem[] {
+  const grouped: OrderItem[] = [];
+  const indexByKey = new Map<string, number>();
+  for (const item of items) {
+    const key = ticketItemKey(item);
+    const existingIndex = indexByKey.get(key);
+    if (existingIndex === undefined) {
+      indexByKey.set(key, grouped.length);
+      grouped.push(item);
+    } else {
+      grouped[existingIndex] = {
+        ...grouped[existingIndex],
+        quantity: grouped[existingIndex].quantity + item.quantity,
+      };
+    }
+  }
+  return grouped;
+}
+
+/** Same idea as groupItemsForTicket, but for the bill: unitPrice IS part of
+ *  the key here, since each row needs a single, correct unit price - merging
+ *  a full-price item with a differently-priced one (e.g. a duo promo's 0-cost
+ *  half) would make that line's price/total wrong. Two lines with the same
+ *  description but different unitPrice stay separate rows. */
+export function groupItemsForBill(items: OrderItem[]): OrderItem[] {
+  const grouped: OrderItem[] = [];
+  const indexByKey = new Map<string, number>();
+  for (const item of items) {
+    const key = `${ticketItemKey(item)}:${item.unitPrice}`;
+    const existingIndex = indexByKey.get(key);
+    if (existingIndex === undefined) {
+      indexByKey.set(key, grouped.length);
+      grouped.push(item);
+    } else {
+      grouped[existingIndex] = {
+        ...grouped[existingIndex],
+        quantity: grouped[existingIndex].quantity + item.quantity,
+      };
+    }
+  }
+  return grouped;
+}
+
 export function renderKitchenTicket(order: Order): string {
   const width = TICKET_TEXT_WIDTH;
   const lines: string[] = [];
@@ -383,16 +542,19 @@ export function renderKitchenTicket(order: Order): string {
   lines.push(centerText("DINAPOLI PIZZA", width));
   lines.push(centerText("COMANDA", width));
   lines.push(`Orden #${order.id}`);
-  lines.push(`${describeOrderType(order.orderType)}`);
-  if (order.promoType)
-    lines.push(centerText(describePromoType(order), width));
-  if (order.tableNumber) lines.push(`Mesa: ${order.tableNumber}`);
+  const orderTypeLine =
+    order.orderType === "delivery"
+      ? `${describeOrderType(order.orderType)} #${deliveryOrderNumberOfDay(order)}`
+      : describeOrderType(order.orderType);
+  lines.push(boldText(orderTypeLine));
+  if (order.promoType) lines.push(centerText(describePromoType(order), width));
+  if (order.tableNumber) lines.push(boldText(`Mesa: ${order.tableNumber}`));
   if (order.customerName) pushLabeled("Cliente", order.customerName);
   if (order.phone) pushLabeled("Tel", order.phone);
   if (order.address) pushLabeled("Dir", order.address);
   pushLabeled("Fecha", formatDateTimeCO(order.createdAt));
   lines.push("-".repeat(width));
-  for (const item of order.items) {
+  for (const item of groupItemsForTicket(order.items)) {
     const [firstLine, ...restLines] = describeItemTicketLines(item, width - 3);
     lines.push(`${item.quantity}x ${firstLine}`);
     for (const line of restLines) lines.push(`   ${line}`);
@@ -409,15 +571,16 @@ export function renderKitchenTicket(order: Order): string {
   return toAsciiText(lines.join("\n"));
 }
 
-// Two physical copies of the same ticket: one stays in the kitchen, one goes
-// to the cashier - same order information on both.
-const KITCHEN_TICKET_COPIES = 2;
+const KITCHEN_TICKET_COPIES = 1;
+// Additions still get 2 (kitchen + cashier), unlike the now-single-copy
+// original ticket - a delta notification is easy to miss with only one copy
+// floating around an already-busy kitchen line.
+const KITCHEN_TICKET_ADDENDUM_COPIES = 2;
 
 export function printKitchenTicket(order: Order): void {
   const text = renderKitchenTicket(order);
   savePrintJob(order.id, "kitchen_ticket", text);
-  // Todo: Uncomment line below to enable printing of kitchen tickets. Currently disabled for testing purposes.
-  // printText(order.id, 'kitchen_ticket', text, KITCHEN_TICKET_COPIES);
+  printText(order.id, "kitchen_ticket", text, KITCHEN_PRINTER_QUEUE, KITCHEN_TICKET_COPIES);
 }
 
 /**
@@ -441,11 +604,11 @@ export function renderKitchenTicketAddendum(
   lines.push(centerText("DINAPOLI PIZZA", width));
   lines.push(centerText("ADICION A COMANDA", width));
   lines.push(`Orden #${order.id}`);
-  lines.push(`${describeOrderType(order.orderType)}`);
-  if (order.tableNumber) lines.push(`Mesa: ${order.tableNumber}`);
+  lines.push(boldText(describeOrderType(order.orderType)));
+  if (order.tableNumber) lines.push(boldText(`Mesa: ${order.tableNumber}`));
   if (order.customerName) pushLabeled("Cliente", order.customerName);
   lines.push("-".repeat(width));
-  for (const item of newItems) {
+  for (const item of groupItemsForTicket(newItems)) {
     const [firstLine, ...restLines] = describeItemTicketLines(item, width - 3);
     lines.push(`${item.quantity}x ${firstLine}`);
     for (const line of restLines) lines.push(`   ${line}`);
@@ -463,9 +626,9 @@ export function printKitchenTicketAddendum(
   newItems: OrderItem[],
 ): void {
   const text = renderKitchenTicketAddendum(order, newItems);
-  writeToDevice(buildTextPayload(text, KITCHEN_TICKET_COPIES));
+  writeToDevice(buildTextPayload(text, KITCHEN_TICKET_ADDENDUM_COPIES), KITCHEN_PRINTER_QUEUE);
   console.log(
-    `[printer:thermal-80mm] printed kitchen ticket addendum for order ${order.id} (${KITCHEN_TICKET_COPIES}x)`,
+    `[printer:thermal-80mm] printed kitchen ticket addendum for order ${order.id} (${KITCHEN_TICKET_ADDENDUM_COPIES}x)`,
   );
 }
 
@@ -623,10 +786,11 @@ async function printHtmlAsImage(
   orderId: number,
   kind: PrintJobKind,
   html: string,
+  queue: string,
 ): Promise<void> {
   const pngBuffer = await renderHtmlToPng(html);
   const png = PNG.sync.read(pngBuffer);
-  writeToDevice(buildRasterPayload(png));
+  writeToDevice(buildRasterPayload(png), queue);
   console.log(
     `[printer:thermal-80mm] printed '${kind}' for order ${orderId} (raster ${png.width}x${png.height})`,
   );
@@ -637,7 +801,7 @@ export async function printBillHtml(
   html: string,
 ): Promise<void> {
   savePrintJob(orderId, "bill", html);
-  await printHtmlAsImage(orderId, "bill", html);
+  await printHtmlAsImage(orderId, "bill", html, COUNTER_PRINTER_QUEUE);
 }
 
 // ---------------------------------------------------------------------------
@@ -655,8 +819,30 @@ export async function reprintJob(
     );
   }
   if (kind === "kitchen_ticket") {
-    printText(orderId, kind, row.content, KITCHEN_TICKET_COPIES);
+    // Unlike the original print (kitchen + cashier copy, see
+    // KITCHEN_TICKET_COPIES), a reprint from order-history/order-detail is a
+    // one-off re-issue - only one copy. Goes back to kitchen_printer, same
+    // as the original.
+    printText(orderId, kind, row.content, KITCHEN_PRINTER_QUEUE, 1);
   } else {
-    await printHtmlAsImage(orderId, kind, row.content);
+    await printHtmlAsImage(orderId, kind, row.content, COUNTER_PRINTER_QUEUE);
   }
+}
+
+/**
+ * Delivery orders leave the building with the driver, unlike dine-in/
+ * takeaway where the kitchen ticket already printed at intake stays with the
+ * kitchen - a copy needs to go out with the order itself. Called from
+ * completeOrder alongside the bill, and printed on counter_printer (not
+ * kitchen_printer like the original comanda) since this copy travels with
+ * the order/bill, not back to the kitchen line.
+ */
+export async function printDeliveryComandaCopy(orderId: number): Promise<void> {
+  const row = getPrintJob.get(orderId, "kitchen_ticket");
+  if (!row) {
+    throw new NotFoundError(
+      `no hay un 'kitchen_ticket' guardado para la orden ${orderId}`,
+    );
+  }
+  printText(orderId, "kitchen_ticket", row.content, COUNTER_PRINTER_QUEUE, 1);
 }
