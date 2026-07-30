@@ -13,6 +13,9 @@ attachOrderSocket(server);
 startQueueWorker();
 getCurrentCashFlow(); // opens today's register period if the latest one is from a previous day
 
-server.listen(PORT, () => {
-  console.log(`Dinapoli orchestrator listening on http://localhost:${PORT}`);
+// Bind to every interface, not just loopback, so other devices on the same
+// LAN (other POS terminals, a phone/tablet checking the dashboard) can reach
+// this by the host machine's local IP, not only from localhost.
+server.listen(Number(PORT), "0.0.0.0", () => {
+  console.log(`Dinapoli orchestrator listening on http://0.0.0.0:${PORT} (reachable via localhost or this machine's LAN IP)`);
 });
