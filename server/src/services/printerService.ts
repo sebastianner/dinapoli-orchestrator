@@ -1,7 +1,9 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import puppeteer, { type Browser } from "puppeteer";
 import { PNG } from "pngjs";
 import db from "../db/index.js";
@@ -23,21 +25,33 @@ export const RECEIPT_WIDTH = 48;
 export const RECEIPT_WIDTH_PX = RECEIPT_WIDTH * 12;
 const TICKET_TEXT_WIDTH = RECEIPT_WIDTH / 2;
 
-// Two physical printers, each reached through its own CUPS queue rather than
-// a raw /dev/usb/lp* device: CUPS's own USB backend claims the device via
-// libusb (detaching the kernel's usblp driver) as soon as it probes it, which
-// makes the /dev/usb/lp* device nodes come and go unpredictably. `-o raw`
-// tells CUPS to skip its filter chain (irrelevant here since neither queue's
-// PPD matches these printers anyway) and hand our ESC/POS bytes straight to
-// the backend.
+// Two physical printers, each reached through its own OS print queue rather
+// than a raw device path (e.g. /dev/usb/lp* or a Windows USB00x port): on
+// Linux the underlying CUPS USB backend claims the device via libusb
+// (detaching the kernel's usblp driver) as soon as it probes it, which makes
+// a raw device node come and go unpredictably - going through the OS's own
+// print spooler is what actually owns the printer reliably on either
+// platform. See writeToDevice/ensurePrinterEnabled below for the actual
+// per-OS dispatch (CUPS's `lp -o raw` on Linux/macOS, WinSpool RAW writes via
+// print-raw.ps1 on Windows) - both send our ESC/POS bytes to the printer
+// completely unfiltered, bypassing any driver-side rendering.
 //
 // Routing: the kitchen comanda (and its addendum) goes to kitchen_printer.
 // The customer bill goes to counter_printer. A delivery order's comanda copy
 // printed again at close time also goes to counter_printer (it travels out
 // with the driver/bill, not back to the kitchen) - see
 // printDeliveryComandaCopy.
+//
+// On Windows, set these to the exact printer name shown in Settings ->
+// Printers & scanners (install the printer there first, any driver is fine
+// since we always print RAW - "Generic / Text Only" is a safe default if the
+// printer has no vendor driver). On Linux, they're CUPS queue names (see
+// `lpstat -v`).
 const KITCHEN_PRINTER_QUEUE = process.env.KITCHEN_PRINTER_QUEUE ?? "kitchen_printer";
 const COUNTER_PRINTER_QUEUE = process.env.COUNTER_PRINTER_QUEUE ?? "counter_printer";
+
+const IS_WINDOWS = process.platform === "win32";
+const WINDOWS_RAW_PRINT_SCRIPT = path.resolve(__dirname, "../assets/print-raw.ps1");
 
 const LOGO_PATH = path.resolve(__dirname, "../assets/dinapoli_pizza_logo.png");
 /** Placeholder swapped for a base64 data: URI right before rasterizing, so the
@@ -139,19 +153,35 @@ export function toAsciiText(text: string): string {
 }
 
 /**
- * Either CUPS queue has been observed going into a `disabled` state on its
- * own (backend/USB hiccup, reason unknown) - a disabled queue still
- * *accepts* jobs (`lp` exits 0), it just leaves them stuck in the spool
- * without ever sending them to the printer. That means nothing downstream
- * (writeToDevice throwing, the kitchen-ticket retry queue, completeOrder's
- * try/catch) ever notices the job didn't actually print - orders/receipts
- * silently stop coming out with no error anywhere. Re-enabling before every
- * job is a cheap no-op when already enabled, and self-heals the common case
- * instead of requiring a manual `cupsenable`.
+ * Either CUPS queue (Linux/macOS) or Windows print queue has been observed
+ * going into a disabled/paused state on its own (backend/USB hiccup, reason
+ * unknown) - a disabled CUPS queue still *accepts* jobs (`lp` exits 0), it
+ * just leaves them stuck in the spool without ever sending them to the
+ * printer; a paused Windows queue behaves the same way. That means nothing
+ * downstream (writeToDevice throwing, the kitchen-ticket retry queue,
+ * completeOrder's try/catch) ever notices the job didn't actually print -
+ * orders/receipts silently stop coming out with no error anywhere.
+ * Re-enabling/resuming before every job is a cheap no-op when the queue's
+ * already running, and self-heals the common case instead of requiring a
+ * manual `cupsenable` / "Resume Printing" click.
  */
 function ensurePrinterEnabled(queue: string): void {
   try {
-    execFileSync("cupsenable", [queue]);
+    if (IS_WINDOWS) {
+      // Resume-Printer ships with Windows' built-in PrintManagement module
+      // (Windows 8+ / Server 2012+) - no extra install needed. Quoting the
+      // name defensively even though it only ever comes from our own env
+      // vars, never user input.
+      execFileSync("powershell.exe", [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        `Resume-Printer -Name '${queue.replace(/'/g, "''")}'`,
+      ]);
+    } else {
+      execFileSync("cupsenable", [queue]);
+    }
   } catch (err) {
     console.error(
       `[printer:thermal-80mm] failed to ensure '${queue}' is enabled:`,
@@ -160,8 +190,37 @@ function ensurePrinterEnabled(queue: string): void {
   }
 }
 
+function writeToDeviceWindows(payload: Buffer, queue: string): void {
+  // WinSpool (unlike CUPS's `lp`) has no "pipe bytes in via stdin" story, so
+  // the payload goes to a scratch file first and print-raw.ps1 (a WritePrinter
+  // P/Invoke wrapper, see server/src/assets/print-raw.ps1) reads it back and
+  // sends it to the named queue with datatype RAW - the Windows equivalent
+  // of `lp -o raw`, bypassing driver-side rendering entirely.
+  const tempFile = path.join(os.tmpdir(), `dinapoli-print-${randomUUID()}.bin`);
+  fs.writeFileSync(tempFile, payload);
+  try {
+    execFileSync("powershell.exe", [
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      WINDOWS_RAW_PRINT_SCRIPT,
+      "-PrinterName",
+      queue,
+      "-FilePath",
+      tempFile,
+    ]);
+  } finally {
+    fs.rmSync(tempFile, { force: true });
+  }
+}
+
 function writeToDevice(payload: Buffer, queue: string): void {
   ensurePrinterEnabled(queue);
+  if (IS_WINDOWS) {
+    writeToDeviceWindows(payload, queue);
+    return;
+  }
   execFileSync("lp", ["-d", queue, "-o", "raw"], {
     input: payload,
   });

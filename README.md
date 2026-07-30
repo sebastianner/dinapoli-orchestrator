@@ -119,21 +119,25 @@ to type `better-sqlite3` prepared statements live in `src/types/db.ts`.
     `COMPLETED` yet (`PENDING`, `PRINTING`, or `ACTIVE`), using the same
     item validation/pricing as order creation, and adds their cost to
     `order.total`.
-- **Printer** (`src/services/printerService.js`): a single 80mm ESC/POS thermal
-  printer, reached through its CUPS queue (`POS-80` by default, override with
-  `PRINTER_QUEUE`) via `lp -d <queue> -o raw`, which hands our ESC/POS bytes to
-  CUPS's USB backend unfiltered. Writing straight to `/dev/usb/lp0` was tried
-  first and abandoned: CUPS's USB backend claims the device via libusb
-  (detaching the kernel's `usblp` driver) as soon as it probes it, so that
-  device node comes and goes unpredictably — going through CUPS is what
-  actually owns the printer reliably on this machine. Two content paths feed it:
-  - Kitchen tickets are plain 48-column text, wrapped with ESC/POS
-    init/codepage-select/cut commands.
+- **Printer** (`src/services/printerService.ts`): two 80mm ESC/POS thermal
+  printers, each reached through its own OS print queue — `KITCHEN_PRINTER_QUEUE`
+  (default `kitchen_printer`) for the kitchen comanda/addendum, and
+  `COUNTER_PRINTER_QUEUE` (default `counter_printer`) for the customer bill and
+  a delivery order's extra comanda copy printed again at close time. On
+  Linux/macOS this goes through `lp -d <queue> -o raw` (CUPS); writing straight
+  to `/dev/usb/lp0` was tried first and abandoned, since CUPS's USB backend
+  claims the device via libusb (detaching the kernel's `usblp` driver) as soon
+  as it probes it, so that device node comes and goes unpredictably. On Windows
+  it goes through `src/assets/print-raw.ps1`, a WinSpool RAW write via
+  PowerShell — see "Trying it out" below for setup. Both paths hand our ESC/POS
+  bytes to the printer completely unfiltered. Two content paths feed either
+  printer:
+  - Kitchen tickets are plain 24-column (double-width) text, wrapped with
+    ESC/POS init/codepage-select/bold-toggle/cut commands.
   - The bill is rendered as HTML (with the logo from `src/assets/`), rasterized
     with a headless Chromium (`puppeteer`) at 576px width, Floyd-Steinberg
     dithered to 1-bit via `pngjs`, and sent as chunked ESC/POS raster (`GS v 0`)
     commands so cheap controllers don't need to buffer the whole image at once.
-  Both routes end up on the same physical printer since only one exists for now.
 - **Saving + reprinting**: every generated kitchen ticket and bill is upserted
   into the `print_jobs` table (one row per `order_id` + `kind`), so a reprint
   re-sends the exact content that was originally generated rather than
@@ -573,10 +577,21 @@ Watch the server log for `[queue]`/`[printer]`/`[payment]` lines; the kitchen
 ticket prints on the thermal printer as soon as the order is queued, and the
 bill prints there too once the complete endpoint is called.
 
-Printing goes through the `lp` CLI (part of CUPS), so the printer needs to
-already exist as a CUPS queue — check with `lpstat -v` and adjust
-`PRINTER_QUEUE` if it's not called `POS-80`. No special file permissions or
-group membership are needed since CUPS handles device access itself.
+Printing goes through the OS's own print spooler — on Linux/macOS via the
+`lp`/`cupsenable` CLIs (part of CUPS), on Windows via a WinSpool RAW write
+(`src/assets/print-raw.ps1`, invoked through `powershell.exe`) — in both
+cases the queue needs to already exist as an OS-level printer:
+- **Linux/macOS**: check `lpstat -v` for the CUPS queue names, and set
+  `KITCHEN_PRINTER_QUEUE`/`COUNTER_PRINTER_QUEUE` if they're not called
+  `kitchen_printer`/`counter_printer`. No special file permissions or group
+  membership are needed since CUPS handles device access itself.
+- **Windows**: install each printer normally under Settings → Printers &
+  scanners (any driver works — we always print RAW bytes, bypassing driver
+  rendering entirely, so "Generic / Text Only" is a safe default if the
+  printer has no vendor driver), then set `KITCHEN_PRINTER_QUEUE`/
+  `COUNTER_PRINTER_QUEUE` to the exact printer names shown there. Nothing
+  else to install — `print-raw.ps1` only uses PowerShell 5.1+ and
+  `winspool.drv`, both built into Windows.
 
 ## Known gaps for a production version
 
