@@ -46,8 +46,8 @@ function EmployeesAdminPage() {
   };
 
   return (
-    <div className="p-6">
-      <div className="mb-6 flex items-center justify-between">
+    <div className="p-4 sm:p-6">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold text-text-primary">Empleados</h1>
         <button
           type="button"
@@ -67,26 +67,30 @@ function EmployeesAdminPage() {
         ) : (
           <div className="flex flex-col gap-2">
             {activeEmployees.map((employee) => (
-              <div key={employee.id} className="flex items-center gap-3 rounded-xl border border-border bg-surface p-3">
-                <img src={avatarSrc(employee)} alt={employee.name} className="h-10 w-10 rounded-full border border-border" />
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-text-primary">{employee.name}</p>
-                  <p className="text-xs text-text-secondary">{employee.role === 'admin' ? 'Administrador' : 'Empleado'}</p>
+              <div key={employee.id} className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-3 sm:flex-row sm:items-center">
+                <div className="flex flex-1 items-center gap-3">
+                  <img src={avatarSrc(employee)} alt={employee.name} className="h-10 w-10 shrink-0 rounded-full border border-border" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-text-primary">{employee.name}</p>
+                    <p className="text-xs text-text-secondary">{employee.role === 'admin' ? 'Administrador' : 'Empleado'}</p>
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setRoleTarget(employee)}
-                  className="flex items-center gap-1 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors duration-fast hover:border-brand-400 hover:text-brand-600"
-                >
-                  <Pencil size={12} /> Cambiar rol
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleDeactivate(employee)}
-                  className="flex items-center gap-1 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors duration-fast hover:border-danger hover:text-danger"
-                >
-                  <UserX size={12} /> Desactivar
-                </button>
+                <div className="flex gap-2 sm:shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setRoleTarget(employee)}
+                    className="flex flex-1 items-center justify-center gap-1 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors duration-fast hover:border-brand-400 hover:text-brand-600 sm:flex-none"
+                  >
+                    <Pencil size={12} /> Cambiar rol
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDeactivate(employee)}
+                    className="flex flex-1 items-center justify-center gap-1 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors duration-fast hover:border-danger hover:text-danger sm:flex-none"
+                  >
+                    <UserX size={12} /> Desactivar
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -102,16 +106,18 @@ function EmployeesAdminPage() {
         ) : (
           <div className="flex flex-col gap-2">
             {inactiveEmployees.map((employee) => (
-              <div key={employee.id} className="flex items-center gap-3 rounded-xl border border-border bg-surface p-3 opacity-70">
-                <img src={avatarSrc(employee)} alt={employee.name} className="h-10 w-10 rounded-full border border-border grayscale" />
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-text-primary">{employee.name}</p>
-                  <p className="text-xs text-text-secondary">{employee.role === 'admin' ? 'Administrador' : 'Empleado'}</p>
+              <div key={employee.id} className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-3 opacity-70 sm:flex-row sm:items-center">
+                <div className="flex flex-1 items-center gap-3">
+                  <img src={avatarSrc(employee)} alt={employee.name} className="h-10 w-10 shrink-0 rounded-full border border-border grayscale" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-text-primary">{employee.name}</p>
+                    <p className="text-xs text-text-secondary">{employee.role === 'admin' ? 'Administrador' : 'Empleado'}</p>
+                  </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => handleReactivate(employee)}
-                  className="flex items-center gap-1 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors duration-fast hover:border-brand-400 hover:text-brand-600"
+                  className="flex w-full items-center justify-center gap-1 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors duration-fast hover:border-brand-400 hover:text-brand-600 sm:w-auto"
                 >
                   <RotateCcw size={12} /> Reactivar
                 </button>

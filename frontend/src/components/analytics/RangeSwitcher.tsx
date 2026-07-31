@@ -19,13 +19,13 @@ interface RangeSwitcherProps {
 export function RangeSwitcher({ range, onRangeChange, from, to, onFromChange, onToChange }: RangeSwitcherProps) {
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <div className="flex gap-1 rounded-full border border-border bg-surface p-1">
+      <div className="flex gap-1 overflow-x-auto rounded-full border border-border bg-surface p-1">
         {OPTIONS.map((opt) => (
           <button
             key={opt.value}
             type="button"
             onClick={() => onRangeChange(opt.value)}
-            className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors duration-fast ${
+            className={`shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-semibold transition-colors duration-fast ${
               range === opt.value ? 'bg-brand-500 text-text-inverted' : 'text-text-secondary hover:text-brand-600'
             }`}
           >
@@ -34,7 +34,7 @@ export function RangeSwitcher({ range, onRangeChange, from, to, onFromChange, on
         ))}
       </div>
       {range === 'custom' && (
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <input
             type="date"
             value={from}

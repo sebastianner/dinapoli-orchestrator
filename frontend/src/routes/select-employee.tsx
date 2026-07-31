@@ -79,7 +79,7 @@ function SelectEmployeePage() {
 
   return (
     <div className={classNames('p-4 sm:p-6 md:p-8', leaving && 'anim-push-out-left')}>
-      <div className="mb-4 flex items-center justify-between sm:mb-6">
+      <div className="mb-4 flex flex-col items-start gap-3 sm:mb-6 sm:flex-row sm:items-center sm:justify-between sm:gap-0">
         <h1 className="text-xl font-semibold text-text-primary sm:text-2xl">Seleccionar empleado</h1>
 
         <div className="flex items-center gap-3">
@@ -151,7 +151,7 @@ function ActiveTab({ employees, loading, onSelect, onEdit, onCreate }: ActiveTab
   }
 
   return (
-    <div className="-mx-4 flex flex-nowrap gap-4 overflow-x-auto px-4 pb-2 sm:mx-0 sm:flex-wrap sm:gap-6 sm:overflow-visible sm:px-0 sm:pb-0">
+    <div className="grid grid-cols-2 gap-4 justify-items-center sm:flex sm:flex-row sm:flex-wrap sm:justify-normal sm:gap-6">
       {employees.map((employee) => (
         <EmployeeCard key={employee.id} employee={employee} onSelect={() => onSelect(employee)} onEdit={() => onEdit(employee)} />
       ))}
@@ -186,7 +186,7 @@ function InactiveTab({ employees, loading }: InactiveTabProps) {
   }
 
   return (
-    <div className="-mx-4 flex flex-nowrap gap-4 overflow-x-auto px-4 pb-2 sm:mx-0 sm:flex-wrap sm:gap-6 sm:overflow-visible sm:px-0 sm:pb-0">
+    <div className="grid grid-cols-2 gap-4 justify-items-center sm:flex sm:flex-row sm:flex-wrap sm:justify-normal sm:gap-6">
       {employees.map((employee) => (
         <div key={employee.id} className="anim-scale-in flex w-32 shrink-0 flex-col items-center gap-2">
           <div className="h-24 w-24 overflow-hidden rounded-full border-2 border-border opacity-50 grayscale">

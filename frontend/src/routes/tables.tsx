@@ -148,7 +148,7 @@ function TablesPage() {
             <button
               type="button"
               onClick={() => setCustomerModalType('delivery')}
-              className="flex flex-1 flex-col items-center gap-2 rounded-2xl border-2 border-border bg-surface py-4 text-text-primary shadow-sm transition-transform duration-fast hover:scale-105 hover:border-brand-400 active:scale-95 md:py-6"
+              className="flex flex-1 flex-col items-center gap-2 rounded-2xl border-2 border-border bg-surface py-4 text-text-primary shadow-sm transition-transform duration-fast hover:scale-105 hover:border-brand-400 active:scale-95 md:flex-none md:py-6"
             >
               <Bike size={28} className="text-brand-600" />
               <span className="text-sm font-semibold">Domicilio</span>
@@ -157,7 +157,7 @@ function TablesPage() {
             <button
               type="button"
               onClick={() => setCustomerModalType('takeaway')}
-              className="flex flex-1 flex-col items-center gap-2 rounded-2xl border-2 border-border bg-surface py-4 text-text-primary shadow-sm transition-transform duration-fast hover:scale-105 hover:border-brand-400 active:scale-95 md:py-6"
+              className="flex flex-1 flex-col items-center gap-2 rounded-2xl border-2 border-border bg-surface py-4 text-text-primary shadow-sm transition-transform duration-fast hover:scale-105 hover:border-brand-400 active:scale-95 md:flex-none md:py-6"
             >
               <ShoppingBag size={28} className="text-brand-600" />
               <span className="text-sm font-semibold">Para llevar</span>

@@ -54,7 +54,7 @@ function StatusTimeline({ order }: { order: Order }) {
   );
 
   return (
-    <div className="rounded-2xl border border-border bg-surface p-5">
+    <div className="rounded-2xl border border-border bg-surface p-4 sm:p-5">
       <div className="flex">
         {STEPS.map((step, i) => (
           <div key={step.status} className="relative flex flex-1 flex-col items-center gap-1">
@@ -119,7 +119,7 @@ function OrderDetailPage() {
   const items = groupOrderItems(menu, order.items);
 
   return (
-    <div className="flex flex-col gap-4 p-6">
+    <div className="flex flex-col gap-4 p-4 sm:p-6">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold text-text-primary">
           Orden #{order.id} · {orderSubtitle(order)}
@@ -128,9 +128,9 @@ function OrderDetailPage() {
 
       <StatusTimeline order={order} />
 
-      <div className="flex items-start gap-4">
-        <div className="flex w-64 shrink-0 flex-col gap-3">
-          <div className="rounded-2xl border border-border bg-surface p-5">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+        <div className="flex w-full flex-col gap-3 lg:w-64 lg:shrink-0">
+          <div className="rounded-2xl border border-border bg-surface p-4 sm:p-5">
             <div className="flex items-center justify-between">
               <span className="font-semibold text-text-primary">Orden #{order.id}</span>
               <span className={classNames('rounded-full px-2 py-0.5 text-xs font-medium', statusStyles[order.status])}>{statusLabels[order.status]}</span>
@@ -177,7 +177,7 @@ function OrderDetailPage() {
         </div>
 
         <div className="flex flex-1 flex-col gap-3">
-          <div className="rounded-2xl border border-border bg-surface p-5">
+          <div className="rounded-2xl border border-border bg-surface p-4 sm:p-5">
             <div className="mb-2 font-semibold text-text-primary">Artículos</div>
             {items.map((item) => (
               <div key={item.key} className="flex items-center justify-between gap-2 border-b border-border py-2.5 last:border-b-0">
@@ -203,7 +203,7 @@ function OrderDetailPage() {
             </div>
           </div>
 
-          <div className="rounded-2xl border border-border bg-surface p-5">
+          <div className="rounded-2xl border border-border bg-surface p-4 sm:p-5">
             <div className="mb-2 font-semibold text-text-primary">Pagos</div>
             {order.payments.length === 0 ? (
               <p className="text-sm text-text-secondary">Sin pagos registrados todavía.</p>

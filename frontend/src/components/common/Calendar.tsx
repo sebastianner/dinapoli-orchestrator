@@ -57,7 +57,7 @@ export function Calendar({ selectedDate, onSelectDate, highlightedDates, maxDate
   };
 
   return (
-    <div className="w-72 rounded-2xl border border-border bg-surface p-4">
+    <div className="w-full rounded-2xl border border-border bg-surface p-4 sm:w-72">
       <div className="mb-3 flex items-center justify-between">
         <button type="button" onClick={goToPreviousMonth} aria-label="Mes anterior" className="rounded-full p-1 text-text-secondary hover:bg-brand-500/10 hover:text-brand-600">
           <ChevronLeft size={18} />
@@ -93,7 +93,7 @@ export function Calendar({ selectedDate, onSelectDate, highlightedDates, maxDate
               disabled={isFuture}
               onClick={() => onSelectDate(dateKey)}
               className={classNames(
-                'flex h-8 w-8 items-center justify-center rounded-full text-sm transition-colors duration-fast',
+                'flex aspect-square w-full items-center justify-center rounded-full text-sm transition-colors duration-fast',
                 isSelected && 'bg-brand-500 font-semibold text-white',
                 !isSelected && !isFuture && 'text-text-primary hover:bg-brand-500/10',
                 !isSelected && isHighlighted && !isFuture && 'font-semibold text-brand-600',

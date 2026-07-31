@@ -123,8 +123,8 @@ function OrderHistoryContent({ today }: { today: string }) {
   };
 
   return (
-    <div className="p-6">
-      <div className="mb-4 flex items-center justify-between">
+    <div className="p-4 sm:p-6">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold text-text-primary">
           Historial de órdenes
         </h1>
@@ -175,7 +175,7 @@ function OrderHistoryContent({ today }: { today: string }) {
               <h2 className="font-semibold capitalize text-text-primary">
                 {formatDateLong(selectedDate)}
               </h2>
-              <div className="mt-1 flex gap-1">
+              <div className="mt-1 flex flex-wrap gap-1">
                 {categories.map((c) => (
                   <button
                     key={c.value}

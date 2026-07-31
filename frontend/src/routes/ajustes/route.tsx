@@ -27,12 +27,12 @@ const tabs = [
 function AjustesLayout() {
   return (
     <div className="flex h-full flex-col">
-      <nav className="flex gap-1 border-b border-border bg-surface px-6">
+      <nav className="flex gap-1 overflow-x-auto border-b border-border bg-surface px-4 sm:px-6">
         {tabs.map((tab) => (
           <Link
             key={tab.to}
             to={tab.to}
-            className="border-b-2 border-transparent px-3 py-3 text-sm font-medium text-text-secondary transition-colors duration-fast hover:text-brand-600 data-[status=active]:border-brand-500 data-[status=active]:text-brand-600"
+            className="shrink-0 whitespace-nowrap border-b-2 border-transparent px-3 py-3 text-sm font-medium text-text-secondary transition-colors duration-fast hover:text-brand-600 data-[status=active]:border-brand-500 data-[status=active]:text-brand-600"
           >
             {tab.label}
           </Link>

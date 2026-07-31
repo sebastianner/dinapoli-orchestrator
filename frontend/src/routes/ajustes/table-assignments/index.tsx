@@ -58,7 +58,7 @@ function TableAssignmentsPage() {
   }, [orderId, openOrders]);
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <h1 className="mb-4 text-xl font-semibold text-text-primary">Editar mesas</h1>
 
       {tables.length > 0 && <TableCountEditor currentCount={tables.length} />}
@@ -71,8 +71,8 @@ function TableAssignmentsPage() {
       ) : (
         <div className="flex max-w-xl flex-col gap-2">
           {openOrders.map((order) => (
-            <div key={order.id} className="flex items-center justify-between gap-4 rounded-xl border border-border bg-surface p-4">
-              <div>
+            <div key={order.id} className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="font-semibold text-text-primary">Mesa {order.tableNumber}</span>
                   <span className={classNames('rounded-full px-2 py-0.5 text-xs font-medium', statusStyles[order.status])}>{statusLabels[order.status]}</span>
@@ -84,7 +84,7 @@ function TableAssignmentsPage() {
               <button
                 type="button"
                 onClick={() => setEditing(order)}
-                className="flex shrink-0 items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-text-secondary transition-colors duration-fast hover:border-brand-400 hover:text-brand-600"
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-text-secondary transition-colors duration-fast hover:border-brand-400 hover:text-brand-600 sm:w-auto sm:shrink-0"
               >
                 <Pencil size={14} /> Editar mesa
               </button>

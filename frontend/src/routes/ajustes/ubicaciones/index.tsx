@@ -70,7 +70,7 @@ function UbicacionesAdminPage() {
   const noResults = q !== '' && cities.length > 0 && cities.every((c) => visibility[c.id] === false);
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold text-text-primary">Ciudades y barrios</h1>
         <button

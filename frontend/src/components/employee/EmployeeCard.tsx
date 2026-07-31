@@ -25,7 +25,18 @@ export function EmployeeCard({ employee, onSelect, onEdit }: EmployeeCardProps) 
         <div className="relative h-24 w-24 overflow-hidden rounded-full border-2 border-border bg-surface-raised">
           <img src={avatarSrc(employee, overrideSeed)} alt={employee.name} className="h-full w-full" />
 
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-black/55 opacity-0 backdrop-blur-[1px] transition-opacity duration-fast group-hover:opacity-100">
+          {/* Mobile (below sm): tap the avatar to sign in directly - no hover
+              to reveal a menu on touch, so editing isn't reachable here at
+              all (desktop-only, see the overlay below). */}
+          <button
+            type="button"
+            onClick={onSelect}
+            aria-label={`Elegir a ${employee.name}`}
+            className="absolute inset-0 sm:hidden"
+          />
+
+          {/* Desktop (sm and up): hover reveals both actions. */}
+          <div className="absolute inset-0 hidden flex-col items-center justify-center gap-1.5 bg-black/55 opacity-0 backdrop-blur-[1px] transition-opacity duration-fast group-hover:opacity-100 sm:flex">
             <button
               type="button"
               onClick={onSelect}

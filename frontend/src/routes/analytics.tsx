@@ -73,14 +73,14 @@ function AnalyticsPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-surface px-6 py-3">
-        <nav className="flex gap-1">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-surface px-4 py-3 sm:px-6">
+        <nav className="flex gap-1 overflow-x-auto">
           {TABS.map((t) => (
             <button
               key={t.key}
               type="button"
               onClick={() => setTab(t.key)}
-              className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors duration-fast ${
+              className={`shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition-colors duration-fast ${
                 tab === t.key ? 'bg-brand-50 text-brand-600' : 'text-text-secondary hover:text-brand-600'
               }`}
             >
@@ -91,7 +91,7 @@ function AnalyticsPage() {
         <RangeSwitcher range={range} onRangeChange={setRange} from={customFrom} to={customTo} onFromChange={setCustomFrom} onToChange={setCustomTo} />
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-6">
+      <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
         {tab === 'resumen' && <ResumenTab range={range} from={from} to={to} />}
         {tab === 'ventas' && <VentasTab range={range} from={from} to={to} />}
         {tab === 'productos' && <ProductosTab range={range} from={from} to={to} />}
@@ -243,16 +243,18 @@ function ProductosTab({ range, from, to }: TabProps) {
           {leastSold.length === 0 ? (
             <p className="text-sm text-text-secondary">Sin datos en este periodo.</p>
           ) : (
-            <table className="w-full text-sm">
-              <tbody>
-                {leastSold.map((p) => (
-                  <tr key={p.name} className="border-b border-border last:border-0">
-                    <td className="py-1.5 text-text-primary">{p.name}</td>
-                    <td className="py-1.5 text-right text-text-secondary">{p.quantity} uds</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <tbody>
+                  {leastSold.map((p) => (
+                    <tr key={p.name} className="border-b border-border last:border-0">
+                      <td className="py-1.5 text-text-primary">{p.name}</td>
+                      <td className="py-1.5 text-right text-text-secondary">{p.quantity} uds</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
         <DonutChart
@@ -284,27 +286,29 @@ function ClientesTab({ range, from, to }: TabProps) {
         {data.topCustomers.length === 0 ? (
           <p className="text-sm text-text-secondary">Sin datos en este periodo.</p>
         ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs text-text-secondary">
-                <th className="pb-2 font-medium">Cliente</th>
-                <th className="pb-2 font-medium">Órdenes</th>
-                <th className="pb-2 text-right font-medium">Gasto</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.topCustomers.map((c) => (
-                <tr key={c.id} className="border-t border-border">
-                  <td className="py-2 text-text-primary">
-                    {c.name}
-                    {c.phone && <span className="ml-1 text-text-secondary">· {c.phone}</span>}
-                  </td>
-                  <td className="py-2 text-text-secondary">{c.orderCount}</td>
-                  <td className="py-2 text-right font-medium text-brand-700">{formatCOP(c.spend)}</td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-text-secondary">
+                  <th className="pb-2 font-medium">Cliente</th>
+                  <th className="pb-2 font-medium">Órdenes</th>
+                  <th className="pb-2 text-right font-medium">Gasto</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {data.topCustomers.map((c) => (
+                  <tr key={c.id} className="border-t border-border">
+                    <td className="py-2 whitespace-nowrap text-text-primary">
+                      {c.name}
+                      {c.phone && <span className="ml-1 text-text-secondary">· {c.phone}</span>}
+                    </td>
+                    <td className="py-2 text-text-secondary">{c.orderCount}</td>
+                    <td className="py-2 text-right font-medium text-brand-700">{formatCOP(c.spend)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>
@@ -321,27 +325,29 @@ function EmpleadosTab({ range, from, to }: TabProps) {
       {data.length === 0 ? (
         <p className="text-sm text-text-secondary">Sin datos en este periodo.</p>
       ) : (
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-xs text-text-secondary">
-              <th className="pb-2 font-medium">Empleado</th>
-              <th className="pb-2 font-medium">Órdenes</th>
-              <th className="pb-2 text-right font-medium">Ventas</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.map((e) => (
-              <tr key={e.id} className="border-t border-border">
-                <td className="py-2 text-text-primary">
-                  {e.name}
-                  {!e.isActive && <span className="ml-1 text-xs text-text-secondary">(inactivo)</span>}
-                </td>
-                <td className="py-2 text-text-secondary">{e.orderCount}</td>
-                <td className="py-2 text-right font-medium text-brand-700">{formatCOP(e.sales)}</td>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs text-text-secondary">
+                <th className="pb-2 font-medium">Empleado</th>
+                <th className="pb-2 font-medium">Órdenes</th>
+                <th className="pb-2 text-right font-medium">Ventas</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {data.map((e) => (
+                <tr key={e.id} className="border-t border-border">
+                  <td className="py-2 whitespace-nowrap text-text-primary">
+                    {e.name}
+                    {!e.isActive && <span className="ml-1 text-xs text-text-secondary">(inactivo)</span>}
+                  </td>
+                  <td className="py-2 text-text-secondary">{e.orderCount}</td>
+                  <td className="py-2 text-right font-medium text-brand-700">{formatCOP(e.sales)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

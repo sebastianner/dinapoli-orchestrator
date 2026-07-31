@@ -59,13 +59,13 @@ export function TableCountEditor({ currentCount }: TableCountEditorProps) {
   };
 
   return (
-    <div className="mb-6 flex items-center justify-between gap-4 rounded-2xl border border-border bg-surface p-4">
+    <div className="mb-6 flex flex-col gap-4 rounded-2xl border border-border bg-surface p-4 sm:flex-row sm:items-center sm:justify-between">
       <div>
         <p className="font-semibold text-text-primary">Número de mesas</p>
         <p className="text-xs text-text-secondary">Agrega o quita mesas del salón - una mesa ocupada no se puede quitar.</p>
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 sm:shrink-0">
         <div className="flex items-center gap-2">
           <button
             type="button"

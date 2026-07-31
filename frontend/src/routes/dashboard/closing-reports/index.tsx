@@ -99,7 +99,7 @@ function ClosingReportsPage() {
   const today = todayStr();
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <h1 className="mb-4 text-xl font-semibold text-text-primary">Cierres del día</h1>
 
       {isLoading && <p className="text-sm text-text-secondary">Cargando...</p>}
@@ -230,14 +230,14 @@ function ReportDetail({
 
   return (
     <>
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-1">
           <button
             type="button"
             onClick={() => previousDay && onSelect(previousDay.id)}
             disabled={!previousDay}
             aria-label="Cierre anterior"
-            className="rounded-lg p-1.5 text-text-secondary hover:bg-brand-500/10 hover:text-brand-600 disabled:opacity-30 disabled:hover:bg-transparent"
+            className="shrink-0 rounded-lg p-1.5 text-text-secondary hover:bg-brand-500/10 hover:text-brand-600 disabled:opacity-30 disabled:hover:bg-transparent"
           >
             <ChevronLeft size={18} />
           </button>
@@ -247,7 +247,7 @@ function ReportDetail({
             onClick={() => nextDay && onSelect(nextDay.id)}
             disabled={!nextDay}
             aria-label="Cierre siguiente"
-            className="rounded-lg p-1.5 text-text-secondary hover:bg-brand-500/10 hover:text-brand-600 disabled:opacity-30 disabled:hover:bg-transparent"
+            className="shrink-0 rounded-lg p-1.5 text-text-secondary hover:bg-brand-500/10 hover:text-brand-600 disabled:opacity-30 disabled:hover:bg-transparent"
           >
             <ChevronRight size={18} />
           </button>
@@ -255,43 +255,55 @@ function ReportDetail({
         <button
           type="button"
           onClick={handleReprint}
-          className="flex items-center gap-1.5 rounded-lg border border-border px-4 py-2 text-sm font-medium text-text-secondary transition-colors duration-fast hover:border-brand-400 hover:text-brand-600"
+          className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-border px-4 py-2 text-sm font-medium text-text-secondary transition-colors duration-fast hover:border-brand-400 hover:text-brand-600 sm:w-auto"
         >
           <Printer size={15} /> Imprimir de nuevo
         </button>
       </div>
 
-      <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-        <StatCard
-          label="Ventas totales"
-          value={formatCOP(report.totalSales)}
-          tooltip="No incluye propinas (se muestran aparte). Los descuentos ya están restados, así que refleja el dinero real vendido."
-        />
-        <StatCard label="Órdenes" value={String(report.orderCount)} />
-        <StatCard label="Artículos vendidos" value={String(report.itemsSold)} />
-        <StatCard label="Propinas" value={formatCOP(report.tips)} />
+      <div className="mb-6 flex flex-col gap-4">
+        {/* Overview */}
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+          <StatCard
+            label="Ventas totales"
+            value={formatCOP(report.totalSales)}
+            tooltip="No incluye propinas (se muestran aparte). Los descuentos ya están restados, así que refleja el dinero real vendido."
+          />
+          <StatCard label="Órdenes" value={String(report.orderCount)} />
+          <StatCard label="Artículos vendidos" value={String(report.itemsSold)} />
+          <StatCard label="Propinas" value={formatCOP(report.tips)} />
+        </div>
 
-        <StatCard label="Ventas domicilio" value={formatCOP(report.deliverySales)} />
-        <StatCard label="Órdenes domicilio" value={String(report.deliveryOrderCount)} />
-        <StatCard label="Ventas mesa / para llevar" value={formatCOP(report.dineInTakeawaySales)} />
-        <StatCard label="Órdenes mesa" value={String(report.dineInOrderCount)} />
-        <StatCard label="Órdenes para llevar" value={String(report.takeawayOrderCount)} />
+        {/* Breakdown by order type */}
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+          <StatCard label="Ventas domicilio" value={formatCOP(report.deliverySales)} />
+          <StatCard label="Órdenes domicilio" value={String(report.deliveryOrderCount)} />
+          <StatCard label="Ventas mesa / para llevar" value={formatCOP(report.dineInTakeawaySales)} />
+          <StatCard label="Órdenes mesa" value={String(report.dineInOrderCount)} />
+          <StatCard label="Órdenes para llevar" value={String(report.takeawayOrderCount)} />
+        </div>
 
-        <StatCard
-          label="Ventas en efectivo"
-          value={formatCOP(report.cashSales)}
-          tooltip="No incluye propinas (se muestran aparte). Los descuentos ya están restados, así que refleja el dinero real vendido en efectivo."
-        />
-        <StatCard
-          label="Efectivo final en caja"
-          value={formatCOP(report.cashInRegister + report.cashSales)}
-          tooltip="Base de caja del día + ventas en efectivo del día. Es el efectivo que debería haber físicamente en la caja al cierre."
-        />
-        <StatCard label="Ventas en tarjeta" value={formatCOP(report.cardSales)} />
-        <StatCard label="Ventas en transferencia" value={formatCOP(report.transferSales)} />
+        {/* Breakdown by payment method */}
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+          <StatCard
+            label="Ventas en efectivo"
+            value={formatCOP(report.cashSales)}
+            tooltip="No incluye propinas (se muestran aparte). Los descuentos ya están restados, así que refleja el dinero real vendido en efectivo."
+          />
+          <StatCard
+            label="Efectivo final en caja"
+            value={formatCOP(report.cashInRegister + report.cashSales)}
+            tooltip="Base de caja del día + ventas en efectivo del día. Es el efectivo que debería haber físicamente en la caja al cierre."
+          />
+          <StatCard label="Ventas en tarjeta" value={formatCOP(report.cardSales)} />
+          <StatCard label="Ventas en transferencia" value={formatCOP(report.transferSales)} />
+        </div>
 
-        <StatCard label="Descuentos" value={formatCOP(report.discounts)} tone="danger" />
-        <StatCard label="Gastos totales" value={formatCOP(report.totalExpenses)} tone="danger" />
+        {/* Deductions */}
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+          <StatCard label="Descuentos" value={formatCOP(report.discounts)} tone="danger" />
+          <StatCard label="Gastos totales" value={formatCOP(report.totalExpenses)} tone="danger" />
+        </div>
       </div>
 
       <HourlyBars orders={orders} />

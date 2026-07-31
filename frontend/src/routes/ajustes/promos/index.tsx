@@ -17,7 +17,7 @@ function PromosAdminPage() {
   const [editing, setEditing] = useState<PromoSettings | null>(null);
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <h1 className="mb-6 text-xl font-semibold text-text-primary">Promociones</h1>
 
       {isLoading ? (
@@ -25,21 +25,23 @@ function PromosAdminPage() {
       ) : (
         <div className="flex flex-col gap-3">
           {promoSettings.map((settings) => (
-            <div key={settings.promoType} className="flex items-center gap-4 rounded-xl border border-border bg-surface p-4">
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-500/10 text-brand-600">
-                <Sparkles size={20} />
-              </span>
-              <div className="flex-1">
-                <p className="text-sm font-semibold text-text-primary">{PROMO_LABELS[settings.promoType]}</p>
-                <p className="text-xs text-text-secondary">
-                  Precio: {formatCOP(settings.price)}
-                  {settings.promoType === 'pizza_xl' && <> · Recargo gaseosa: {formatCOP(settings.sodaSurcharge)}</>}
-                </p>
+            <div key={settings.promoType} className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-4 sm:flex-row sm:items-center">
+              <div className="flex flex-1 items-center gap-4">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-500/10 text-brand-600">
+                  <Sparkles size={20} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-text-primary">{PROMO_LABELS[settings.promoType]}</p>
+                  <p className="text-xs text-text-secondary">
+                    Precio: {formatCOP(settings.price)}
+                    {settings.promoType === 'pizza_xl' && <> · Recargo gaseosa: {formatCOP(settings.sodaSurcharge)}</>}
+                  </p>
+                </div>
               </div>
               <button
                 type="button"
                 onClick={() => setEditing(settings)}
-                className="flex items-center gap-1 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors duration-fast hover:border-brand-400 hover:text-brand-600"
+                className="flex w-full items-center justify-center gap-1 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors duration-fast hover:border-brand-400 hover:text-brand-600 sm:w-auto"
               >
                 <Pencil size={12} /> Editar precio
               </button>
