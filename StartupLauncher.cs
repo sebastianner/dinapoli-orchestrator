@@ -101,15 +101,30 @@ class Program
             return;
         }
 
+        bool serverChanged = false;
+        bool frontendChanged = false;
+
         if (!upToDate)
         {
             Log("Changes detected: local=" + localSha + " remote=" + remoteSha);
+
+            // Which side(s) the incoming commits actually touch, so a
+            // frontend-only change doesn't cost a needless server rebuild
+            // (and vice versa).
+            string diffOutput = RunCommandCapture(repoRoot, "git diff --name-only " + localSha + " " + remoteSha);
+            foreach (string line in diffOutput.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (line.StartsWith("server/", StringComparison.OrdinalIgnoreCase)) serverChanged = true;
+                else if (line.StartsWith("frontend/", StringComparison.OrdinalIgnoreCase)) frontendChanged = true;
+            }
 
             string status = RunCommandCapture(repoRoot, "git status --porcelain");
             if (!string.IsNullOrEmpty(status.Trim()))
             {
                 Log("Working tree has uncommitted changes; skipping auto-pull to avoid overwriting local work:");
                 Log(status);
+                serverChanged = false;
+                frontendChanged = false;
             }
             else
             {
@@ -119,16 +134,22 @@ class Program
                     Log("git pull failed (exit " + pullExit + "). Will run with whatever is already built.");
                     return;
                 }
-                Log("Pull succeeded.");
+                Log("Pull succeeded (server changed=" + serverChanged + ", frontend changed=" + frontendChanged + ").");
             }
         }
         else
         {
-            Log("Repo already up to date, but missing a build (server=" + serverBuilt + ", frontend=" + frontendBuilt + "). Building now.");
+            Log("Repo already up to date, but missing a build (server=" + serverBuilt + ", frontend=" + frontendBuilt + ").");
         }
 
-        BuildProject(Path.Combine(repoRoot, "server"), "server");
-        BuildProject(Path.Combine(repoRoot, "frontend"), "frontend");
+        bool buildServer = serverChanged || !serverBuilt;
+        bool buildFrontend = frontendChanged || !frontendBuilt;
+
+        if (buildServer) BuildProject(Path.Combine(repoRoot, "server"), "server");
+        else Log("server: no pulled changes and a build already exists - skipping rebuild.");
+
+        if (buildFrontend) BuildProject(Path.Combine(repoRoot, "frontend"), "frontend");
+        else Log("frontend: no pulled changes and a build already exists - skipping rebuild.");
     }
 
     static void BuildProject(string dir, string label)
