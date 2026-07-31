@@ -122,7 +122,7 @@ function ResumenTab({ range, from, to }: TabProps) {
   return (
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <div className="sm:col-span-2">
+        <div className="col-span-2">
           <KpiCard
             label="Ventas totales"
             value={formatCOP(summary.totalSales)}
@@ -135,12 +135,12 @@ function ResumenTab({ range, from, to }: TabProps) {
         <KpiCard label="Ticket promedio" value={formatCOP(summary.avgOrderValue)} growthPct={summary.avgOrderValueGrowthPct} />
         <KpiCard label="Artículos / orden" value={summary.itemsPerOrder.toFixed(1)} />
         <KpiCard label="Clientes atendidos" value={String(summary.customersServed)} growthPct={summary.customersServedGrowthPct} />
-        <div className="sm:col-span-2">
+        <div className="col-span-2">
           <div className="rounded-2xl border border-border bg-surface p-4">
             <p className="text-sm text-text-secondary">Producto más vendido</p>
             {topProduct ? (
               <div className="mt-1 flex items-baseline justify-between gap-2">
-                <span className="truncate text-xl font-bold text-brand-700">{topProduct.name}</span>
+                <span className="min-w-0 truncate text-xl font-bold text-brand-700">{topProduct.name}</span>
                 <span className="shrink-0 text-sm font-medium text-text-secondary">
                   {formatCOP(topProduct.revenue)} · {topProduct.quantity} uds
                 </span>

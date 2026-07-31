@@ -26,8 +26,8 @@ export function KpiCard({ label, value, growthPct, tooltip, size = 'default' }: 
       </p>
       <p className={`mt-1 font-bold text-brand-700 ${size === 'hero' ? 'text-3xl' : 'text-xl'}`}>{value}</p>
       {showDelta && (
-        <p className={`mt-1 flex items-center gap-1 text-xs font-semibold ${isUp ? 'text-success' : 'text-danger'}`}>
-          {isUp ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+        <p className={`mt-1 flex flex-wrap items-center gap-1 text-xs font-semibold ${isUp ? 'text-success' : 'text-danger'}`}>
+          {isUp ? <TrendingUp size={12} className="shrink-0" /> : <TrendingDown size={12} className="shrink-0" />}
           {Math.abs(growthPct as number).toFixed(1)}% vs. periodo anterior
         </p>
       )}

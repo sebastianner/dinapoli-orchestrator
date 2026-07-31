@@ -18,8 +18,8 @@ interface RangeSwitcherProps {
 
 export function RangeSwitcher({ range, onRangeChange, from, to, onFromChange, onToChange }: RangeSwitcherProps) {
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <div className="flex gap-1 overflow-x-auto rounded-full border border-border bg-surface p-1">
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
+      <div className="flex min-w-0 max-w-full gap-1 overflow-x-auto rounded-full border border-border bg-surface p-1">
         {OPTIONS.map((opt) => (
           <button
             key={opt.value}

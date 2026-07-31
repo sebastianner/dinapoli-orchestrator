@@ -64,9 +64,9 @@ export function OrderHistoryCard({ order, removeMode, onDelete }: OrderHistoryCa
     <Link
       to="/dashboard/order-history/$id"
       params={{ id: String(order.id) }}
-      className="flex items-center justify-between gap-4 rounded-2xl border border-border bg-surface p-4 transition-colors duration-fast hover:border-brand-400"
+      className="flex flex-col gap-3 rounded-2xl border border-border bg-surface p-4 transition-colors duration-fast hover:border-brand-400 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
     >
-      <div>
+      <div className="min-w-0">
         <div className="flex items-center gap-2">
           <span title={orderTypeLabels[order.orderType]} className="shrink-0 text-text-secondary">
             <TypeIcon size={22} />
@@ -74,12 +74,12 @@ export function OrderHistoryCard({ order, removeMode, onDelete }: OrderHistoryCa
           <span className="font-semibold text-text-primary">Orden #{order.id}</span>
           <span className={classNames('rounded-full px-2 py-0.5 text-xs font-medium', statusStyles[order.status])}>{statusLabels[order.status]}</span>
         </div>
-        <p className="text-sm text-text-secondary">
+        <p className="truncate text-sm text-text-secondary">
           {orderSubtitle(order)} · {formatTime(order.createdAt)}
         </p>
       </div>
 
-      <div className="flex items-center gap-4">
+      <div className="flex items-center justify-between gap-4 sm:shrink-0 sm:justify-end">
         {(() => {
           const gross = order.grandTotal;
           const discount = order.discount ?? 0;

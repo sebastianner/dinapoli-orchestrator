@@ -59,7 +59,7 @@ export function ActiveOrdersTab() {
       )}
     >
       {open && (
-        <div className="anim-slide-up flex max-h-96 w-72 flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-lg">
+        <div className="anim-slide-up flex max-h-96 w-72 max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-lg">
           <div className="border-b border-border px-4 py-3">
             <h3 className="font-semibold text-text-primary">Órdenes activas</h3>
           </div>
@@ -95,16 +95,17 @@ export function ActiveOrdersTab() {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-2.5 text-sm font-semibold text-text-primary shadow-md transition-transform duration-fast hover:scale-105 active:scale-95"
+        aria-label="Órdenes activas"
+        className="flex items-center gap-2 rounded-full border border-border bg-surface p-2.5 text-sm font-semibold text-text-primary shadow-md transition-transform duration-fast hover:scale-105 active:scale-95 sm:px-4"
       >
         <ClipboardList size={18} className="text-brand-600" />
-        Órdenes activas
+        <span className="hidden sm:inline">Órdenes activas</span>
         {orders.length > 0 && (
           <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-brand-500 px-1 text-xs font-bold text-white">
             {orders.length}
           </span>
         )}
-        {open ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+        <span className="hidden sm:inline">{open ? <ChevronDown size={16} /> : <ChevronUp size={16} />}</span>
       </button>
     </div>
   );
