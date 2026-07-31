@@ -22,16 +22,16 @@ export function Header() {
   }, []);
 
   return (
-    <header className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-surface px-6">
-      <div className="flex items-center gap-2.5">
-        <img src={logo} alt="" className="h-9 w-9 rounded-full object-cover" />
-        <span className="text-lg font-bold tracking-tight text-brand-600">Dinapoli Pizza</span>
+    <header className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border bg-surface px-3 sm:h-16 sm:px-6">
+      <div className="flex min-w-0 items-center gap-1.5 sm:gap-2.5">
+        <img src={logo} alt="" className="h-6 w-6 shrink-0 rounded-full object-cover sm:h-9 sm:w-9" />
+        <span className="truncate text-sm font-bold tracking-tight text-brand-600 sm:text-lg">Dinapoli Pizza</span>
       </div>
 
-      <div className="flex items-center gap-6">
+      <div className="flex shrink-0 items-center gap-2 sm:gap-6">
         <div className="text-right leading-tight">
-          <p className="text-sm font-semibold text-text-primary">{timeFormatter.format(now)}</p>
-          <p className="text-xs text-text-secondary">
+          <p className="text-xs font-semibold text-text-primary sm:text-sm">{timeFormatter.format(now)}</p>
+          <p className="hidden text-xs text-text-secondary sm:block">
             {capitalize(dayFormatter.format(now))}, {dateFormatter.format(now)}
           </p>
         </div>
@@ -40,9 +40,9 @@ export function Header() {
           type="button"
           onClick={toggleTheme}
           aria-label="Cambiar tema"
-          className="flex h-9 w-9 items-center justify-center rounded-full border border-border text-text-secondary transition-colors duration-fast hover:bg-brand-500/10 hover:text-brand-600"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border text-text-secondary transition-colors duration-fast hover:bg-brand-500/10 hover:text-brand-600 sm:h-9 sm:w-9"
         >
-          {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+          {theme === 'dark' ? <Sun size={16} className="sm:h-[18px] sm:w-[18px]" /> : <Moon size={16} className="sm:h-[18px] sm:w-[18px]" />}
         </button>
       </div>
     </header>

@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { mutate } from 'swr';
 import classNames from 'classnames';
-import { CreditCard, Send, Trash2, UserPlus, Pencil, Percent, X } from 'lucide-react';
+import { CreditCard, Send, Trash2, UserPlus, Pencil, Percent, X, ShoppingCart, ChevronUp, ChevronDown } from 'lucide-react';
 import { useOrderStore, type CartItem, type CustomerDisplayInfo } from '@/store/useOrderStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useToastStore } from '@/store/useToastStore';
@@ -58,6 +58,10 @@ export function OrderOverview() {
   const [submitting, setSubmitting] = useState(false);
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [customerModalOpen, setCustomerModalOpen] = useState(false);
+  // Desktop keeps this docked open (see the `md:` classes below) - this only
+  // gates the phone-width bottom sheet, which starts collapsed to a summary
+  // bar so it doesn't block the product grid until tapped open.
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   const cartSubtotal = cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
   const existingSubtotal = existingOrder?.total ?? 0;
@@ -84,6 +88,7 @@ export function OrderOverview() {
   const grossTotal = subtotal + pendingTip + (isDelivery ? pendingDeliveryFee : 0);
   const netTotal = grossTotal - pendingDiscount;
   const showDiscountInput = pendingDiscount > 0 || discountOpen;
+  const itemCount = (existingOrder?.items.reduce((sum, item) => sum + item.quantity, 0) ?? 0) + cart.reduce((sum, item) => sum + item.quantity, 0);
 
   const handlePercentClick = (mode: 'ten' | 'twenty') => {
     const turningOn = tipMode !== mode;
@@ -188,8 +193,36 @@ export function OrderOverview() {
   };
 
   return (
-    <aside className="anim-slide-up flex w-80 shrink-0 flex-col border-l border-border bg-surface">
-      <div className="border-b border-border px-4 py-3">
+    <>
+      {/* Phone: collapsed summary bar - tap to expand the full sheet below.
+          Desktop keeps the panel docked open at all times (md:hidden here). */}
+      {!mobileOpen && (
+        <button
+          type="button"
+          onClick={() => setMobileOpen(true)}
+          className="fixed inset-x-0 bottom-16 z-40 flex items-center justify-between gap-3 border-t border-border bg-surface px-4 py-3 shadow-lg md:hidden"
+        >
+          <span className="flex items-center gap-2 text-sm font-medium text-text-primary">
+            <ShoppingCart size={16} className="text-brand-600" /> {itemCount} {itemCount === 1 ? 'item' : 'items'}
+          </span>
+          <span className="flex items-center gap-2 text-sm font-semibold text-text-primary">
+            {formatCOP(netTotal)}
+            <ChevronUp size={16} className="text-text-secondary" />
+          </span>
+        </button>
+      )}
+
+      <aside
+        className={classNames(
+          'flex-col bg-surface',
+          'md:anim-slide-up md:static md:flex md:h-full md:w-80 md:shrink-0 md:border-l md:border-border md:shadow-none',
+          mobileOpen
+            ? 'anim-slide-up max-md:fixed max-md:inset-x-0 max-md:bottom-16 max-md:z-40 max-md:flex max-md:max-h-[75vh] max-md:rounded-t-2xl max-md:border max-md:border-border max-md:shadow-xl'
+            : 'max-md:hidden',
+        )}
+      >
+      <div className="flex items-start justify-between gap-2 border-b border-border px-4 py-3">
+        <div className="min-w-0">
         <h2 className="font-semibold text-text-primary">
           {existingOrder ? orderTitle(existingOrder.orderType, existingOrder.tableNumber) : orderTitle(newOrderInfo?.orderType, newOrderInfo?.tableNumber)}
         </h2>
@@ -215,6 +248,15 @@ export function OrderOverview() {
         ) : (
           customerName && <p className="text-xs text-text-secondary">{customerName}</p>
         )}
+        </div>
+        <button
+          type="button"
+          onClick={() => setMobileOpen(false)}
+          aria-label="Cerrar orden"
+          className="shrink-0 text-text-secondary hover:text-text-primary md:hidden"
+        >
+          <ChevronDown size={20} />
+        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-3">
@@ -388,7 +430,8 @@ export function OrderOverview() {
       {orderType === 'dine_in' && (
         <CustomerInfoModal open={customerModalOpen} orderType="dine_in" onClose={() => setCustomerModalOpen(false)} onSubmit={handleCustomerSubmit} />
       )}
-    </aside>
+      </aside>
+    </>
   );
 }
 

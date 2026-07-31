@@ -30,14 +30,14 @@ function MenuLayout() {
   const customerAddress = existingOrder?.address ?? newOrderInfo?.customerDisplay?.address;
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full flex-col md:flex-row">
       {menu && <CategorySidebar menu={menu} />}
 
       <div className="flex min-w-0 flex-1 flex-col">
         {!hasOrderContext && (
-          <div className="flex items-center justify-between gap-4 border-b border-warning/30 bg-warning-bg px-6 py-3">
+          <div className="flex items-center justify-between gap-4 border-b border-warning/30 bg-warning-bg px-4 py-3 sm:px-6">
             <span className="flex items-center gap-2 text-sm font-medium text-warning">
-              <AlertTriangle size={16} /> Elige una mesa, domicilio o para llevar antes de agregar productos.
+              <AlertTriangle size={16} className="shrink-0" /> Elige una mesa, domicilio o para llevar antes de agregar productos.
             </span>
             <Link
               to="/tables"
@@ -53,9 +53,9 @@ function MenuLayout() {
         )}
 
         {promoDraft && activePromoSettings && (
-          <div className="flex items-center justify-between gap-4 border-b border-brand-400/30 bg-brand-500/10 px-6 py-3">
+          <div className="flex items-center justify-between gap-4 border-b border-brand-400/30 bg-brand-500/10 px-4 py-3 sm:px-6">
             <span className="flex items-center gap-2 text-sm font-medium text-brand-700">
-              <Sparkles size={16} /> {promoProgressText(promoDraft.type, promoDraft.items.length, activePromoSettings)}
+              <Sparkles size={16} className="shrink-0" /> {promoProgressText(promoDraft.type, promoDraft.items.length, activePromoSettings)}
             </span>
             <button
               type="button"
@@ -67,7 +67,7 @@ function MenuLayout() {
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto p-4 pb-20 sm:p-6 md:pb-6">
           {isLoading ? <p className="text-sm text-text-secondary">Cargando menú...</p> : <Outlet />}
         </div>
       </div>

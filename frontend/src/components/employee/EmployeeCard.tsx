@@ -14,7 +14,7 @@ export function EmployeeCard({ employee, onSelect, onEdit }: EmployeeCardProps) 
   const overrideSeed = useAvatarOverrideStore((s) => s.overrides[employee.id]);
 
   return (
-    <div className="group anim-scale-in flex w-32 flex-col items-center gap-2">
+    <div className="group anim-scale-in flex w-32 shrink-0 flex-col items-center gap-2">
       <div className="relative">
         {employee.role === 'admin' && (
           <span className="absolute -right-1 -top-1 z-10 rounded-full bg-brand-500 px-2 py-0.5 text-[10px] font-bold text-white shadow-sm">

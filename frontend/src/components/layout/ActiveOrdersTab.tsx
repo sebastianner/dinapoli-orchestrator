@@ -51,8 +51,11 @@ export function ActiveOrdersTab() {
     <div
       ref={containerRef}
       className={classNames(
-        'fixed bottom-[30px] z-40 flex flex-col items-end gap-2 transition-[right] duration-base',
-        orderOverviewVisible ? 'right-[392px]' : 'right-16',
+        'fixed z-40 flex flex-col items-end gap-2 transition-[right] duration-base md:bottom-[30px]',
+        // On mobile, /menu's OrderOverview collapses to a full-width summary
+        // bar fixed at bottom-16 (see OrderOverview.tsx) - sit above it
+        // instead of the usual bottom-20 so the two don't overlap.
+        orderOverviewVisible ? 'bottom-36 right-4 sm:right-16 md:bottom-[30px] md:right-[392px]' : 'bottom-20 right-4 sm:right-16',
       )}
     >
       {open && (

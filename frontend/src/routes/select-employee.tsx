@@ -78,9 +78,9 @@ function SelectEmployeePage() {
   };
 
   return (
-    <div className={classNames('p-8', leaving && 'anim-push-out-left')}>
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-text-primary">Seleccionar empleado</h1>
+    <div className={classNames('p-4 sm:p-6 md:p-8', leaving && 'anim-push-out-left')}>
+      <div className="mb-4 flex items-center justify-between sm:mb-6">
+        <h1 className="text-xl font-semibold text-text-primary sm:text-2xl">Seleccionar empleado</h1>
 
         <div className="flex items-center gap-3">
           {alreadyLoggedIn && (
@@ -151,13 +151,18 @@ function ActiveTab({ employees, loading, onSelect, onEdit, onCreate }: ActiveTab
   }
 
   return (
-    <div className="flex flex-wrap gap-6">
+    <div className="-mx-4 flex flex-nowrap gap-4 overflow-x-auto px-4 pb-2 sm:mx-0 sm:flex-wrap sm:gap-6 sm:overflow-visible sm:px-0 sm:pb-0">
       {employees.map((employee) => (
         <EmployeeCard key={employee.id} employee={employee} onSelect={() => onSelect(employee)} onEdit={() => onEdit(employee)} />
       ))}
 
       {onCreate && (
-        <button type="button" onClick={onCreate} aria-label="Crear empleado" className="flex w-32 flex-col items-center gap-2">
+        <button
+          type="button"
+          onClick={onCreate}
+          aria-label="Crear empleado"
+          className="flex w-32 shrink-0 flex-col items-center gap-2"
+        >
           <span className="flex h-24 w-24 items-center justify-center rounded-full border-2 border-dashed border-border text-text-secondary transition-colors duration-fast hover:border-brand-400 hover:text-brand-600">
             <Plus size={28} />
           </span>
@@ -181,9 +186,9 @@ function InactiveTab({ employees, loading }: InactiveTabProps) {
   }
 
   return (
-    <div className="flex flex-wrap gap-6">
+    <div className="-mx-4 flex flex-nowrap gap-4 overflow-x-auto px-4 pb-2 sm:mx-0 sm:flex-wrap sm:gap-6 sm:overflow-visible sm:px-0 sm:pb-0">
       {employees.map((employee) => (
-        <div key={employee.id} className="anim-scale-in flex w-32 flex-col items-center gap-2">
+        <div key={employee.id} className="anim-scale-in flex w-32 shrink-0 flex-col items-center gap-2">
           <div className="h-24 w-24 overflow-hidden rounded-full border-2 border-border opacity-50 grayscale">
             <img src={avatarSrc(employee)} alt={employee.name} className="h-full w-full" />
           </div>

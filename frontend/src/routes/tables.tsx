@@ -89,9 +89,9 @@ function TablesPage() {
   };
 
   return (
-    <div className="flex h-full flex-col gap-6 p-8">
+    <div className="flex h-full flex-col gap-4 p-4 sm:gap-6 sm:p-6 md:p-8">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-text-primary">Mesas</h1>
+        <h1 className="text-xl font-semibold text-text-primary sm:text-2xl">Mesas</h1>
 
         {isTabletUp && (
           <div className="flex rounded-xl border border-border bg-surface p-1" role="tablist" aria-label="Vista de mesas">
@@ -126,9 +126,9 @@ function TablesPage() {
       {isLoading ? (
         <p className="text-sm text-text-secondary">Cargando mesas...</p>
       ) : effectiveView === 'grid' ? (
-        <div className="flex flex-1 gap-8">
-          <div className="flex-1">
-            <div className="flex flex-wrap gap-5">
+        <div className="flex min-w-0 flex-1 flex-col gap-6 md:flex-row md:gap-8">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap gap-3 sm:gap-5">
               {tables.map((table) => {
                 const order = table.status === 'busy' ? activeOrders.find((o) => o.tableNumber === table.number) : undefined;
                 return (
@@ -144,11 +144,11 @@ function TablesPage() {
             </div>
           </div>
 
-          <div className="flex w-48 shrink-0 flex-col gap-4 pt-2">
+          <div className="mb-20 flex flex-row gap-3 md:mb-0 md:w-48 md:shrink-0 md:flex-col md:gap-4 md:pt-2">
             <button
               type="button"
               onClick={() => setCustomerModalType('delivery')}
-              className="flex flex-col items-center gap-2 rounded-2xl border-2 border-border bg-surface py-6 text-text-primary shadow-sm transition-transform duration-fast hover:scale-105 hover:border-brand-400 active:scale-95"
+              className="flex flex-1 flex-col items-center gap-2 rounded-2xl border-2 border-border bg-surface py-4 text-text-primary shadow-sm transition-transform duration-fast hover:scale-105 hover:border-brand-400 active:scale-95 md:py-6"
             >
               <Bike size={28} className="text-brand-600" />
               <span className="text-sm font-semibold">Domicilio</span>
@@ -157,7 +157,7 @@ function TablesPage() {
             <button
               type="button"
               onClick={() => setCustomerModalType('takeaway')}
-              className="flex flex-col items-center gap-2 rounded-2xl border-2 border-border bg-surface py-6 text-text-primary shadow-sm transition-transform duration-fast hover:scale-105 hover:border-brand-400 active:scale-95"
+              className="flex flex-1 flex-col items-center gap-2 rounded-2xl border-2 border-border bg-surface py-4 text-text-primary shadow-sm transition-transform duration-fast hover:scale-105 hover:border-brand-400 active:scale-95 md:py-6"
             >
               <ShoppingBag size={28} className="text-brand-600" />
               <span className="text-sm font-semibold">Para llevar</span>
