@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/server.js",
   "scripts": {
-    "build": "tsc && cp -r src/assets dist/assets",
+    "build": "tsc && node -e \"require('fs').cpSync('src/assets','dist/assets',{recursive:true})\"",
     "start": "node dist/server.js",
     "dev": "node --env-file=.env --import tsx/esm --watch --watch-path=src src/server.ts",
     "db:migrate": "tsx src/db/migrate.ts",

@@ -75,7 +75,7 @@ export function Sidebar() {
           title="Rappi Colombia"
           className="group flex w-16 flex-col items-center gap-1 rounded-xl px-2 py-3 text-text-secondary transition-colors duration-fast hover:bg-brand-500/10 hover:text-brand-600 sm:w-20"
         >
-          <img src="/rappi-logo.svg" alt="Rappi" className="h-[22px] w-[22px] rounded-full" />
+          <img src="/rappi-logo-rounded-hd-free-png.webp" alt="Rappi" className="h-8 w-8 rounded-full" />
           <span className="text-center text-[11px] font-medium leading-tight">Rappi</span>
         </a>
 

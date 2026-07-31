@@ -1,3 +1,6 @@
 .claude/
 todos.md
 server/data/
+StartupLauncher.exe
+startup-log.txt
+logs/
