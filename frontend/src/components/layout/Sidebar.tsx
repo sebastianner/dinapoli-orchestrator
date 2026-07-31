@@ -69,7 +69,7 @@ export function Sidebar() {
 
       <div className="flex flex-col items-center gap-2">
         <a
-          href="https://www.rappi.com.co"
+          href="https://aliados.rappi.com/orders-kanban"
           target="_blank"
           rel="noopener noreferrer"
           title="Rappi Colombia"
