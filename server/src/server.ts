@@ -2,6 +2,7 @@ import http from "node:http";
 import { createApp } from "./app.js";
 import { attachOrderSocket } from "./ws/orderSocket.js";
 import { startQueueWorker } from "./services/queueService.js";
+import { startBackupWorker } from "./services/backupService.js";
 import { getCurrentCashFlow } from "./services/cashFlowService.js";
 
 const PORT = process.env.PORT ?? 3000;
@@ -11,6 +12,7 @@ const server = http.createServer(app);
 
 attachOrderSocket(server);
 startQueueWorker();
+startBackupWorker();
 getCurrentCashFlow(); // opens today's register period if the latest one is from a previous day
 
 // Bind to every interface, not just loopback, so other devices on the same

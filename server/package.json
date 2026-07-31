@@ -6,7 +6,7 @@
   "main": "dist/server.js",
   "scripts": {
     "build": "tsc && node -e \"require('fs').cpSync('src/assets','dist/assets',{recursive:true})\"",
-    "start": "node dist/server.js",
+    "start": "node --env-file-if-exists=.env dist/server.js",
     "dev": "node --env-file=.env --import tsx/esm --watch --watch-path=src src/server.ts",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed.ts",
@@ -15,13 +15,15 @@
     "ws:simulate": "tsx scripts/simulate-orders.ts",
     "ws:stress": "tsx scripts/stress-test-orders.ts",
     "orders:complete-random": "tsx scripts/complete-random-orders.ts",
-    "admin:create": "tsx scripts/create-admin.ts"
+    "admin:create": "tsx scripts/create-admin.ts",
+    "gdrive:auth": "tsx scripts/google-drive-auth.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^11.9.1",
     "cookie-parser": "^1.4.7",
     "express": "^4.21.2",
+    "googleapis": "^173.0.0",
     "jsonwebtoken": "^9.0.3",
     "pngjs": "^7.0.0",
     "puppeteer": "^25.3.0",
