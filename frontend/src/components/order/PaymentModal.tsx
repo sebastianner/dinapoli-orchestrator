@@ -3,6 +3,7 @@ import { Trash2 } from "lucide-react";
 import { Modal } from "@/components/common/Modal";
 import { formatCOP } from "@/lib/format";
 import { completeOrder } from "@/lib/api";
+import { randomUUID } from "@/lib/uuid";
 import { useOrderStore } from "@/store/useOrderStore";
 import type { Order, PaymentMethod } from "@/types/api";
 
@@ -60,7 +61,7 @@ export function PaymentModal({
 
   const [splits, setSplits] = useState<PaymentSplitRow[]>(() => [
     {
-      clientId: crypto.randomUUID(),
+      clientId: randomUUID(),
       method: "cash",
       netAmount: String(
         order.total + pendingTip + pendingDeliveryFee - pendingDiscount,
@@ -96,7 +97,7 @@ export function PaymentModal({
   const reset = () => {
     setSplits([
       {
-        clientId: crypto.randomUUID(),
+        clientId: randomUUID(),
         method: "cash",
         netAmount: String(
           order.total + pendingTip + pendingDeliveryFee - pendingDiscount,
@@ -171,7 +172,7 @@ export function PaymentModal({
     setSplits((prev) => [
       ...prev,
       {
-        clientId: crypto.randomUUID(),
+        clientId: randomUUID(),
         method: "cash",
         netAmount: String(Math.max(remaining, 0)),
         tipAmount: "0",

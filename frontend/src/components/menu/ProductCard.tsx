@@ -9,6 +9,7 @@ import { useToastStore } from '@/store/useToastStore';
 import { usePromoSettings } from '@/lib/queries';
 import { promoProgressText } from '@/lib/promos';
 import { categoryIcon } from '@/lib/menuIcons';
+import { randomUUID } from '@/lib/uuid';
 
 interface ProductCardProps {
   categoryId: ProductCategoryId;
@@ -57,7 +58,7 @@ export function ProductCard({ categoryId, product, pizzaFlavors, excludedFlavorI
     const labelParts = [product.name, drinkFlavor?.name, flavor?.name].filter(Boolean);
 
     const item = {
-      clientId: crypto.randomUUID(),
+      clientId: randomUUID(),
       request: {
         type: 'product' as const,
         category: categoryId,

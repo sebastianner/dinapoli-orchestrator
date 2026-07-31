@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Order, OrderItemRequest, OrderType, PromoSettings, PromoType } from '@/types/api';
 import { applyPromoPricingPreview, freeBreadRequest, PROMO_ITEM_COUNTS } from '@/lib/promos';
+import { randomUUID } from '@/lib/uuid';
 
 /** Cached at draft-start time (see startDraft) purely for display in the Order Overview panel, so it doesn't need an extra fetch - only customerId/customerAddressId are ever sent to the server. */
 export interface CustomerDisplayInfo {
@@ -150,7 +151,7 @@ export const useOrderStore = create<OrderState>((set) => ({
         type,
         items:
           type === 'pizza_xl'
-            ? [{ clientId: crypto.randomUUID(), request: freeBreadRequest(), label: 'Panes al Gratín (promo, gratis)', unitPrice: 0, quantity: 1 }]
+            ? [{ clientId: randomUUID(), request: freeBreadRequest(), label: 'Panes al Gratín (promo, gratis)', unitPrice: 0, quantity: 1 }]
             : [],
       },
     }),

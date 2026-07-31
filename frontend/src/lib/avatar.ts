@@ -1,11 +1,12 @@
 import type { Employee } from '@/types/api';
+import { randomUUID } from '@/lib/uuid';
 
 export function dicebearUrl(seed: string): string {
   return `https://api.dicebear.com/9.x/avataaars/svg?seed=${encodeURIComponent(seed)}`;
 }
 
 export function randomSeed(): string {
-  return crypto.randomUUID();
+  return randomUUID();
 }
 
 /**

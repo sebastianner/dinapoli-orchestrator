@@ -18,6 +18,7 @@ import { formatCOP } from '@/lib/format';
 import { useOrderStore } from '@/store/useOrderStore';
 import { useToastStore } from '@/store/useToastStore';
 import { DUO_EXCLUDED_FLAVORS, promoProgressText } from '@/lib/promos';
+import { randomUUID } from '@/lib/uuid';
 import type { PizzaSizeId } from '@/types/api';
 
 export const Route = createFileRoute('/menu/pizzas/$size')({
@@ -99,7 +100,7 @@ function PizzaFlavorPage() {
     });
 
     const item = {
-      clientId: crypto.randomUUID(),
+      clientId: randomUUID(),
       request: {
         type: 'pizza' as const,
         size: sizeId as PizzaSizeId,

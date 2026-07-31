@@ -28,9 +28,9 @@ export default defineConfig(({ mode }) => {
       host: true,
       port: Number(env.PORT ?? 5173),
       proxy: {
-        "/api": `http://localhost:${backendPort}`,
+        "/api": `http://127.0.0.1:${backendPort}`,
         "/ws": {
-          target: `ws://localhost:${backendPort}`,
+          target: `ws://127.0.0.1:${backendPort}`,
           ws: true,
         },
       },

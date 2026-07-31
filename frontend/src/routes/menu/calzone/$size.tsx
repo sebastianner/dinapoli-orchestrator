@@ -7,6 +7,7 @@ import { allPizzaFlavors, getPizzaCategory, getProductCategory, productUnitPrice
 import { formatCOP } from '@/lib/format';
 import { useOrderStore } from '@/store/useOrderStore';
 import { useToastStore } from '@/store/useToastStore';
+import { randomUUID } from '@/lib/uuid';
 
 export const Route = createFileRoute('/menu/calzone/$size')({
   component: CalzoneFlavorPage,
@@ -44,7 +45,7 @@ function CalzoneFlavorPage() {
     const flavorName = flavors.find((f) => f.id === flavorId)?.name ?? '';
 
     addCartItem({
-      clientId: crypto.randomUUID(),
+      clientId: randomUUID(),
       request: {
         type: 'product',
         category: 'calzones',
