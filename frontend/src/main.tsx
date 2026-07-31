@@ -9,8 +9,20 @@ import { routeTree } from './routeTree.gen';
 
 // The port isn't hardcoded (Vite bumps it if the default is taken) - this
 // makes it easy to check what to type on another device (phone, tablet) on
-// the same network instead of hunting through terminal output.
-console.log(`[Dinapoli] Running on port ${window.location.port || '80'} - connect other devices via http://<this-machine's-LAN-IP>:${window.location.port || '80'}`);
+// the same network instead of hunting through terminal output. The LAN IP
+// itself isn't knowable from the browser (no such API) - /api/lan-ip asks
+// the backend, which can see it via os.networkInterfaces().
+const port = window.location.port || '80';
+fetch('/api/lan-ip')
+  .then((r) => r.json())
+  .then(({ lanIp }: { lanIp: string | null }) => {
+    console.log(
+      lanIp
+        ? `[Dinapoli] Running on port ${port} - connect other devices via http://${lanIp}:${port}`
+        : `[Dinapoli] Running on port ${port} - couldn't detect this machine's LAN IP`,
+    );
+  })
+  .catch(() => console.log(`[Dinapoli] Running on port ${port}`));
 
 const router = createRouter({ routeTree });
 

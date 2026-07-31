@@ -37,7 +37,7 @@ export default defineConfig(({ mode }) => {
     },
     preview: {
       host: true,
-      allowedHosts: ["smrpc.local"]
+      allowedHosts: ["smrpc.local","dinapoli.local"]
     },
   };
 });

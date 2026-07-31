@@ -1,5 +1,6 @@
 import express, { type ErrorRequestHandler } from 'express';
 import cookieParser from 'cookie-parser';
+import os from 'node:os';
 import menuRouter from './routes/menu.js';
 import ordersRouter from './routes/orders.js';
 import tablesRouter from './routes/tables.js';
@@ -20,6 +21,15 @@ export function createApp() {
   app.use(cookieParser());
 
   app.get('/health', (req, res) => res.json({ status: 'ok' }));
+  // The browser can't see the machine's own LAN IP (main.tsx's startup log
+  // needs it to tell staff what to type on a phone) - os.networkInterfaces()
+  // only works server-side, hence this tiny endpoint instead of computing it
+  // client-side.
+  app.get('/api/lan-ip', (req, res) => {
+    const interfaces = Object.values(os.networkInterfaces()).flat();
+    const lanIp = interfaces.find((i) => i && i.family === 'IPv4' && !i.internal)?.address ?? null;
+    res.json({ lanIp });
+  });
   app.use('/api/auth', authRouter);
   app.use('/api/menu', menuRouter);
   app.use('/api/orders', ordersRouter);
