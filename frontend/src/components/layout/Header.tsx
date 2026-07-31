@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from '@tanstack/react-router';
 import { Moon, Sun } from 'lucide-react';
 import { useThemeStore } from '@/store/useThemeStore';
 import logo from '@/assets/dinapoli-logo.png';
@@ -23,10 +24,10 @@ export function Header() {
 
   return (
     <header className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border bg-surface px-3 sm:h-16 sm:px-6">
-      <div className="flex min-w-0 items-center gap-1.5 sm:gap-2.5">
+      <Link to="/tables" className="flex min-w-0 items-center gap-1.5 sm:gap-2.5">
         <img src={logo} alt="" className="h-6 w-6 shrink-0 rounded-full object-cover sm:h-9 sm:w-9" />
         <span className="truncate text-sm font-bold tracking-tight text-brand-600 sm:text-lg">Dinapoli Pizza</span>
-      </div>
+      </Link>
 
       <div className="flex shrink-0 items-center gap-2 sm:gap-6">
         <div className="text-right leading-tight">
