@@ -239,15 +239,15 @@ const upsertPrintJob = db.prepare<[number, PrintJobKind, string]>(
 // Delivery orders aren't given their own day-scoped sequence column
 // anywhere (orders.id is a single global AUTOINCREMENT, never reset) - so
 // the kitchen comanda's "delivery #N of the day" is derived here by
-// counting how many other delivery orders were created earlier the same
-// Bogota-local day. `-5 hours` mirrors the fixed-offset day-boundary
-// convention used elsewhere (see endOfDayService.ts, orderService.ts's
-// order-history filter) rather than a real timezone conversion, since
-// Colombia doesn't observe DST. `id < ?` (not `<=`) makes this 0-indexed,
-// per the request that the count reset to 0 each day.
+// counting how many delivery orders were created up to and including this
+// one, the same Bogota-local day. `-5 hours` mirrors the fixed-offset
+// day-boundary convention used elsewhere (see endOfDayService.ts,
+// orderService.ts's order-history filter) rather than a real timezone
+// conversion, since Colombia doesn't observe DST. `id <= ?` (not `<`) makes
+// this 1-indexed - the day's first delivery order is #1, not #0.
 const countEarlierDeliveryOrdersToday = db.prepare<[number, string], { count: number }>(
   `SELECT COUNT(*) AS count FROM orders
-   WHERE order_type = 'delivery' AND id < ? AND date(created_at, '-5 hours') = date(?, '-5 hours')`,
+   WHERE order_type = 'delivery' AND id <= ? AND date(created_at, '-5 hours') = date(?, '-5 hours')`,
 );
 
 function deliveryOrderNumberOfDay(order: Order): number {

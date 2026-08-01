@@ -9,9 +9,7 @@ import { useToastStore } from '@/store/useToastStore';
 import { useMediaQuery } from '@/lib/useMediaQuery';
 import { TableTile } from '@/components/table/TableTile';
 import { TablesFloorPlanView } from '@/components/table/TablesFloorPlanView';
-import { CustomerInfoModal } from '@/components/table/CustomerInfoModal';
-import type { CustomerDisplayInfo } from '@/store/useOrderStore';
-import type { Order, RestaurantTableSummary } from '@/types/api';
+import type { Order, OrderType, RestaurantTableSummary } from '@/types/api';
 
 export const Route = createFileRoute('/tables')({
   component: TablesPage,
@@ -20,9 +18,8 @@ export const Route = createFileRoute('/tables')({
 type TablesView = 'grid' | 'floorplan';
 const VIEW_STORAGE_KEY = 'dinapoli:tablesView';
 // Dragging a floor plan on a phone-sized screen isn't practical, so the
-// selector only shows - and the floor plan can only be picked - from tablet
-// width up (matches Tailwind's `md` breakpoint).
-const TABLET_UP_QUERY = '(min-width: 768px)';
+// selector only shows - and the floor plan can only be picked - from 534px up.
+const TABLET_UP_QUERY = '(min-width: 533px)';
 
 function initialView(): TablesView {
   return localStorage.getItem(VIEW_STORAGE_KEY) === 'floorplan' ? 'floorplan' : 'grid';
@@ -33,7 +30,6 @@ function TablesPage() {
   const activeOrders = useOrderStore((s) => s.activeOrders);
   const startDraft = useOrderStore((s) => s.startDraft);
   const openExistingOrder = useOrderStore((s) => s.openExistingOrder);
-  const setPendingDeliveryFee = useOrderStore((s) => s.setPendingDeliveryFee);
   const pushToast = useToastStore((s) => s.push);
   const navigate = useNavigate();
   const isTabletUp = useMediaQuery(TABLET_UP_QUERY);
@@ -41,8 +37,6 @@ function TablesPage() {
 
   const [view, setView] = useState<TablesView>(initialView);
   const effectiveView: TablesView = isTabletUp ? view : 'grid';
-
-  const [customerModalType, setCustomerModalType] = useState<'takeaway' | 'delivery' | null>(null);
 
   const changeView = (next: TablesView) => {
     setView(next);
@@ -72,19 +66,13 @@ function TablesPage() {
     navigate({ to: '/ajustes/table-assignments', search: { orderId: order.id } });
   };
 
-  const handleCustomerSubmit = (
-    customerId: number,
-    customerAddressId: number | undefined,
-    customerDisplay: CustomerDisplayInfo,
-    deliveryFee: number | null,
-  ) => {
-    if (!customerModalType) return;
-    startDraft({ orderType: customerModalType, customerId, customerAddressId, customerDisplay });
-    // startDraft resets pendingDeliveryFee to 0 - apply the neighborhood's fee (already known
-    // client-side, no extra DB round trip) right after, so the "Domicilio" field in the order
-    // overview starts pre-filled instead of making staff type it in every time.
-    if (deliveryFee != null) setPendingDeliveryFee(deliveryFee);
-    setCustomerModalType(null);
+  // Same as handleTableClick: straight to /menu without asking for customer
+  // details up front - the Order Overview panel's "Agregar cliente" (see
+  // CustomerInfoModal reuse there) is where that gets attached, and the
+  // server rejects submitting a delivery/takeaway order with none (see
+  // orderService.validateOrderRequest).
+  const handleQuickOrderStart = (orderType: Extract<OrderType, 'delivery' | 'takeaway'>) => {
+    startDraft({ orderType });
     navigate({ to: '/menu' });
   };
 
@@ -147,7 +135,7 @@ function TablesPage() {
           <div className="mb-20 flex flex-row gap-3 md:mb-0 md:w-48 md:shrink-0 md:flex-col md:gap-4 md:pt-2">
             <button
               type="button"
-              onClick={() => setCustomerModalType('delivery')}
+              onClick={() => handleQuickOrderStart('delivery')}
               className="flex flex-1 flex-col items-center gap-2 rounded-2xl border-2 border-border bg-surface py-4 text-text-primary shadow-sm transition-transform duration-fast hover:scale-105 hover:border-brand-400 active:scale-95 md:flex-none md:py-6"
             >
               <Bike size={28} className="text-brand-600" />
@@ -156,7 +144,7 @@ function TablesPage() {
 
             <button
               type="button"
-              onClick={() => setCustomerModalType('takeaway')}
+              onClick={() => handleQuickOrderStart('takeaway')}
               className="flex flex-1 flex-col items-center gap-2 rounded-2xl border-2 border-border bg-surface py-4 text-text-primary shadow-sm transition-transform duration-fast hover:scale-105 hover:border-brand-400 active:scale-95 md:flex-none md:py-6"
             >
               <ShoppingBag size={28} className="text-brand-600" />
@@ -170,17 +158,10 @@ function TablesPage() {
           activeOrders={activeOrders}
           onTableClick={handleTableClick}
           onEditTable={isAdmin ? handleEditTable : undefined}
-          onDeliveryClick={() => setCustomerModalType('delivery')}
-          onTakeawayClick={() => setCustomerModalType('takeaway')}
+          onDeliveryClick={() => handleQuickOrderStart('delivery')}
+          onTakeawayClick={() => handleQuickOrderStart('takeaway')}
         />
       )}
-
-      <CustomerInfoModal
-        open={customerModalType != null}
-        orderType={customerModalType ?? 'takeaway'}
-        onClose={() => setCustomerModalType(null)}
-        onSubmit={handleCustomerSubmit}
-      />
     </div>
   );
 }

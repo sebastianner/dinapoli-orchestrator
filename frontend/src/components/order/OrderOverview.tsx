@@ -117,6 +117,15 @@ export function OrderOverview() {
       pushToast('Primero elige una mesa, domicilio o para llevar', 'warning');
       return;
     }
+    // Server-enforced too (orderService.validateOrderRequest rejects it
+    // regardless), but checking here avoids a pointless round trip and gives
+    // a clearer message - dine_in never requires a customer up front, but
+    // delivery/takeaway do, since there's no table to fall back on to
+    // identify who the order is for.
+    if (newOrderInfo.orderType !== 'dine_in' && !newOrderInfo.customerId) {
+      pushToast('Agrega los datos del cliente antes de enviar la orden', 'warning');
+      return;
+    }
     // Shouldn't happen - __root.tsx blocks every route but /select-employee
     // until an employee is selected - but the type is no longer optional,
     // so this is the explicit guard that makes that guarantee checkable here.
@@ -165,7 +174,7 @@ export function OrderOverview() {
     }
   };
 
-  const handleCustomerSubmit = async (customerId: number, customerAddressId: number | undefined, display: CustomerDisplayInfo) => {
+  const handleCustomerSubmit = async (customerId: number, customerAddressId: number | undefined, display: CustomerDisplayInfo, deliveryFee: number | null) => {
     setCustomerModalOpen(false);
     if (existingOrder) {
       // Order already exists server-side - persist the attachment, not just the draft.
@@ -173,7 +182,7 @@ export function OrderOverview() {
         const updated = await updateOrderCustomer(existingOrder.id, customerId, customerAddressId);
         upsertActiveOrder(updated);
         await mutate(`/orders/${existingOrder.id}`, updated, { revalidate: false });
-        pushToast('Cliente asignado a la mesa');
+        pushToast('Cliente asignado');
       } catch (err) {
         pushToast(err instanceof Error ? err.message : 'No se pudo asignar el cliente', 'error');
       }
@@ -181,6 +190,9 @@ export function OrderOverview() {
     }
     // Not submitted yet - just update the draft, sent along with the order on Enviar orden.
     setDraftCustomer(customerId, customerAddressId, display);
+    // The neighborhood's fee (already known client-side, no extra DB round trip) - pre-fills
+    // the "Domicilio" field below instead of making staff type it in every time.
+    if (deliveryFee != null) setPendingDeliveryFee(deliveryFee);
   };
 
   const handlePaymentSuccess = (completedOrder: Order) => {
@@ -226,27 +238,23 @@ export function OrderOverview() {
         <h2 className="font-semibold text-text-primary">
           {existingOrder ? orderTitle(existingOrder.orderType, existingOrder.tableNumber) : orderTitle(newOrderInfo?.orderType, newOrderInfo?.tableNumber)}
         </h2>
-        {orderType === 'dine_in' ? (
-          customerName ? (
-            <button
-              type="button"
-              onClick={() => setCustomerModalOpen(true)}
-              className="mt-0.5 flex cursor-pointer items-center gap-1 text-xs text-text-secondary hover:text-brand-600"
-            >
-              {customerName}
-              <Pencil size={11} className="shrink-0" />
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setCustomerModalOpen(true)}
-              className="mt-0.5 flex cursor-pointer items-center gap-1 text-xs font-medium text-brand-600 hover:text-brand-700"
-            >
-              <UserPlus size={12} className="shrink-0" /> Agregar cliente
-            </button>
-          )
+        {customerName ? (
+          <button
+            type="button"
+            onClick={() => setCustomerModalOpen(true)}
+            className="mt-0.5 flex cursor-pointer items-center gap-1 text-xs text-text-secondary hover:text-brand-600"
+          >
+            {customerName}
+            <Pencil size={11} className="shrink-0" />
+          </button>
         ) : (
-          customerName && <p className="text-xs text-text-secondary">{customerName}</p>
+          <button
+            type="button"
+            onClick={() => setCustomerModalOpen(true)}
+            className="mt-0.5 flex cursor-pointer items-center gap-1 text-xs font-medium text-brand-600 hover:text-brand-700"
+          >
+            <UserPlus size={12} className="shrink-0" /> Agregar cliente
+          </button>
         )}
         </div>
         <button
@@ -427,8 +435,8 @@ export function OrderOverview() {
         <PaymentModal open={paymentOpen} order={existingOrder} onClose={() => setPaymentOpen(false)} onSuccess={handlePaymentSuccess} />
       )}
 
-      {orderType === 'dine_in' && (
-        <CustomerInfoModal open={customerModalOpen} orderType="dine_in" onClose={() => setCustomerModalOpen(false)} onSubmit={handleCustomerSubmit} />
+      {orderType && (
+        <CustomerInfoModal open={customerModalOpen} orderType={orderType} onClose={() => setCustomerModalOpen(false)} onSubmit={handleCustomerSubmit} />
       )}
       </aside>
     </>

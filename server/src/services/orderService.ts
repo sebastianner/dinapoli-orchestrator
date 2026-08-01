@@ -745,6 +745,8 @@ export interface ListOrdersFilter {
   /** 1-indexed. Both page and pageSize must be set together to paginate; omitting both returns every match (unchanged legacy behavior). */
   page?: number;
   pageSize?: number;
+  /** Omitted keeps the historical default (oldest first, by id) - existing callers (active-orders panel, closing-report chart) rely on that and don't pass this. */
+  sort?: 'newest' | 'oldest';
 }
 
 export interface ListOrdersResult {
@@ -755,7 +757,7 @@ export interface ListOrdersResult {
 
 const MAX_PAGE_SIZE = 200;
 
-export function listOrders({ status, date, orderType, page, pageSize }: ListOrdersFilter = {}): ListOrdersResult {
+export function listOrders({ status, date, orderType, page, pageSize, sort }: ListOrdersFilter = {}): ListOrdersResult {
   if (date != null && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     throw new ValidationError("date debe tener el formato 'YYYY-MM-DD'");
   }
@@ -767,6 +769,9 @@ export function listOrders({ status, date, orderType, page, pageSize }: ListOrde
   }
   if (pageSize != null && (!isPositiveInt(pageSize) || pageSize > MAX_PAGE_SIZE)) {
     throw new ValidationError(`pageSize debe ser un número entero positivo de hasta ${MAX_PAGE_SIZE}`);
+  }
+  if (sort != null && sort !== 'newest' && sort !== 'oldest') {
+    throw new ValidationError("sort debe ser 'newest' u 'oldest'");
   }
 
   const conditions: string[] = [];
@@ -787,7 +792,7 @@ export function listOrders({ status, date, orderType, page, pageSize }: ListOrde
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const total = db.prepare<string[], { count: number }>(`SELECT COUNT(*) as count FROM orders ${where}`).get(...params)!.count;
 
-  let query = `SELECT id FROM orders ${where} ORDER BY id`;
+  let query = `SELECT id FROM orders ${where} ORDER BY id ${sort === 'newest' ? 'DESC' : 'ASC'}`;
   const queryParams = [...params];
   if (page != null && pageSize != null) {
     query += ' LIMIT ? OFFSET ?';
@@ -1064,6 +1069,40 @@ export async function completeOrder(id: number, { payments }: { payments?: unkno
   if (order.orderType === 'dine_in') {
     refreshTableStatus(order.tableNumber as number);
   }
+
+  return getOrderById(id);
+}
+
+const deleteOrderPayments = db.prepare<[number]>('DELETE FROM order_payments WHERE order_id = ?');
+
+/**
+ * Corrects the payment split on an already-COMPLETED order (e.g. staff typed
+ * "card" but it was actually split cash+card) - same validation as
+ * completing one in the first place (resolvePayments: grossAmount must sum to
+ * exactly order.total + declared tip + delivery fee, same per-split bounds),
+ * so a corrected split can't under- or over-cover the order any more than the
+ * original one could. Not available on an open (non-COMPLETED) order - that's
+ * what "Cobrar orden" (completeOrder above) is for.
+ *
+ * The client sends the full desired set of splits each time, not a diff -
+ * existing rows are replaced wholesale in one transaction, which is how
+ * splits end up added, removed, or modified from the caller's point of view.
+ */
+export function updateOrderPayments(id: number, payments: unknown): Order {
+  const order = getOrderById(id);
+  if (order.status !== 'COMPLETED') {
+    throw new ConflictError(`la orden ${id} debe estar COMPLETED para corregir sus pagos (está ${order.status}) - usa completeOrder para cobrarla primero`);
+  }
+
+  const resolvedPayments = resolvePayments(payments, order);
+
+  db.transaction(() => {
+    deleteOrderPayments.run(id);
+    for (const p of resolvedPayments) {
+      insertOrderPayment.run(id, p.method, p.grossAmount, p.tipAmount, p.deliveryFee, p.netAmount, p.discount);
+    }
+  })();
+  broadcastOrderUpdate(id);
 
   return getOrderById(id);
 }

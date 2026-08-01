@@ -1,5 +1,5 @@
 import classNames from 'classnames';
-import { Pencil } from 'lucide-react';
+import { Check, Pencil } from 'lucide-react';
 import type { Employee } from '@/types/api';
 import { avatarSrc } from '@/lib/avatar';
 import { useAvatarOverrideStore } from '@/store/useAvatarOverrideStore';
@@ -8,9 +8,11 @@ interface EmployeeCardProps {
   employee: Employee;
   onSelect: () => void;
   onEdit: () => void;
+  /** True for the employee currently signed in on this device - shown with a ring + badge instead of leaving no visible sign of who's already active. */
+  isCurrent?: boolean;
 }
 
-export function EmployeeCard({ employee, onSelect, onEdit }: EmployeeCardProps) {
+export function EmployeeCard({ employee, onSelect, onEdit, isCurrent }: EmployeeCardProps) {
   const overrideSeed = useAvatarOverrideStore((s) => s.overrides[employee.id]);
 
   return (
@@ -22,7 +24,21 @@ export function EmployeeCard({ employee, onSelect, onEdit }: EmployeeCardProps) 
           </span>
         )}
 
-        <div className="relative h-24 w-24 overflow-hidden rounded-full border-2 border-border bg-surface-raised">
+        {isCurrent && (
+          <span
+            title="Sesión actual"
+            className="absolute -bottom-1 -right-1 z-10 flex h-6 w-6 items-center justify-center rounded-full border-2 border-surface bg-success text-white shadow-sm"
+          >
+            <Check size={12} strokeWidth={3} />
+          </span>
+        )}
+
+        <div
+          className={classNames(
+            'relative h-24 w-24 overflow-hidden rounded-full border-2 bg-surface-raised',
+            isCurrent ? 'border-success ring-2 ring-success/30' : 'border-border',
+          )}
+        >
           <img src={avatarSrc(employee, overrideSeed)} alt={employee.name} className="h-full w-full" />
 
           {/* Mobile (below sm): tap the avatar to sign in directly - no hover
@@ -60,6 +76,7 @@ export function EmployeeCard({ employee, onSelect, onEdit }: EmployeeCardProps) 
       </div>
 
       <span className="max-w-full truncate text-sm font-medium text-text-primary">{employee.name}</span>
+      {isCurrent && <span className="text-xs font-medium text-success">Sesión actual</span>}
     </div>
   );
 }

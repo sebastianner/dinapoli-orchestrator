@@ -8,6 +8,7 @@ import {
   deleteOrder,
   updateOrderTable,
   updateOrderCustomer,
+  updateOrderPayments,
 } from '../services/orderService.js';
 import { notifyPrintQueue } from '../services/queueService.js';
 import { ValidationError } from '../utils/errors.js';
@@ -29,9 +30,10 @@ router.get('/', (req, res) => {
   const orderType = typeof req.query.orderType === 'string' ? req.query.orderType : undefined;
   const page = typeof req.query.page === 'string' ? Number(req.query.page) : undefined;
   const pageSize = typeof req.query.pageSize === 'string' ? Number(req.query.pageSize) : undefined;
+  const sort = req.query.sort === 'newest' || req.query.sort === 'oldest' ? req.query.sort : undefined;
   // page/pageSize are opt-in - omit both to get every match in one shot (unchanged
   // for existing callers like the active-orders panel and the closing-report chart).
-  const { orders, total } = listOrders({ status, date, orderType, page, pageSize });
+  const { orders, total } = listOrders({ status, date, orderType, page, pageSize, sort });
   res.set('X-Total-Count', String(total));
   res.json(orders);
 });
@@ -77,6 +79,18 @@ router.put('/:id/table', requireAuth, requireAdmin, (req, res, next) => {
 router.put('/:id/customer', requireAuth, (req, res, next) => {
   try {
     const order = updateOrderCustomer(parseOrderId(req.params.id), req.body?.customerId, req.body?.customerAddressId);
+    res.json(order);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Public, no auth - same "correcting a mistake after the fact" reasoning as
+// PUT /:id/table, but for an already-COMPLETED order's payment records
+// specifically, which also feed end-of-day reporting.
+router.put('/:id/payments', (req, res, next) => {
+  try {
+    const order = updateOrderPayments(parseOrderId(req.params.id), req.body?.payments);
     res.json(order);
   } catch (err) {
     next(err);

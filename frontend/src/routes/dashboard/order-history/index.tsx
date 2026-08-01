@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
+import { ArrowDownNarrowWide, ArrowUpNarrowWide, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
 import {
   useCurrentCashFlow,
   useOrdersByFilter,
@@ -42,6 +42,7 @@ function OrderHistoryPage() {
 function OrderHistoryContent({ today }: { today: string }) {
   const [selectedDate, setSelectedDate] = useState(today);
   const [category, setCategory] = useState<OrderType | "all">("all");
+  const [sort, setSort] = useState<"newest" | "oldest">("newest");
   const [generating, setGenerating] = useState(false);
   const [page, setPage] = useState(1);
   const [removeMode, setRemoveMode] = useState(false);
@@ -50,6 +51,7 @@ function OrderHistoryContent({ today }: { today: string }) {
   const filter = {
     date: selectedDate,
     orderType: category === "all" ? undefined : category,
+    sort,
   };
   const {
     data: ordersPage,
@@ -60,10 +62,10 @@ function OrderHistoryContent({ today }: { today: string }) {
   const total = ordersPage?.total ?? 0;
   const totalPages = Math.max(Math.ceil(total / PAGE_SIZE), 1);
 
-  // Changing the date or category invalidates whatever page we were on.
+  // Changing the date, category, or sort order invalidates whatever page we were on.
   useEffect(() => {
     setPage(1);
-  }, [selectedDate, category]);
+  }, [selectedDate, category, sort]);
 
   // Unfiltered, just to gate "Generar cierre del día" - the category filter above
   // shouldn't make the button disappear/disable just because e.g. "Domicilio" is
@@ -175,7 +177,7 @@ function OrderHistoryContent({ today }: { today: string }) {
               <h2 className="font-semibold capitalize text-text-primary">
                 {formatDateLong(selectedDate)}
               </h2>
-              <div className="mt-1 flex flex-wrap gap-1">
+              <div className="mt-1 flex flex-wrap items-center gap-1">
                 {categories.map((c) => (
                   <button
                     key={c.value}
@@ -191,6 +193,16 @@ function OrderHistoryContent({ today }: { today: string }) {
                     {c.label}
                   </button>
                 ))}
+
+                <button
+                  type="button"
+                  onClick={() => setSort((s) => (s === "newest" ? "oldest" : "newest"))}
+                  title={sort === "newest" ? "Más recientes primero" : "Más antiguas primero"}
+                  className="ml-1 flex items-center gap-1 rounded-full bg-brand-500/10 px-3 py-1 text-xs font-medium text-text-secondary transition-colors duration-fast hover:text-brand-600"
+                >
+                  {sort === "newest" ? <ArrowDownNarrowWide size={13} /> : <ArrowUpNarrowWide size={13} />}
+                  {sort === "newest" ? "Más recientes" : "Más antiguas"}
+                </button>
               </div>
             </div>
 

@@ -97,6 +97,11 @@ export interface ProductSearchResult extends Product {
   categoryId: ProductCategoryId;
 }
 
+/** A PizzaFlavor plus which group(s) (classic/special) it belongs to - menuService.searchPizzaFlavors results span both groups, unlike PizzaGroup.flavors which are already scoped to one. */
+export interface PizzaFlavorSearchResult extends PizzaFlavor {
+  groupIds: PizzaGroupId[];
+}
+
 export interface DrinkFlavor {
   id: string;
   name: string;

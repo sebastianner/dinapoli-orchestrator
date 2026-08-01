@@ -18,6 +18,7 @@ const TABLES = [
   "orders",
   "customers_fts",
   "products_fts",
+  "pizza_flavors_fts",
   "customer_addresses",
   "customers",
   "neighborhoods",
@@ -142,6 +143,7 @@ function migrate(): void {
   db.exec("DROP TABLE IF EXISTS order_settlement");
   seedDefaultPromoSettings();
   backfillProductsFts();
+  backfillPizzaFlavorsFts();
   widenTableNumberBounds();
   migrateProductOptionsToDrinkFlavors();
 }
@@ -330,6 +332,17 @@ function backfillProductsFts(): void {
   if (indexed > 0) return;
   db.exec(
     `INSERT INTO products_fts (rowid, name, description) SELECT id, name, description FROM products;`,
+  );
+}
+
+/** Same one-time backfill as backfillProductsFts above, for pizza_flavors_fts. */
+function backfillPizzaFlavorsFts(): void {
+  const { indexed } = db
+    .prepare("SELECT COUNT(*) AS indexed FROM pizza_flavors_fts_docsize")
+    .get() as { indexed: number };
+  if (indexed > 0) return;
+  db.exec(
+    `INSERT INTO pizza_flavors_fts (rowid, name, description) SELECT id, name, description FROM pizza_flavors;`,
   );
 }
 

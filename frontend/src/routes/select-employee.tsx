@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { createFileRoute, useNavigate } from '@tanstack/react-router';
+import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router';
 import classNames from 'classnames';
 import { Plus } from 'lucide-react';
 import { useActiveEmployees, useInactiveEmployees } from '@/lib/queries';
@@ -13,6 +13,17 @@ import { useToastStore } from '@/store/useToastStore';
 import type { Employee } from '@/types/api';
 
 export const Route = createFileRoute('/select-employee')({
+  beforeLoad: () => {
+    // consumeSwitchIntent reads-and-resets a flag the Sidebar's "switch
+    // employee" link sets right before navigating here (see Sidebar.tsx) -
+    // true only for that deliberate action, false for just landing/reloading
+    // on this URL while already logged in (e.g. a bookmark), which should
+    // skip straight to /tables instead of re-showing the picker.
+    const isDeliberateSwitch = useSessionStore.getState().consumeSwitchIntent();
+    if (!isDeliberateSwitch && useSessionStore.getState().employee != null) {
+      throw redirect({ to: '/tables' });
+    }
+  },
   component: SelectEmployeePage,
 });
 
@@ -63,6 +74,13 @@ function SelectEmployeePage() {
 
   const handleSelect = async (employee: Employee) => {
     if (leaving) return; // already mid-transition to another selection
+    // Picking whoever's already signed in on this device (see the "Sesión
+    // actual" badge on their card) - no need to re-authenticate, admin or
+    // not, since the session is already theirs. Straight back to /tables.
+    if (employee.id === sessionEmployee?.id) {
+      navigate({ to: '/tables' });
+      return;
+    }
     // Admins authenticate with a password; staff log in by picking their
     // name alone (see authService.login).
     if (employee.role === 'admin') {
@@ -117,6 +135,7 @@ function SelectEmployeePage() {
           onSelect={handleSelect}
           onEdit={(employee) => setEmployeeModal({ mode: 'edit', employee })}
           onCreate={alreadyLoggedIn && isAdmin ? () => setEmployeeModal({ mode: 'create' }) : undefined}
+          currentEmployeeId={sessionEmployee?.id}
         />
       ) : (
         <InactiveTab employees={inactiveEmployees} loading={loadingInactive} />
@@ -139,9 +158,11 @@ interface ActiveTabProps {
   onEdit: (employee: Employee) => void;
   /** Admin-only, switching-context-only (see SelectEmployeePage) - absent hides the tile entirely. */
   onCreate?: () => void;
+  /** The employee currently signed in on this device, if any - highlighted in the grid (see EmployeeCard.isCurrent). */
+  currentEmployeeId?: number;
 }
 
-function ActiveTab({ employees, loading, onSelect, onEdit, onCreate }: ActiveTabProps) {
+function ActiveTab({ employees, loading, onSelect, onEdit, onCreate, currentEmployeeId }: ActiveTabProps) {
   if (loading) return <p className="text-sm text-text-secondary">Cargando empleados...</p>;
 
   if (employees.length === 0 && !onCreate) {
@@ -153,7 +174,13 @@ function ActiveTab({ employees, loading, onSelect, onEdit, onCreate }: ActiveTab
   return (
     <div className="grid grid-cols-2 gap-4 justify-items-center sm:flex sm:flex-row sm:flex-wrap sm:justify-normal sm:gap-6">
       {employees.map((employee) => (
-        <EmployeeCard key={employee.id} employee={employee} onSelect={() => onSelect(employee)} onEdit={() => onEdit(employee)} />
+        <EmployeeCard
+          key={employee.id}
+          employee={employee}
+          onSelect={() => onSelect(employee)}
+          onEdit={() => onEdit(employee)}
+          isCurrent={employee.id === currentEmployeeId}
+        />
       ))}
 
       {onCreate && (

@@ -15,6 +15,7 @@ import type {
   Product,
   AdminProduct,
   ProductSearchResult,
+  PizzaFlavorSearchResult,
   ProductSize,
   DrinkFlavor,
   AdminDrinkFlavor,
@@ -195,6 +196,53 @@ export function searchProducts(query: unknown): ProductSearchResult[] {
   const trigramQuery = buildTrigramMatchQuery(query);
   const rows = trigramQuery ? searchProductsByTrigram.all(trigramQuery) : searchProductsByPrefix.all(`${query.trim()}%`, `${query.trim()}%`);
   return rows.map((row) => ({ ...rowToProduct(row), categoryId: row.category_key as ProductCategoryId }));
+}
+
+interface PizzaFlavorSearchRow {
+  /** Numeric PK - needed for the group-membership lookup below, not part of the response shape itself (that's `id`, the string key). */
+  flavor_id: number;
+  id: string;
+  name: string;
+  description: string | null;
+  is_available: 0 | 1;
+}
+
+const searchPizzaFlavorsByTrigram = db.prepare<[string], PizzaFlavorSearchRow>(
+  `SELECT f.id AS flavor_id, f.key AS id, f.name, f.description, f.is_available
+   FROM pizza_flavors_fts pf
+   JOIN pizza_flavors f ON f.id = pf.rowid
+   WHERE pizza_flavors_fts MATCH ?
+   ORDER BY rank
+   LIMIT ${SEARCH_RESULT_LIMIT}`
+);
+const searchPizzaFlavorsByPrefix = db.prepare<[string, string], PizzaFlavorSearchRow>(
+  `SELECT id AS flavor_id, key AS id, name, description, is_available
+   FROM pizza_flavors
+   WHERE name LIKE ? OR description LIKE ?
+   ORDER BY name
+   LIMIT ${SEARCH_RESULT_LIMIT}`
+);
+
+/**
+ * Fuzzy/typo-tolerant pizza flavor search for the pizza size picker's search
+ * bar - same trigram approach as searchProducts above. Results span both
+ * pizza_groups (classic/special) rather than being scoped to one, so each
+ * result carries groupIds telling the caller which group(s) it belongs to
+ * (see getFlavorGroupKeys, shared with the admin pizza flavor endpoints).
+ */
+export function searchPizzaFlavors(query: unknown): PizzaFlavorSearchResult[] {
+  if (typeof query !== 'string' || query.trim() === '') return [];
+  const trigramQuery = buildTrigramMatchQuery(query);
+  const rows = trigramQuery
+    ? searchPizzaFlavorsByTrigram.all(trigramQuery)
+    : searchPizzaFlavorsByPrefix.all(`${query.trim()}%`, `${query.trim()}%`);
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    description: row.description ?? '',
+    isAvailable: row.is_available === 1,
+    groupIds: getFlavorGroupKeys.all(row.flavor_id).map((g) => g.key),
+  }));
 }
 
 // ---------------------------------------------------------------------------

@@ -86,6 +86,11 @@ export interface ProductSearchResult extends Product {
   categoryId: ProductCategoryId;
 }
 
+/** A PizzaFlavor plus which group(s) (classic/special) it belongs to - /menu/flavors/search results span both groups, unlike PizzaGroup.flavors which are already scoped to one. */
+export interface PizzaFlavorSearchResult extends PizzaFlavor {
+  groupIds: PizzaGroupId[];
+}
+
 /** The full row behind a menu Product, for /ajustes/menu-settings - unlike Product (only ever the currently-available subset), this carries the numeric id updates/deletes target and isAvailable regardless of value. */
 export interface AdminProduct {
   id: number;

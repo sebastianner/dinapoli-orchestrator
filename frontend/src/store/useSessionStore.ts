@@ -27,6 +27,17 @@ interface SessionState {
   justSelected: boolean;
   markJustSelected: () => void;
   consumeJustSelected: () => boolean;
+  /**
+   * Same read-and-reset pattern as justSelected above, but for the opposite
+   * direction: set right before navigating to /select-employee via the
+   * Sidebar's deliberate "switch employee" link (avatar or nav item), so its
+   * beforeLoad (select-employee.tsx) can tell that apart from just landing/
+   * reloading on the URL while already logged in (e.g. a bookmark) - which
+   * should skip straight to /tables instead of re-showing the picker.
+   */
+  switchIntent: boolean;
+  markSwitchIntent: () => void;
+  consumeSwitchIntent: () => boolean;
 }
 
 // The stored employee is only a paint cache to avoid a flash of "logged out"
@@ -45,6 +56,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   consumeJustSelected: () => {
     const value = get().justSelected;
     if (value) set({ justSelected: false });
+    return value;
+  },
+  switchIntent: false,
+  markSwitchIntent: () => set({ switchIntent: true }),
+  consumeSwitchIntent: () => {
+    const value = get().switchIntent;
+    if (value) set({ switchIntent: false });
     return value;
   },
 }));

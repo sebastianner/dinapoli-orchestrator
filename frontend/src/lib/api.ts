@@ -27,6 +27,7 @@ import type {
   PromoType,
   PropertyType,
   ProductSearchResult,
+  PizzaFlavorSearchResult,
   AdminProduct,
   AdminDrinkFlavor,
   RestaurantTableSummary,
@@ -118,6 +119,8 @@ const del = <T>(path: string) => request<T>(path, { method: 'DELETE' });
 export const fetchMenu = () => get<Menu>('/menu');
 
 export const searchProducts = (query: string) => get<ProductSearchResult[]>(`/menu/search?q=${encodeURIComponent(query)}`);
+
+export const searchPizzaFlavors = (query: string) => get<PizzaFlavorSearchResult[]>(`/menu/flavors/search?q=${encodeURIComponent(query)}`);
 
 // ---------- Menu settings (admin) ----------
 
@@ -251,6 +254,8 @@ export interface FetchOrdersFilter {
   /** YYYY-MM-DD, Bogotá business day. */
   date?: string;
   orderType?: OrderType;
+  /** Omitted keeps the backend's historical default (oldest first, by id). */
+  sort?: 'newest' | 'oldest';
 }
 
 export const fetchOrders = (filter: FetchOrdersFilter = {}) => {
@@ -258,6 +263,7 @@ export const fetchOrders = (filter: FetchOrdersFilter = {}) => {
   if (filter.status) params.set('status', filter.status);
   if (filter.date) params.set('date', filter.date);
   if (filter.orderType) params.set('orderType', filter.orderType);
+  if (filter.sort) params.set('sort', filter.sort);
   const query = params.toString();
   return get<Order[]>(`/orders${query ? `?${query}` : ''}`);
 };
@@ -274,6 +280,7 @@ export const fetchOrdersPage = async (filter: FetchOrdersFilter, page: number, p
   if (filter.status) params.set('status', filter.status);
   if (filter.date) params.set('date', filter.date);
   if (filter.orderType) params.set('orderType', filter.orderType);
+  if (filter.sort) params.set('sort', filter.sort);
   params.set('page', String(page));
   params.set('pageSize', String(pageSize));
   const { res, body } = await fetchJson(`/orders?${params.toString()}`);
@@ -283,6 +290,8 @@ export const fetchOrdersPage = async (filter: FetchOrdersFilter, page: number, p
 export const fetchOrder = (id: number) => get<Order>(`/orders/${id}`);
 export const addOrderItems = (id: number, items: unknown[]) => post<Order>(`/orders/${id}/items`, { items });
 export const completeOrder = (id: number, payments?: PaymentSplitRequest[]) => post<Order>(`/orders/${id}/complete`, { payments });
+/** Public, no auth required. Replaces a COMPLETED order's payment split wholesale - same total-coverage validation as completeOrder, just correcting the record after the fact instead of setting it for the first time. */
+export const updateOrderPayments = (id: number, payments: PaymentSplitRequest[]) => put<Order>(`/orders/${id}/payments`, { payments });
 export const reprintOrderDocument = (id: number, kind: 'kitchen_ticket' | 'bill') =>
   post<{ status: string; orderId: number; kind: string }>(`/orders/${id}/reprint`, { kind });
 /** Admin only, irreversible - deletes the order and everything derived from it (items, payments, print jobs). */

@@ -231,6 +231,30 @@ CREATE TABLE IF NOT EXISTS pizza_group_flavors (
   PRIMARY KEY (group_id, flavor_id)
 );
 
+-- Same external-content trigram FTS5 setup as products_fts above, over
+-- pizza_flavors.name/description - powers menuService.searchPizzaFlavors
+-- (the pizza size picker's "buscar sabor" bar).
+CREATE VIRTUAL TABLE IF NOT EXISTS pizza_flavors_fts USING fts5(
+  name,
+  description,
+  content='pizza_flavors',
+  content_rowid='id',
+  tokenize='trigram'
+);
+
+CREATE TRIGGER IF NOT EXISTS pizza_flavors_fts_insert AFTER INSERT ON pizza_flavors BEGIN
+  INSERT INTO pizza_flavors_fts (rowid, name, description) VALUES (new.id, new.name, new.description);
+END;
+
+CREATE TRIGGER IF NOT EXISTS pizza_flavors_fts_delete AFTER DELETE ON pizza_flavors BEGIN
+  INSERT INTO pizza_flavors_fts (pizza_flavors_fts, rowid, name, description) VALUES ('delete', old.id, old.name, old.description);
+END;
+
+CREATE TRIGGER IF NOT EXISTS pizza_flavors_fts_update AFTER UPDATE ON pizza_flavors BEGIN
+  INSERT INTO pizza_flavors_fts (pizza_flavors_fts, rowid, name, description) VALUES ('delete', old.id, old.name, old.description);
+  INSERT INTO pizza_flavors_fts (rowid, name, description) VALUES (new.id, new.name, new.description);
+END;
+
 CREATE TABLE IF NOT EXISTS orders (
   id                  INTEGER PRIMARY KEY AUTOINCREMENT,
   order_type          TEXT NOT NULL CHECK (order_type IN ('dine_in', 'takeaway', 'delivery')),

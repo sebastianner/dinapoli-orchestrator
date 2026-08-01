@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import classNames from 'classnames';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { MessageSquarePlus, Plus } from 'lucide-react';
-import { useMenu, usePromoSettings } from '@/lib/queries';
+import { MessageSquarePlus, Plus, Search } from 'lucide-react';
+import { useMenu, usePizzaFlavorSearch, usePromoSettings } from '@/lib/queries';
+import { useDebouncedValue } from '@/lib/useDebouncedValue';
 import {
   allPizzaFlavors,
   computeFlavorPortions,
@@ -46,12 +47,20 @@ function PizzaFlavorPage() {
   const [halfFlavorId, setHalfFlavorId] = useState<string | null>(null);
   const [showComment, setShowComment] = useState(false);
   const [notes, setNotes] = useState('');
+  const [flavorQuery, setFlavorQuery] = useState('');
+  const debouncedFlavorQuery = useDebouncedValue(flavorQuery, 250);
+  const isSearchingFlavors = debouncedFlavorQuery.trim() !== '';
 
   const addCartItem = useOrderStore((s) => s.addCartItem);
   const promoDraft = useOrderStore((s) => s.promoDraft);
   const addPromoItem = useOrderStore((s) => s.addPromoItem);
   const pushToast = useToastStore((s) => s.push);
   const { data: promoSettings = [] } = usePromoSettings();
+  const { data: flavorSearchResults = [], isLoading: isFlavorSearchLoading } = usePizzaFlavorSearch(debouncedFlavorQuery);
+  // Search results identify a match by flavor id alone - groups/sizes/promo
+  // exclusions/availability all still come from the already-loaded menu (see
+  // `flavors`/`pizzas.groups` below), this just narrows which tiles show.
+  const matchedFlavorIds = useMemo(() => new Set(flavorSearchResults.map((f) => f.id)), [flavorSearchResults]);
 
   if (isLoading || !menu) return <p className="text-sm text-text-secondary">Cargando...</p>;
 
@@ -139,12 +148,33 @@ function PizzaFlavorPage() {
         Seleccionados: {selectedFlavors.length}/{maxFlavors}
       </p>
 
+      <div className="relative mb-4 max-w-md">
+        <span className="pointer-events-none absolute left-3 flex items-center text-text-secondary" style={{ top: 0, bottom: 0 }}>
+          <Search size={17} />
+        </span>
+        <input
+          type="text"
+          value={flavorQuery}
+          onChange={(e) => setFlavorQuery(e.target.value)}
+          placeholder="Buscar sabor..."
+          className="w-full rounded-xl border border-border bg-surface py-2.5 pl-10 pr-3 text-sm text-text-primary outline-none focus:border-brand-400"
+        />
+      </div>
+
+      {isSearchingFlavors && isFlavorSearchLoading ? (
+        <p className="text-sm text-text-secondary">Buscando...</p>
+      ) : isSearchingFlavors && matchedFlavorIds.size === 0 ? (
+        <p className="text-sm text-text-secondary">Ningún sabor coincide con "{debouncedFlavorQuery.trim()}".</p>
+      ) : (
       <div className="flex flex-col gap-6">
-        {pizzas.groups.map((group) => (
+        {pizzas.groups.map((group) => {
+          const visibleFlavors = isSearchingFlavors ? group.flavors.filter((f) => matchedFlavorIds.has(f.id)) : group.flavors;
+          if (visibleFlavors.length === 0) return null;
+          return (
           <div key={group.id}>
             <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-text-secondary">{group.name}</h2>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-              {group.flavors.map((flavor) => {
+              {visibleFlavors.map((flavor) => {
                 const isSelected = selectedFlavors.includes(flavor.id);
                 const portion = portions.find((p) => p.flavor === flavor.id)?.portion;
                 const isExcluded = isDuoPromo && DUO_EXCLUDED_FLAVORS.has(flavor.id);
@@ -182,8 +212,10 @@ function PizzaFlavorPage() {
               })}
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
+      )}
 
       {availablePatterns.length > 1 && (
         <div className="mt-4">

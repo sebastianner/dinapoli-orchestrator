@@ -30,6 +30,7 @@ import {
   fetchTables,
   searchCustomers,
   searchProducts,
+  searchPizzaFlavors,
   suggestBuildingNames,
   type FetchOrdersFilter,
 } from '@/lib/api';
@@ -47,6 +48,12 @@ export function useMenu() {
 export function useProductSearch(query: string) {
   const trimmed = query.trim();
   return useSWR(trimmed.length > 0 ? `/menu/search?q=${trimmed}` : null, () => searchProducts(trimmed));
+}
+
+/** Fuzzy/typo-tolerant pizza flavor search spanning both classic/special groups (see the pizza size picker). Caller is expected to debounce `query` itself, same as useProductSearch. */
+export function usePizzaFlavorSearch(query: string) {
+  const trimmed = query.trim();
+  return useSWR(trimmed.length > 0 ? `/menu/flavors/search?q=${trimmed}` : null, () => searchPizzaFlavors(trimmed));
 }
 
 /** Admin only (see routes/products.ts) - every product regardless of availability, for /ajustes/menu-settings. */

@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
+import { mutate } from 'swr';
 import classNames from 'classnames';
-import { Printer, Receipt, CreditCard } from 'lucide-react';
+import { Printer, Receipt, CreditCard, Pencil } from 'lucide-react';
 import { useMenu, useOrder } from '@/lib/queries';
 import { reprintOrderDocument } from '@/lib/api';
 import { groupOrderItems } from '@/lib/pricing';
@@ -8,6 +10,7 @@ import { formatCOP } from '@/lib/format';
 import { formatDateTime, formatTime } from '@/lib/date';
 import { useOrderStore } from '@/store/useOrderStore';
 import { useToastStore } from '@/store/useToastStore';
+import { EditPaymentsModal } from '@/components/order/EditPaymentsModal';
 import type { Order, OrderStatus, PaymentMethod } from '@/types/api';
 
 export const Route = createFileRoute('/dashboard/order-history/$id')({
@@ -57,14 +60,14 @@ function StatusTimeline({ order }: { order: Order }) {
     <div className="rounded-2xl border border-border bg-surface p-4 sm:p-5">
       <div className="flex">
         {STEPS.map((step, i) => (
-          <div key={step.status} className="relative flex flex-1 flex-col items-center gap-1">
+          <div key={step.status} className="relative flex min-w-0 flex-1 flex-col items-center gap-1">
             {i > 0 && (
               <div
                 className={classNames('absolute top-[7px] h-[2px]', i <= currentIndex ? 'bg-success' : 'bg-border')}
                 style={{ width: 'calc(100% - 14px)', right: 'calc(50% + 7px)' }}
               />
             )}
-            <div className="relative z-10 flex h-[14px] w-[14px] items-center justify-center">
+            <div className="relative z-10 flex h-[14px] w-[14px] shrink-0 items-center justify-center">
               {step.status === 'ACTIVE' && order.status === 'ACTIVE' && (
                 <>
                   <span className="anim-pulse-ring absolute h-full w-full rounded-full bg-success" />
@@ -78,8 +81,15 @@ function StatusTimeline({ order }: { order: Order }) {
                 )}
               />
             </div>
-            <span className={classNames('text-sm font-medium', i <= currentIndex ? 'text-text-primary' : 'text-text-secondary')}>{step.label}</span>
-            <span className="h-4 text-xs text-text-secondary">
+            <span
+              className={classNames(
+                'w-full text-center text-[11px] font-medium leading-tight sm:text-sm',
+                i <= currentIndex ? 'text-text-primary' : 'text-text-secondary',
+              )}
+            >
+              {step.label}
+            </span>
+            <span className="h-4 text-[10px] text-text-secondary sm:text-xs">
               {i === 0 && formatTime(order.createdAt)}
               {i === STEPS.length - 1 && order.completedAt && formatTime(order.completedAt)}
             </span>
@@ -98,6 +108,13 @@ function OrderDetailPage() {
   const pushToast = useToastStore((s) => s.push);
   const openExistingOrder = useOrderStore((s) => s.openExistingOrder);
   const navigate = useNavigate();
+  const [editPaymentsOpen, setEditPaymentsOpen] = useState(false);
+
+  const handlePaymentsUpdated = (updatedOrder: Order) => {
+    setEditPaymentsOpen(false);
+    mutate(`/orders/${orderId}`, updatedOrder, { revalidate: false });
+    pushToast('Pagos actualizados');
+  };
 
   const handleReprint = async (kind: 'kitchen_ticket' | 'bill') => {
     try {
@@ -204,7 +221,18 @@ function OrderDetailPage() {
           </div>
 
           <div className="rounded-2xl border border-border bg-surface p-4 sm:p-5">
-            <div className="mb-2 font-semibold text-text-primary">Pagos</div>
+            <div className="mb-2 flex items-center justify-between">
+              <span className="font-semibold text-text-primary">Pagos</span>
+              {order.status === 'COMPLETED' && (
+                <button
+                  type="button"
+                  onClick={() => setEditPaymentsOpen(true)}
+                  className="flex items-center gap-1 text-sm font-medium text-brand-600 hover:text-brand-700"
+                >
+                  <Pencil size={13} /> Editar
+                </button>
+              )}
+            </div>
             {order.payments.length === 0 ? (
               <p className="text-sm text-text-secondary">Sin pagos registrados todavía.</p>
             ) : (
@@ -218,6 +246,10 @@ function OrderDetailPage() {
           </div>
         </div>
       </div>
+
+      {order.status === 'COMPLETED' && (
+        <EditPaymentsModal open={editPaymentsOpen} order={order} onClose={() => setEditPaymentsOpen(false)} onSuccess={handlePaymentsUpdated} />
+      )}
     </div>
   );
 }
