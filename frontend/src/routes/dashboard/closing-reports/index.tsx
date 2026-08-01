@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { createFileRoute, redirect } from '@tanstack/react-router';
+import { createFileRoute } from '@tanstack/react-router';
 import { ChevronLeft, ChevronRight, Printer, Info } from 'lucide-react';
 import { useClosingReports, useClosingReport, useOrdersByFilter } from '@/lib/queries';
 import { reprintClosingReport } from '@/lib/api';
@@ -19,14 +19,10 @@ export const Route = createFileRoute('/dashboard/closing-reports/')({
   validateSearch: (search: Record<string, unknown>): ClosingReportsSearch => ({
     reportId: typeof search.reportId === 'string' || typeof search.reportId === 'number' ? Number(search.reportId) : undefined,
   }),
-  beforeLoad: () => {
-    // /dashboard itself is open to every employee (see route.tsx) - closing
-    // reports expose the whole day's sales breakdown, so this one page keeps
-    // its own admin-only check (see routes/endOfDay.ts).
-    if (useSessionStore.getState().employee?.role !== 'admin') {
-      throw redirect({ to: '/dashboard/order-history' });
-    }
-  },
+  // Open to any employee (see routes/endOfDay.ts) - staff may need to check
+  // the day's numbers while closing, not just admins. Reprinting a report
+  // still checks isAdmin itself further down, since that's a
+  // physical-document action, not just viewing.
   component: ClosingReportsPage,
 });
 
@@ -211,6 +207,10 @@ function ReportDetail({
   const { data: report, isLoading } = useClosingReport(reportId);
   const { data: orders = [] } = useOrdersByFilter({ date: report?.date, status: 'COMPLETED' });
   const pushToast = useToastStore((s) => s.push);
+  // Viewing a closing report is open to any employee (see Route.beforeLoad
+  // above), but reprinting stays admin-only server-side (routes/endOfDay.ts)
+  // - hide the button for non-admins instead of letting them hit a 403.
+  const isAdmin = useSessionStore((s) => s.employee?.role === 'admin');
 
   const currentIndex = sortedByDate.findIndex((r) => r.id === reportId);
   const previousDay = currentIndex >= 0 ? sortedByDate[currentIndex + 1] : undefined;
@@ -252,13 +252,15 @@ function ReportDetail({
             <ChevronRight size={18} />
           </button>
         </div>
-        <button
-          type="button"
-          onClick={handleReprint}
-          className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-border px-4 py-2 text-sm font-medium text-text-secondary transition-colors duration-fast hover:border-brand-400 hover:text-brand-600 sm:w-auto"
-        >
-          <Printer size={15} /> Imprimir de nuevo
-        </button>
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={handleReprint}
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-border px-4 py-2 text-sm font-medium text-text-secondary transition-colors duration-fast hover:border-brand-400 hover:text-brand-600 sm:w-auto"
+          >
+            <Printer size={15} /> Imprimir de nuevo
+          </button>
+        )}
       </div>
 
       <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">

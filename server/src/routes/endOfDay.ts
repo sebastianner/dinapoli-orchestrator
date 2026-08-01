@@ -15,17 +15,18 @@ function parseReportId(param: string): number {
 
 // Generating is open to any logged-in employee - closeDay() itself enforces
 // the "every order today is already COMPLETED" precondition. Reviewing past
-// reports still exposes the whole day's sales/tips/discounts breakdown
-// though, so that stays admin-only.
+// reports is open to any employee too - staff may need to check the day's
+// numbers while closing, not just admins. Reprinting (below) stays
+// admin-only, since that's a physical-document action, not just viewing.
 router.post('/close', requireAuth, (_req, res) => {
   res.json(closeDay());
 });
 
-router.get('/', requireAuth, requireAdmin, (_req, res) => {
+router.get('/', requireAuth, (_req, res) => {
   res.json(listClosingReports());
 });
 
-router.get('/:id', requireAuth, requireAdmin, (req, res) => {
+router.get('/:id', requireAuth, (req, res) => {
   res.json(getClosingReport(parseReportId(req.params.id)));
 });
 

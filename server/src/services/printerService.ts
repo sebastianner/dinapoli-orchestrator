@@ -81,6 +81,16 @@ const CMD_TEXT_DOUBLE = Buffer.from([GS, 0x21, 0x11]); // GS ! 0x11 -> 2x width,
 // bigger than normal size.
 const CMD_TEXT_DOUBLE_HEIGHT = Buffer.from([GS, 0x21, 0x01]); // GS ! 0x01 -> 1x width, 2x height
 const CMD_TEXT_NORMAL = Buffer.from([GS, 0x21, 0x00]); // GS ! 0
+// Extra gap (in dots) added to the right of every character - closing report
+// only, for readability. Chosen over doubling width (like the kitchen ticket)
+// for the same reason as CMD_TEXT_DOUBLE_HEIGHT above: the fixed 48-col
+// padded layout would overflow 80mm paper if each glyph got twice as wide.
+// A few extra dots per character instead widens the line only slightly, no
+// overflow/wrap risk. Tune the value if it still reads cramped on the actual
+// printer - it's in printer dots, not points, so how big 2 looks is
+// hardware-dependent.
+const CMD_CHAR_SPACING = Buffer.from([ESC, 0x20, 2]); // ESC SP 2
+const CMD_CHAR_SPACING_RESET = Buffer.from([ESC, 0x20, 0]); // ESC SP 0
 const CMD_FEED_4 = Buffer.from([ESC, 0x64, 4]); // ESC d 4 : feed 4 lines
 const CMD_CUT_PARTIAL = Buffer.from([GS, 0x56, 1]); // GS V 1 : partial cut
 const CMD_BOLD_ON = Buffer.from([ESC, 0x45, 1]); // ESC E 1 : emphasized (bold) on
@@ -303,9 +313,11 @@ function buildPlainTextPayload(text: string): Buffer {
   return Buffer.concat([
     CMD_INIT,
     CMD_SELECT_CODEPAGE,
+    CMD_CHAR_SPACING,
     CMD_TEXT_DOUBLE_HEIGHT,
     Buffer.from(sanitizeForPrint(text), "latin1"),
     CMD_TEXT_NORMAL,
+    CMD_CHAR_SPACING_RESET,
     CMD_FEED_4,
     CMD_CUT_PARTIAL,
   ]);
