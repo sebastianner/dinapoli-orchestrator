@@ -8,6 +8,7 @@ import { reprintOrderDocument } from '@/lib/api';
 import { groupOrderItems } from '@/lib/pricing';
 import { formatCOP } from '@/lib/format';
 import { formatDateTime, formatTime } from '@/lib/date';
+import { useDebouncedCallback } from '@/lib/useDebouncedCallback';
 import { useOrderStore } from '@/store/useOrderStore';
 import { useToastStore } from '@/store/useToastStore';
 import { EditPaymentsModal } from '@/components/order/EditPaymentsModal';
@@ -116,14 +117,14 @@ function OrderDetailPage() {
     pushToast('Pagos actualizados');
   };
 
-  const handleReprint = async (kind: 'kitchen_ticket' | 'bill') => {
+  const handleReprint = useDebouncedCallback(async (kind: 'kitchen_ticket' | 'bill') => {
     try {
       await reprintOrderDocument(orderId, kind);
       pushToast('Reimpresión enviada');
     } catch (err) {
       pushToast(err instanceof Error ? err.message : 'No se pudo reimprimir', 'error');
     }
-  };
+  });
 
   const handleCompleteOrder = () => {
     openExistingOrder(orderId);

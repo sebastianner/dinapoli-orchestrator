@@ -6,6 +6,7 @@ import { reprintClosingReport } from '@/lib/api';
 import { formatCOP } from '@/lib/format';
 import { formatMonthLong, formatDateLong, shiftMonth } from '@/lib/date';
 import { HourlyBars } from '@/components/charts/HourlyBars';
+import { useDebouncedCallback } from '@/lib/useDebouncedCallback';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useToastStore } from '@/store/useToastStore';
 import type { ClosingReport } from '@/types/api';
@@ -216,7 +217,7 @@ function ReportDetail({
   const previousDay = currentIndex >= 0 ? sortedByDate[currentIndex + 1] : undefined;
   const nextDay = currentIndex > 0 ? sortedByDate[currentIndex - 1] : undefined;
 
-  const handleReprint = async () => {
+  const handleReprint = useDebouncedCallback(async () => {
     if (!report) return;
     try {
       await reprintClosingReport(report.id);
@@ -224,7 +225,7 @@ function ReportDetail({
     } catch (err) {
       pushToast(err instanceof Error ? err.message : 'No se pudo reimprimir', 'error');
     }
-  };
+  });
 
   if (isLoading || !report) return <p className="text-sm text-text-secondary">Selecciona un día en el calendario</p>;
 

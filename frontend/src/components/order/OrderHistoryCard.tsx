@@ -5,6 +5,7 @@ import type { Order, OrderStatus, OrderType } from '@/types/api';
 import { formatCOP } from '@/lib/format';
 import { formatTime } from '@/lib/date';
 import { reprintOrderDocument } from '@/lib/api';
+import { useDebouncedCallback } from '@/lib/useDebouncedCallback';
 import { useToastStore } from '@/store/useToastStore';
 
 const statusStyles: Record<OrderStatus, string> = {
@@ -49,14 +50,14 @@ interface OrderHistoryCardProps {
 export function OrderHistoryCard({ order, removeMode, onDelete }: OrderHistoryCardProps) {
   const pushToast = useToastStore((s) => s.push);
 
-  const handleReprint = async (kind: 'kitchen_ticket' | 'bill') => {
+  const handleReprint = useDebouncedCallback(async (kind: 'kitchen_ticket' | 'bill') => {
     try {
       await reprintOrderDocument(order.id, kind);
       pushToast('Reimpresión enviada');
     } catch (err) {
       pushToast(err instanceof Error ? err.message : 'No se pudo reimprimir', 'error');
     }
-  };
+  });
 
   const TypeIcon = orderTypeIcons[order.orderType];
 
