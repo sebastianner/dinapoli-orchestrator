@@ -246,6 +246,8 @@ export interface PizzaItemRequest {
   flavors: PizzaFlavorSelection[];
   quantity: number;
   notes?: string;
+  /** True for an item that's part of the order's promoType composition - lets a promo share an order with extra, normally-priced items (see applyPromoPricingPreview/useOrderStore.addPromoItem). */
+  promoItem?: boolean;
 }
 
 export interface ProductItemRequest {
@@ -257,6 +259,8 @@ export interface ProductItemRequest {
   pizzaFlavor?: string;
   quantity: number;
   notes?: string;
+  /** True for an item that's part of the order's promoType composition - lets a promo share an order with extra, normally-priced items (see applyPromoPricingPreview/useOrderStore.addPromoItem). */
+  promoItem?: boolean;
 }
 
 export function isPizzaItem(i: OrderItemRequest): i is PizzaItemRequest {

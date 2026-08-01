@@ -338,116 +338,139 @@ const PROMO_TYPES = new Set<PromoType>(['duo', 'pizza_xl']);
 // pizza's only flavor or as a gratinado's pizzaFlavor - these are the same 5
 // "special" flavors either way, so one set covers both checks below.
 const DUO_EXCLUDED_FLAVORS = new Set(['campesina', 'madrilena', 'atarraya', 'tricaccio', 'ardiente']);
-// Coca-Cola and Quatro are the two soft_drink flavors that cost extra inside
-// the 'pizza_xl' promo; every other flavor (Postobón's own brands, water) is free.
-const XL_SODA_SURCHARGE_FLAVORS = new Set(['coca_cola', 'quatro']);
+// Coca-Cola, Quatro, and Premio are the soft_drink_1_5l flavors that cost
+// extra inside the 'pizza_xl' promo; every other flavor (Postobón's own
+// brands, water) is free.
+const XL_SODA_SURCHARGE_FLAVORS = new Set(['coca_cola', 'quatro', 'premio']);
 
 /**
- * Validates that `items` is exactly the required composition for `promoType`,
- * checked against the raw client-submitted keys (not resolveItems' DB ids,
+ * Validates that the items tagged `promoItem: true` are exactly the required
+ * composition for `promoType` - untagged items are extra, normally-priced
+ * items sharing the order (see applyPromoPricing) and aren't checked here.
+ * Checked against the raw client-submitted keys (not resolveItems' DB ids,
  * which don't carry the string keys needed for the flavor/product exclusions
  * below). Throws ValidationError on any violation; returns nothing on success.
  */
 function validatePromoItems(promoType: PromoType, items: OrderItemRequest[]): void {
-  for (const [index, item] of items.entries()) {
+  const promoItems = items.filter((item) => item.promoItem === true);
+
+  for (const [index, item] of promoItems.entries()) {
     if (item.quantity !== 1) {
-      throw new ValidationError(`items[${index}]: los ítems de la promoción deben tener cantidad 1`);
+      throw new ValidationError(`items de la promoción[${index}]: deben tener cantidad 1`);
     }
   }
 
   if (promoType === 'duo') {
-    if (items.length !== 2) {
-      throw new ValidationError(`la promoción 'duo' requiere exactamente 2 ítems, se recibieron ${items.length}`);
+    if (promoItems.length !== 2) {
+      throw new ValidationError(`la promoción 'duo' requiere exactamente 2 ítems marcados como parte de la promoción, se recibieron ${promoItems.length}`);
     }
-    items.forEach((item, index) => {
+    promoItems.forEach((item, index) => {
       if (item.type === 'pizza') {
         if (item.size !== 'personal') {
-          throw new ValidationError(`items[${index}]: la promoción 'duo' solo permite pizzas tamaño personal`);
+          throw new ValidationError(`items de la promoción[${index}]: la promoción 'duo' solo permite pizzas tamaño personal`);
         }
         if (item.flavors.length !== 1 || item.flavors[0].portion !== 100) {
-          throw new ValidationError(`items[${index}]: las pizzas de la promoción 'duo' no pueden ser mitad y mitad - solo un sabor`);
+          throw new ValidationError(`items de la promoción[${index}]: las pizzas de la promoción 'duo' no pueden ser mitad y mitad - solo un sabor`);
         }
         if (DUO_EXCLUDED_FLAVORS.has(item.flavors[0].flavor)) {
-          throw new ValidationError(`items[${index}]: el sabor '${item.flavors[0].flavor}' no está incluido en la promoción 'duo'`);
+          throw new ValidationError(`items de la promoción[${index}]: el sabor '${item.flavors[0].flavor}' no está incluido en la promoción 'duo'`);
         }
         return;
       }
       if (item.type === 'product' && item.category === 'lasagnas') {
         if (item.product === 'mamma_mia') {
-          throw new ValidationError(`items[${index}]: la lasaña Mamma Mia no está incluida en la promoción 'duo'`);
+          throw new ValidationError(`items de la promoción[${index}]: la lasaña Mamma Mia no está incluida en la promoción 'duo'`);
         }
         return;
       }
       if (item.type === 'product' && item.category === 'pastas') {
         if (item.product === 'seafood') {
-          throw new ValidationError(`items[${index}]: la pasta Marinera no está incluida en la promoción 'duo'`);
+          throw new ValidationError(`items de la promoción[${index}]: la pasta Marinera no está incluida en la promoción 'duo'`);
         }
         return;
       }
       if (item.type === 'product' && item.category === 'gratinados') {
         if (item.pizzaFlavor && DUO_EXCLUDED_FLAVORS.has(item.pizzaFlavor)) {
-          throw new ValidationError(`items[${index}]: el sabor de gratinado '${item.pizzaFlavor}' no está incluido en la promoción 'duo'`);
+          throw new ValidationError(`items de la promoción[${index}]: el sabor de gratinado '${item.pizzaFlavor}' no está incluido en la promoción 'duo'`);
         }
         return;
       }
-      throw new ValidationError(`items[${index}]: la promoción 'duo' solo permite una pizza personal, lasaña, pasta o gratinado`);
+      throw new ValidationError(`items de la promoción[${index}]: la promoción 'duo' solo permite una pizza personal, lasaña, pasta o gratinado`);
     });
     return;
   }
 
   // pizza_xl
-  if (items.length !== 3) {
-    throw new ValidationError(`la promoción 'pizza_xl' requiere exactamente 3 ítems (pizza XL, gaseosa, panes al gratín), se recibieron ${items.length}`);
+  if (promoItems.length !== 3) {
+    throw new ValidationError(
+      `la promoción 'pizza_xl' requiere exactamente 3 ítems marcados como parte de la promoción (pizza XL, gaseosa 1.5L, panes al gratín), se recibieron ${promoItems.length}`
+    );
   }
-  const pizza = items.find((i) => i.type === 'pizza');
+  const pizza = promoItems.find((i) => i.type === 'pizza');
   if (!pizza || pizza.type !== 'pizza' || pizza.size !== 'xlarge') {
     throw new ValidationError(`la promoción 'pizza_xl' requiere una pizza XL`);
   }
-  const soda = items.find((i) => i.type === 'product' && i.category === 'drinks' && i.product === 'soft_drink');
+  const soda = promoItems.find((i) => i.type === 'product' && i.category === 'drinks' && i.product === 'soft_drink_1_5l');
   if (!soda) {
-    throw new ValidationError(`la promoción 'pizza_xl' requiere una Gaseosa Personal`);
+    throw new ValidationError(`la promoción 'pizza_xl' requiere una Gaseosa 1.5L`);
   }
-  const bread = items.find((i) => i.type === 'product' && i.category === 'appetizers' && i.product === 'garlic_bread');
+  const bread = promoItems.find((i) => i.type === 'product' && i.category === 'appetizers' && i.product === 'garlic_bread');
   if (!bread) {
     throw new ValidationError(`la promoción 'pizza_xl' requiere una orden de Panes al Gratín`);
   }
 }
 
 /**
- * Overrides resolveItems' normal menu pricing with the promo's flat price -
- * the primary item (the pizza, or items[0] for 'duo') carries the full
- * admin-configured price (see promoSettingsService), the rest are free,
- * matching how the promo is marketed ("gratis gaseosa y panes al gratín").
- * The XL promo's soda is the one exception: choosing Coca-Cola or Quatro
- * adds a flat surcharge on top. Prices are read live (not cached), so an
- * admin's price change applies starting with the very next order - already-
- * placed orders keep whatever was snapshotted into their unit_price at the
- * time (see printerService.describePromoType for the matching reasoning on
- * the kitchen ticket label). Mutates `resolvedItems` in place; returns the
- * order's total.
+ * Overrides resolveItems' normal menu pricing with the promo's flat price,
+ * for whichever items are tagged `promoItem: true` only - the primary item
+ * (the pizza, or the first promo item for 'duo') carries the full
+ * admin-configured price (see promoSettingsService), the rest of the promo's
+ * items are free, matching how the promo is marketed ("gratis gaseosa y
+ * panes al gratín"). Untagged items keep whatever resolveItems already
+ * priced them at (regular menu pricing) - this is what lets a promo share an
+ * order with extra, full-price items instead of requiring its own separate
+ * order. The XL promo's soda is the one exception among promo items:
+ * choosing Coca-Cola, Quatro, or Premio adds a flat surcharge on top. Prices
+ * are read live (not cached), so an admin's price change applies starting
+ * with the very next order - already-placed orders keep whatever was
+ * snapshotted into their unit_price at the time (see
+ * printerService.describePromoType for the matching reasoning on the
+ * kitchen ticket label). Mutates `resolvedItems` in place; returns the
+ * order's total (promo items + any extra items, already-priced by
+ * resolveItems).
  */
 function applyPromoPricing(promoType: PromoType, items: OrderItemRequest[], resolvedItems: ResolvedItem[]): number {
   const settings = getPromoSettings(promoType);
 
+  // Extra items (not part of the promo) keep resolveItems' regular pricing untouched.
+  let total = resolvedItems.reduce((sum, resolved, index) => (items[index].promoItem ? sum : sum + resolved.unitPrice * resolved.quantity), 0);
+
+  const promoIndexes = items.reduce<number[]>((acc, item, index) => {
+    if (item.promoItem) acc.push(index);
+    return acc;
+  }, []);
+
   if (promoType === 'duo') {
-    resolvedItems[0].unitPrice = settings.price;
-    resolvedItems[1].unitPrice = 0;
-    return settings.price;
+    resolvedItems[promoIndexes[0]].unitPrice = settings.price;
+    resolvedItems[promoIndexes[1]].unitPrice = 0;
+    return total + settings.price;
   }
 
-  let total = settings.price;
-  items.forEach((item, index) => {
+  // pizza_xl
+  let promoTotal = settings.price;
+  for (const index of promoIndexes) {
+    const item = items[index];
     if (item.type === 'pizza') {
       resolvedItems[index].unitPrice = settings.price;
     } else if (item.type === 'product' && item.category === 'drinks') {
       const surcharge = item.drinkFlavor && XL_SODA_SURCHARGE_FLAVORS.has(item.drinkFlavor) ? settings.sodaSurcharge : 0;
       resolvedItems[index].unitPrice = surcharge;
-      total += surcharge;
+      promoTotal += surcharge;
     } else {
       resolvedItems[index].unitPrice = 0;
     }
-  });
-  return total;
+  }
+  return total + promoTotal;
 }
 
 /**

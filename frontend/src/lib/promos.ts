@@ -49,8 +49,8 @@ export function promoProgressText(type: PromoType, itemCount: number, settings: 
 /** These 5 "special" flavors are excluded from the 'duo' promo whether picked as a personal pizza's single flavor or a gratinado's pizzaFlavor. */
 export const DUO_EXCLUDED_FLAVORS = new Set(['campesina', 'madrilena', 'atarraya', 'tricaccio', 'ardiente']);
 
-/** Coca-Cola and Quatro are the two soft_drink flavors that add a surcharge inside the 'pizza_xl' promo; every other flavor is free. The surcharge amount itself is admin-editable (PromoSettings.sodaSurcharge), this is just which flavors trigger it. */
-export const XL_SODA_SURCHARGE_FLAVORS = new Set(['coca_cola', 'quatro']);
+/** Coca-Cola, Quatro, and Premio are the soft_drink_1_5l flavors that add a surcharge inside the 'pizza_xl' promo; every other flavor is free. The surcharge amount itself is admin-editable (PromoSettings.sodaSurcharge), this is just which flavors trigger it. */
+export const XL_SODA_SURCHARGE_FLAVORS = new Set(['coca_cola', 'quatro', 'premio']);
 
 export function isPizzaEligibleForDuo(size: PizzaSizeId, flavors: { flavor: string; portion: number }[]): boolean {
   if (size !== 'personal') return false;
@@ -74,7 +74,7 @@ export function isGratinEligibleForDuo(pizzaFlavor: string | undefined): boolean
 export function isProductEligibleForPromo(promoType: PromoType | undefined, categoryId: ProductCategoryId, productId: string): boolean {
   if (promoType === 'duo' && categoryId === 'lasagnas') return productId !== 'mamma_mia';
   if (promoType === 'duo' && categoryId === 'pastas') return productId !== 'seafood';
-  if (promoType === 'pizza_xl' && categoryId === 'drinks') return productId === 'soft_drink';
+  if (promoType === 'pizza_xl' && categoryId === 'drinks') return productId === 'soft_drink_1_5l';
   return true;
 }
 
@@ -89,10 +89,14 @@ export function freeBreadRequest(): OrderItemRequest {
 
 /**
  * Applies the promo's flat pricing (from the current, admin-editable
- * PromoSettings) to a completed set of draft items, for cart display only.
+ * PromoSettings) to a completed set of draft items, for cart display only -
+ * also tags each item `promoItem: true` (mirrors orderService's
+ * validatePromoItems/applyPromoPricing), which is what lets these items keep
+ * being treated as the promo once merged into the shared cart alongside any
+ * other, normally-priced items added afterward.
  * 'duo': the first item carries the full price, the second is free.
  * 'pizza_xl': the pizza carries the full price, the bread is free, and the
- * soda is free unless a surcharge option (Coca-Cola/Quatro) was chosen.
+ * soda is free unless a surcharge option (Coca-Cola/Quatro/Premio) was chosen.
  */
 export function applyPromoPricingPreview<T extends { request: OrderItemRequest; unitPrice: number }>(
   promoType: PromoType,
@@ -100,14 +104,15 @@ export function applyPromoPricingPreview<T extends { request: OrderItemRequest; 
   settings: PromoSettings
 ): T[] {
   if (promoType === 'duo') {
-    return items.map((item, i) => ({ ...item, unitPrice: i === 0 ? settings.price : 0 }));
+    return items.map((item, i) => ({ ...item, request: { ...item.request, promoItem: true }, unitPrice: i === 0 ? settings.price : 0 }));
   }
   return items.map((item) => {
-    if (item.request.type === 'pizza') return { ...item, unitPrice: settings.price };
+    const request = { ...item.request, promoItem: true };
+    if (item.request.type === 'pizza') return { ...item, request, unitPrice: settings.price };
     if (item.request.type === 'product' && item.request.category === 'drinks') {
       const surcharge = item.request.drinkFlavor && XL_SODA_SURCHARGE_FLAVORS.has(item.request.drinkFlavor) ? settings.sodaSurcharge : 0;
-      return { ...item, unitPrice: surcharge };
+      return { ...item, request, unitPrice: surcharge };
     }
-    return { ...item, unitPrice: 0 };
+    return { ...item, request, unitPrice: 0 };
   });
 }

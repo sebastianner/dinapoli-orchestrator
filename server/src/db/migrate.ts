@@ -356,7 +356,7 @@ function seedDefaultPromoSettings(): void {
     "INSERT OR IGNORE INTO promo_settings (promo_type, price, soda_surcharge) VALUES (?, ?, ?)",
   );
   insert.run("duo", 37000, 0);
-  insert.run("pizza_xl", 80000, 2000);
+  insert.run("pizza_xl", 86000, 2000);
 }
 
 /** Adds a column to a table that predates it, without touching existing rows. No-op if already present. */

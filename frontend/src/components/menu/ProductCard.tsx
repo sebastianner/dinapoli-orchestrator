@@ -54,7 +54,12 @@ export function ProductCard({ categoryId, product, pizzaFlavors, excludedFlavorI
     }
 
     const drinkFlavor = product.drinkFlavors?.find((f) => f.id === drinkFlavorId);
-    const flavor = availableFlavors.find((f) => f.id === flavorId);
+    // `flavorId` defaults to the first pizza flavor (Napolitana) regardless of
+    // product type - only meaningful (and only rendered as a picker) when the
+    // product actually requires one (gratinados etc.), so gate both the label
+    // and the request on product.pizzaFlavor instead of using it unconditionally,
+    // which was tacking "- Napolitana" onto every product including drinks.
+    const flavor = product.pizzaFlavor ? availableFlavors.find((f) => f.id === flavorId) : undefined;
     const labelParts = [product.name, drinkFlavor?.name, flavor?.name].filter(Boolean);
 
     const item = {
@@ -64,7 +69,7 @@ export function ProductCard({ categoryId, product, pizzaFlavors, excludedFlavorI
         category: categoryId,
         product: product.id,
         drinkFlavor: drinkFlavorId || undefined,
-        pizzaFlavor: flavorId || undefined,
+        pizzaFlavor: product.pizzaFlavor ? (flavorId || undefined) : undefined,
         quantity: 1,
         notes: notes.trim() || undefined,
       },
