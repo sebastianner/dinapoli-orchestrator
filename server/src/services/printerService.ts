@@ -655,10 +655,9 @@ export function printKitchenTicket(order: Order): void {
  * A short "addition" ticket for items added to an order that's already
  * ACTIVE (see orderService.addOrderItems) - lists only the newly added
  * items, since the kitchen already has the original items cooking/plated.
- * Unlike printKitchenTicket, this isn't saved to print_jobs: it isn't the
- * order's single reprintable "kitchen_ticket" snapshot, just a delta
- * notification, and retry safety on printer failure comes from
- * order_items.printed_at / the order bouncing back through PENDING instead.
+ * Retry safety on printer failure comes from order_items.printed_at / the
+ * order bouncing back through PENDING, not from a saved copy of *this*
+ * rendering - see printKitchenTicketAddendum below for what does get saved.
  */
 export function renderKitchenTicketAddendum(
   order: Order,
@@ -698,6 +697,14 @@ export function printKitchenTicketAddendum(
   console.log(
     `[printer:thermal-80mm] printed kitchen ticket addendum for order ${order.id} (${KITCHEN_TICKET_ADDENDUM_COPIES}x)`,
   );
+  // The kitchen only ever sees the addendum above (it already has the
+  // original items cooking/plated) - but the order's saved 'kitchen_ticket'
+  // snapshot still needs to grow to match, since that saved copy (not this
+  // addendum) is what a later reprint or a delivery's counter-printer copy
+  // (see reprintJob/printDeliveryComandaCopy below) sends out - both should
+  // always show every item on the order, past and new, not just whatever was
+  // on it the moment it was first printed.
+  savePrintJob(order.id, "kitchen_ticket", renderKitchenTicket(order));
 }
 
 // ---------------------------------------------------------------------------
@@ -889,9 +896,11 @@ export async function reprintJob(
   if (kind === "kitchen_ticket") {
     // Unlike the original print (kitchen + cashier copy, see
     // KITCHEN_TICKET_COPIES), a reprint from order-history/order-detail is a
-    // one-off re-issue - only one copy. Goes back to kitchen_printer, same
-    // as the original.
-    printText(orderId, kind, row.content, KITCHEN_PRINTER_QUEUE, 1);
+    // one-off re-issue - only one copy. Goes to counter_printer, not back to
+    // the kitchen line - kitchen_printer is reserved for the original ticket
+    // and live addition notifications only (see printKitchenTicketAddendum);
+    // any reprint is a cashier/register action, same as the bill below.
+    printText(orderId, kind, row.content, COUNTER_PRINTER_QUEUE, 1);
   } else {
     await printHtmlAsImage(orderId, kind, row.content, COUNTER_PRINTER_QUEUE);
   }
