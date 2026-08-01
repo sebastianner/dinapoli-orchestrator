@@ -643,10 +643,7 @@ export function renderKitchenTicket(order: Order): string {
 }
 
 const KITCHEN_TICKET_COPIES = 1;
-// Additions still get 2 (kitchen + cashier), unlike the now-single-copy
-// original ticket - a delta notification is easy to miss with only one copy
-// floating around an already-busy kitchen line.
-const KITCHEN_TICKET_ADDENDUM_COPIES = 2;
+const KITCHEN_TICKET_ADDENDUM_COPIES = 1;
 
 export function printKitchenTicket(order: Order): void {
   const text = renderKitchenTicket(order);
