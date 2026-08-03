@@ -1,6 +1,6 @@
 import db from '../db/index.js';
 import { ValidationError } from '../utils/errors.js';
-import { todayDateStrBogota } from '../utils/date.js';
+import { currentBusinessDateBogota, BUSINESS_DAY_SQL_OFFSET } from '../utils/date.js';
 import type {
   AnalyticsRange,
   SalesSummary,
@@ -55,7 +55,7 @@ export function resolveRange(range: AnalyticsRange, from?: string, to?: string):
     const spanDays = daysBetween(from, to) + 1;
     return { start: from, end: to, prevStart: addDays(from, -spanDays), prevEnd: addDays(from, -1) };
   }
-  const today = todayDateStrBogota();
+  const today = currentBusinessDateBogota();
   const spanDays = RANGE_DAYS[range];
   const end = today;
   const start = addDays(today, -(spanDays - 1));
@@ -89,14 +89,14 @@ const getOrderPaymentTotals = db.prepare<
     COUNT(DISTINCT o.customer_id) AS customers_served
   FROM orders o
   LEFT JOIN order_payments op ON op.order_id = o.id
-  WHERE o.status = 'COMPLETED' AND date(o.completed_at, '-5 hours') BETWEEN ? AND ?
+  WHERE o.status = 'COMPLETED' AND date(o.completed_at, '${BUSINESS_DAY_SQL_OFFSET}') BETWEEN ? AND ?
 `);
 
 const getItemsSoldForRange = db.prepare<[string, string], { total: number | null }>(`
   SELECT COALESCE(SUM(oi.quantity), 0) AS total
   FROM order_items oi
   JOIN orders o ON o.id = oi.order_id
-  WHERE o.status = 'COMPLETED' AND date(o.completed_at, '-5 hours') BETWEEN ? AND ?
+  WHERE o.status = 'COMPLETED' AND date(o.completed_at, '${BUSINESS_DAY_SQL_OFFSET}') BETWEEN ? AND ?
 `);
 
 function periodTotals(start: string, end: string): PeriodTotals {
@@ -138,18 +138,31 @@ const getHourlyTrend = db.prepare<[string], { bucket: string; order_count: numbe
     COALESCE(SUM(op.gross_amount - op.tip_amount - op.discount), 0) AS total_sales
   FROM orders o
   LEFT JOIN order_payments op ON op.order_id = o.id
-  WHERE o.status = 'COMPLETED' AND date(o.completed_at, '-5 hours') = ?
+  WHERE o.status = 'COMPLETED' AND date(o.completed_at, '${BUSINESS_DAY_SQL_OFFSET}') = ?
   GROUP BY bucket
 `);
 
+// Both the bucket and the range filter use BUSINESS_DAY_SQL_OFFSET, and they
+// have to agree. The bucket used to be the plain Bogota date while the filter
+// was the business day, which quietly lost data: an order completed at 00:30 on
+// the 24th belongs to the 23rd's service, so the filter included it but the
+// bucket put it on the 24th - a bar outside the requested window, dropped
+// entirely by getSalesTrend's zero-fill. A range ending on the 23rd showed
+// $10.000 on a night that took $30.000, and disagreed with the KPI card
+// directly above it.
+//
+// This is the "how much did we sell on day X" view, so day X is the business
+// day - the same day the closing report and the calendar heatmap use. Charts
+// that answer "at what time of day" (getHourlyTrend's hour, getHeatmapRows'
+// day/hour) deliberately stay on the real clock instead; see those queries.
 const getDailyTrend = db.prepare<[string, string], { bucket: string; order_count: number; total_sales: number | null }>(`
   SELECT
-    date(o.completed_at, '-5 hours') AS bucket,
+    date(o.completed_at, '${BUSINESS_DAY_SQL_OFFSET}') AS bucket,
     COUNT(DISTINCT o.id) AS order_count,
     COALESCE(SUM(op.gross_amount - op.tip_amount - op.discount), 0) AS total_sales
   FROM orders o
   LEFT JOIN order_payments op ON op.order_id = o.id
-  WHERE o.status = 'COMPLETED' AND date(o.completed_at, '-5 hours') BETWEEN ? AND ?
+  WHERE o.status = 'COMPLETED' AND date(o.completed_at, '${BUSINESS_DAY_SQL_OFFSET}') BETWEEN ? AND ?
   GROUP BY bucket
 `);
 
@@ -199,7 +212,7 @@ const getPaymentMethodBreakdown = db.prepare<[string, string], { method: string;
   SELECT op.method AS method, COALESCE(SUM(op.gross_amount - op.tip_amount - op.discount), 0) AS sales
   FROM order_payments op
   JOIN orders o ON o.id = op.order_id
-  WHERE o.status = 'COMPLETED' AND date(o.completed_at, '-5 hours') BETWEEN ? AND ?
+  WHERE o.status = 'COMPLETED' AND date(o.completed_at, '${BUSINESS_DAY_SQL_OFFSET}') BETWEEN ? AND ?
   GROUP BY op.method
 `);
 
@@ -211,7 +224,7 @@ const getOrderTypeBreakdown = db.prepare<
          COALESCE(SUM(op.gross_amount - op.tip_amount - op.discount), 0) AS sales
   FROM orders o
   LEFT JOIN order_payments op ON op.order_id = o.id
-  WHERE o.status = 'COMPLETED' AND date(o.completed_at, '-5 hours') BETWEEN ? AND ?
+  WHERE o.status = 'COMPLETED' AND date(o.completed_at, '${BUSINESS_DAY_SQL_OFFSET}') BETWEEN ? AND ?
   GROUP BY o.order_type
 `);
 
@@ -241,13 +254,28 @@ export function getBreakdown(resolved: ResolvedRange): SalesBreakdown {
 // it should reflect when orders arrive, not whenever the customer happened
 // to pay. Every other analytics query intentionally stays on completed_at
 // (it's about settled sales), so this is a deliberate exception.
+//
+// dow/hour deliberately use the plain Bogota offset, NOT
+// BUSINESS_DAY_SQL_OFFSET - unlike every other analytics/report query (which
+// buckets by business day, e.g. a 1am order counts toward the previous
+// day's closing report), the heatmap is a real time-of-day/day-of-week
+// pattern, not a financial rollup: a 1am order should land on the real
+// day it happened (Tuesday), not get folded into "Monday" just because
+// Monday's business day hadn't closed yet. The range filter (BETWEEN)
+// still uses the business day, though, so the heatmap's populated window
+// matches whatever range the rest of the page has selected.
+// Also deliberately NOT filtered to status = 'COMPLETED', unlike every sales
+// query. This is a kitchen-load question, and an order that arrived is load on
+// the kitchen whether or not it has been paid for yet - filtering to COMPLETED
+// made the current shift's busiest hours read as empty right when someone would
+// be looking at them.
 const getHeatmapRows = db.prepare<[string, string], { dow: string; hour: string; order_count: number }>(`
   SELECT
     strftime('%w', o.created_at, '-5 hours') AS dow,
     strftime('%H', o.created_at, '-5 hours') AS hour,
     COUNT(*) AS order_count
   FROM orders o
-  WHERE o.status = 'COMPLETED' AND date(o.created_at, '-5 hours') BETWEEN ? AND ?
+  WHERE date(o.created_at, '${BUSINESS_DAY_SQL_OFFSET}') BETWEEN ? AND ?
   GROUP BY dow, hour
 `);
 
@@ -286,7 +314,7 @@ const getProductRankingRows = db.prepare<
   JOIN orders o ON o.id = oi.order_id
   JOIN products p ON p.id = oi.product_id
   JOIN categories cat ON cat.id = p.category_id
-  WHERE oi.item_type = 'product' AND o.status = 'COMPLETED' AND date(o.completed_at, '-5 hours') BETWEEN ? AND ?
+  WHERE oi.item_type = 'product' AND o.status = 'COMPLETED' AND date(o.completed_at, '${BUSINESS_DAY_SQL_OFFSET}') BETWEEN ? AND ?
   GROUP BY p.id
 
   UNION ALL
@@ -299,7 +327,7 @@ const getProductRankingRows = db.prepare<
   JOIN order_item_flavors oif ON oif.order_item_id = oi.id
   JOIN pizza_flavors pf ON pf.id = oif.flavor_id
   JOIN pizza_sizes ps ON ps.id = oi.pizza_size_id
-  WHERE oi.item_type = 'pizza' AND o.status = 'COMPLETED' AND date(o.completed_at, '-5 hours') BETWEEN ? AND ?
+  WHERE oi.item_type = 'pizza' AND o.status = 'COMPLETED' AND date(o.completed_at, '${BUSINESS_DAY_SQL_OFFSET}') BETWEEN ? AND ?
   GROUP BY pf.id, ps.id
 
   UNION ALL
@@ -310,7 +338,7 @@ const getProductRankingRows = db.prepare<
   JOIN orders o ON o.id = oi.order_id
   JOIN pizza_flavor_counts pfc ON pfc.order_item_id = oi.id AND pfc.flavor_count > 1
   JOIN pizza_sizes ps ON ps.id = oi.pizza_size_id
-  WHERE oi.item_type = 'pizza' AND o.status = 'COMPLETED' AND date(o.completed_at, '-5 hours') BETWEEN ? AND ?
+  WHERE oi.item_type = 'pizza' AND o.status = 'COMPLETED' AND date(o.completed_at, '${BUSINESS_DAY_SQL_OFFSET}') BETWEEN ? AND ?
   GROUP BY ps.id
 `);
 
@@ -351,22 +379,22 @@ const getTopCustomersRows = db.prepare<
   FROM orders o
   JOIN customers c ON c.id = o.customer_id
   LEFT JOIN order_payments op ON op.order_id = o.id
-  WHERE o.status = 'COMPLETED' AND date(o.completed_at, '-5 hours') BETWEEN ? AND ?
+  WHERE o.status = 'COMPLETED' AND date(o.completed_at, '${BUSINESS_DAY_SQL_OFFSET}') BETWEEN ? AND ?
   GROUP BY c.id
   ORDER BY spend DESC
   LIMIT ${TOP_CUSTOMERS_LIMIT}
 `);
 
 const getNewCustomerCount = db.prepare<[string, string], { count: number }>(`
-  SELECT COUNT(*) AS count FROM customers WHERE date(created_at, '-5 hours') BETWEEN ? AND ?
+  SELECT COUNT(*) AS count FROM customers WHERE date(created_at, '${BUSINESS_DAY_SQL_OFFSET}') BETWEEN ? AND ?
 `);
 
 const getReturningCustomerCount = db.prepare<[string, string, string], { count: number }>(`
   SELECT COUNT(DISTINCT o.customer_id) AS count
   FROM orders o
   JOIN customers c ON c.id = o.customer_id
-  WHERE o.status = 'COMPLETED' AND date(o.completed_at, '-5 hours') BETWEEN ? AND ?
-    AND date(c.created_at, '-5 hours') < ?
+  WHERE o.status = 'COMPLETED' AND date(o.completed_at, '${BUSINESS_DAY_SQL_OFFSET}') BETWEEN ? AND ?
+    AND date(c.created_at, '${BUSINESS_DAY_SQL_OFFSET}') < ?
 `);
 
 export function getCustomers(resolved: ResolvedRange): CustomersAnalytics {
@@ -399,7 +427,7 @@ const getEmployeePerformanceRows = db.prepare<
   FROM orders o
   JOIN employees e ON e.id = o.employee_id
   LEFT JOIN order_payments op ON op.order_id = o.id
-  WHERE o.status = 'COMPLETED' AND date(o.completed_at, '-5 hours') BETWEEN ? AND ?
+  WHERE o.status = 'COMPLETED' AND date(o.completed_at, '${BUSINESS_DAY_SQL_OFFSET}') BETWEEN ? AND ?
   GROUP BY e.id
   ORDER BY sales DESC
 `);
@@ -420,7 +448,7 @@ export function getEmployees(resolved: ResolvedRange): EmployeePerformance[] {
 const getPromoCounts = db.prepare<[string, string], { promo_type: string; order_count: number }>(`
   SELECT promo_type, COUNT(*) AS order_count
   FROM orders
-  WHERE status = 'COMPLETED' AND promo_type IS NOT NULL AND date(completed_at, '-5 hours') BETWEEN ? AND ?
+  WHERE status = 'COMPLETED' AND promo_type IS NOT NULL AND date(completed_at, '${BUSINESS_DAY_SQL_OFFSET}') BETWEEN ? AND ?
   GROUP BY promo_type
 `);
 
@@ -434,7 +462,7 @@ const getDiscountTotals = db.prepare<
     COUNT(DISTINCT CASE WHEN op.discount > 0 THEN o.id END) AS orders_with_discount
   FROM orders o
   LEFT JOIN order_payments op ON op.order_id = o.id
-  WHERE o.status = 'COMPLETED' AND date(o.completed_at, '-5 hours') BETWEEN ? AND ?
+  WHERE o.status = 'COMPLETED' AND date(o.completed_at, '${BUSINESS_DAY_SQL_OFFSET}') BETWEEN ? AND ?
 `);
 
 export function getPromotions(resolved: ResolvedRange): PromoUsageSummary {

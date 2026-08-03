@@ -43,6 +43,7 @@ interface PizzaGroupFlavorRow {
   name: string;
   description: string | null;
   is_available: 0 | 1;
+  extra_cost: number;
 }
 
 interface CategoryRow {
@@ -73,7 +74,7 @@ const getGroupSizes = db.prepare<[number], PizzaGroupSizeRow>(
 // disabled tile, see the pizza/calzone flavor pickers) instead of
 // disappearing outright, same as products (see getCategoryProducts above).
 const getGroupFlavors = db.prepare<[number], PizzaGroupFlavorRow>(
-  `SELECT f.key AS id, f.name, f.description, f.is_available
+  `SELECT f.key AS id, f.name, f.description, f.is_available, f.extra_cost
    FROM pizza_group_flavors gf
    JOIN pizza_flavors f ON f.id = gf.flavor_id
    WHERE gf.group_id = ?
@@ -116,6 +117,7 @@ function buildPizzaCategory(): PizzaCategory {
       name: f.name,
       description: f.description ?? '',
       isAvailable: f.is_available === 1,
+      extraCost: f.extra_cost,
     }));
     return { id: group.key, name: group.name, sizes, flavors };
   });
@@ -205,10 +207,11 @@ interface PizzaFlavorSearchRow {
   name: string;
   description: string | null;
   is_available: 0 | 1;
+  extra_cost: number;
 }
 
 const searchPizzaFlavorsByTrigram = db.prepare<[string], PizzaFlavorSearchRow>(
-  `SELECT f.id AS flavor_id, f.key AS id, f.name, f.description, f.is_available
+  `SELECT f.id AS flavor_id, f.key AS id, f.name, f.description, f.is_available, f.extra_cost
    FROM pizza_flavors_fts pf
    JOIN pizza_flavors f ON f.id = pf.rowid
    WHERE pizza_flavors_fts MATCH ?
@@ -216,7 +219,7 @@ const searchPizzaFlavorsByTrigram = db.prepare<[string], PizzaFlavorSearchRow>(
    LIMIT ${SEARCH_RESULT_LIMIT}`
 );
 const searchPizzaFlavorsByPrefix = db.prepare<[string, string], PizzaFlavorSearchRow>(
-  `SELECT id AS flavor_id, key AS id, name, description, is_available
+  `SELECT id AS flavor_id, key AS id, name, description, is_available, extra_cost
    FROM pizza_flavors
    WHERE name LIKE ? OR description LIKE ?
    ORDER BY name
@@ -241,6 +244,7 @@ export function searchPizzaFlavors(query: unknown): PizzaFlavorSearchResult[] {
     name: row.name,
     description: row.description ?? '',
     isAvailable: row.is_available === 1,
+    extraCost: row.extra_cost,
     groupIds: getFlavorGroupKeys.all(row.flavor_id).map((g) => g.key),
   }));
 }

@@ -106,6 +106,19 @@ function migrate(): void {
     "promo_type",
     "TEXT CHECK (promo_type IS NULL OR promo_type IN ('duo', 'pizza_xl'))",
   );
+  // Which items make up the order's promo. Not backfillable - a promo item's
+  // unit_price (flat price / 0 / soda surcharge) is indistinguishable from a
+  // regular item's, which is exactly why guessing it at print time printed the
+  // wrong promo price. Existing rows default to 0, so an old promo order's
+  // ticket falls back to the pre-column behaviour on reprint.
+  ensureColumn(
+    "order_items",
+    "promo_item",
+    "INTEGER NOT NULL DEFAULT 0 CHECK (promo_item IN (0, 1))",
+  );
+  // Snapshot of "delivery #N of the day" (see schema.sql). Existing rows stay
+  // NULL and keep using the live count.
+  ensureColumn("orders", "delivery_day_number", "INTEGER");
   ensureColumn(
     "employees",
     "role",

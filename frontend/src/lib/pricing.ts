@@ -2,11 +2,15 @@ import type { Menu, OrderItem, PizzaCategory, PizzaFlavor, PizzaGroupId, PizzaSi
 import { isPizzaCategory } from '@/types/api';
 
 /**
- * The public /api/menu payload doesn't expose per-flavor extra_cost or a
- * flavor's owning group (see server/src/services/orderService.ts), so these
- * helpers can only reproduce the *base* group+size price client-side. The
- * server always recomputes the authoritative price on submission; this is
- * strictly a best-effort preview for the cart.
+ * Client-side price preview for the cart. The server always recomputes the
+ * authoritative price on submission (see server/src/services/orderService.ts) -
+ * this exists so the running total in the Order Overview matches what the
+ * customer will be charged, not to decide it.
+ *
+ * That match is the whole point, so these helpers reproduce the server's rules
+ * exactly: the group is derived from the flavors picked (any 'special' flavor
+ * upgrades the pizza), and each flavor's `extraCost` is added pro-rata by
+ * portion, rounded per flavor, the same way resolvePizzaItem does it.
  */
 
 export function getPizzaCategory(menu: Menu): PizzaCategory | undefined {
@@ -48,11 +52,42 @@ export function resolvePizzaGroupId(pizzas: PizzaCategory, flavorIds: string[]):
   return flavorIds.some((id) => specialIds?.has(id)) ? 'special' : 'classic';
 }
 
-export function pizzaUnitPrice(pizzas: PizzaCategory, sizeId: string, flavorIds: string[]): number {
+/**
+ * Base group+size price plus each flavor's own surcharge, scaled by how much of
+ * the pizza that flavor covers - mirroring orderService.resolvePizzaItem's
+ * `Math.round(extra_cost * portion / 100)` per flavor, including the rounding,
+ * so the two agree to the peso.
+ *
+ * `portions` is optional: the flavor picker calls this before the split has
+ * been chosen, and an even split is the right assumption at that point.
+ */
+export function pizzaUnitPrice(
+  pizzas: PizzaCategory,
+  sizeId: string,
+  flavorIds: string[],
+  portions?: { flavor: string; portion: number }[],
+): number {
   const groupId = resolvePizzaGroupId(pizzas, flavorIds);
   const group = pizzas.groups.find((g) => g.id === groupId);
   const size = group?.sizes.find((s) => s.id === sizeId);
-  return size?.price ?? 0;
+  if (size?.price == null) return 0;
+
+  const byId = new Map(allPizzaFlavors(pizzas).map((f) => [f.id, f]));
+  const evenShare = flavorIds.length > 0 ? 100 / flavorIds.length : 0;
+  const extra = flavorIds.reduce((sum, id) => {
+    const extraCost = byId.get(id)?.extraCost ?? 0;
+    if (extraCost === 0) return sum;
+    const portion = portions?.find((p) => p.flavor === id)?.portion ?? evenShare;
+    return sum + Math.round((extraCost * portion) / 100);
+  }, 0);
+
+  return size.price + extra;
+}
+
+/** A product that takes a pizza flavor (gratinado, calzone) pays that flavor's surcharge in full - see orderService.resolveProductItem. */
+export function pizzaFlavorExtraCost(pizzas: PizzaCategory | undefined, flavorId: string | undefined): number {
+  if (!pizzas || !flavorId) return 0;
+  return allPizzaFlavors(pizzas).find((f) => f.id === flavorId)?.extraCost ?? 0;
 }
 
 export function maxFlavorsFor(pizzas: PizzaCategory, sizeId: string): number {

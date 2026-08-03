@@ -13,6 +13,7 @@ import {
   useAnalyticsCustomers,
   useAnalyticsEmployees,
   useAnalyticsPromotions,
+  useCurrentCashFlow,
 } from '@/lib/queries';
 import { KpiCard } from '@/components/analytics/KpiCard';
 import { TrendChart } from '@/components/charts/TrendChart';
@@ -63,10 +64,20 @@ const CATEGORY_COLORS = [
 ];
 
 function AnalyticsPage() {
+  const { data: current } = useCurrentCashFlow();
+  // Wait for the backend's Bogotá business day instead of seeding the custom-
+  // range defaults from the browser's raw UTC date, which can be a day
+  // ahead/behind (see order-history/index.tsx and caja.tsx, which already do
+  // this).
+  if (!current) return <p className="p-6 text-sm text-text-secondary">Cargando...</p>;
+  return <AnalyticsContent today={current.date} />;
+}
+
+function AnalyticsContent({ today }: { today: string }) {
   const [tab, setTab] = useState<TabKey>('resumen');
   const [range, setRange] = useState<AnalyticsRange>('today');
-  const [customTo, setCustomTo] = useState(() => new Date().toISOString().slice(0, 10));
-  const [customFrom, setCustomFrom] = useState(() => shiftDate(new Date().toISOString().slice(0, 10), -7));
+  const [customTo, setCustomTo] = useState(today);
+  const [customFrom, setCustomFrom] = useState(() => shiftDate(today, -7));
 
   const from = range === 'custom' ? customFrom : undefined;
   const to = range === 'custom' ? customTo : undefined;

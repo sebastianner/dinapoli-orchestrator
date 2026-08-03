@@ -1,4 +1,3 @@
-import { ValidationError } from '../utils/errors.js';
 import type { Order, PaymentMethod } from '../types/dinapoly-types.js';
 
 export interface PaymentSplit {
@@ -34,10 +33,10 @@ export interface Payment {
  * integration here later without touching call sites.
  */
 export function processPayment(order: Order, payments: PaymentSplit[]): Payment {
-  if (!Number.isInteger(order.total) || order.total <= 0) {
-    throw new ValidationError('el total de la orden debe ser un monto entero positivo en COP');
-  }
-
+  // The order total is validated by the caller *before* it commits the payment
+  // rows (see orderService.completeOrder). Throwing from here would leave an
+  // order settled in the database while the client saw an error, so this stays
+  // side-effect-free reporting.
   const amountCOP = order.grandTotal;
   const breakdown = payments
     .map((p) => {

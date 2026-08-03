@@ -1,6 +1,6 @@
 import db from '../db/index.js';
 import { ValidationError } from '../utils/errors.js';
-import { todayDateStrBogota } from '../utils/date.js';
+import { currentBusinessDateBogota } from '../utils/date.js';
 import { aggregateSales } from './endOfDayService.js';
 import type { CashFlowDay, CashExpense } from '../types/dinapoly-types.js';
 import type { CashRegisterSettingsRow, CashFlowRow, CashExpenseRow } from '../types/db.js';
@@ -83,7 +83,7 @@ const setCurrentCash = db.prepare<[number, number]>('UPDATE cash_flow SET cash_i
  * exists, this just returns it as-is.
  */
 export function getCurrentCashFlow(): CashFlowDay {
-  const today = todayDateStrBogota();
+  const today = currentBusinessDateBogota();
   const latest = getLatestRow.get();
   if (latest && latest.date === today) return withCashSalesToday(rowToCashFlowDay(latest));
 

@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
+    "test": "npx --prefix ../server tsx --tsconfig tsconfig.app.json tests/run-all.ts",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -75,9 +75,12 @@ function PizzaFlavorPage() {
   // The promo's own rule ("no puede ser mitad y mitad") caps a duo pizza at a
   // single flavor, regardless of how many the size would normally allow.
   const maxFlavors = isDuoPromo ? 1 : maxFlavorsFor(pizzas, sizeId);
-  const price = promoDraft ? 0 : pizzaUnitPrice(pizzas, sizeId, selectedFlavors);
   const availablePatterns = isDuoPromo ? [] : splitPatternsFor(selectedFlavors.length);
   const portions = computeFlavorPortions(selectedFlavors, pattern, halfFlavorId ?? undefined);
+  // Priced with the chosen split, not an assumed even one: a flavor's surcharge
+  // is charged pro-rata by portion server-side, so half of a premium flavor
+  // costs half its surcharge (see lib/pricing.pizzaUnitPrice).
+  const price = promoDraft ? 0 : pizzaUnitPrice(pizzas, sizeId, selectedFlavors, portions);
 
   const toggleFlavor = (flavorId: string) => {
     setSelectedFlavors((prev) => {

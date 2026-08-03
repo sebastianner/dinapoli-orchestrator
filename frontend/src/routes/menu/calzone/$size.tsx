@@ -3,7 +3,7 @@ import classNames from 'classnames';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { MessageSquarePlus, Plus } from 'lucide-react';
 import { useMenu } from '@/lib/queries';
-import { allPizzaFlavors, getPizzaCategory, getProductCategory, productUnitPrice } from '@/lib/pricing';
+import { allPizzaFlavors, getPizzaCategory, getProductCategory, pizzaFlavorExtraCost, productUnitPrice } from '@/lib/pricing';
 import { formatCOP } from '@/lib/format';
 import { useOrderStore } from '@/store/useOrderStore';
 import { useToastStore } from '@/store/useToastStore';
@@ -34,7 +34,10 @@ function CalzoneFlavorPage() {
   if (!category || !product || !size || !pizzas) return <p className="text-sm text-text-secondary">No encontrado.</p>;
 
   const flavors = allPizzaFlavors(pizzas);
-  const price = productUnitPrice(product, sizeId);
+  // A product that takes a pizza flavor pays that flavor's surcharge in full
+  // (see orderService.resolveProductItem) - usually 0, but quoting the base
+  // price alone would understate the bill the moment one isn't.
+  const price = productUnitPrice(product, sizeId) + pizzaFlavorExtraCost(pizzas, flavorId ?? undefined);
 
   const handleAdd = () => {
     if (!flavorId) {

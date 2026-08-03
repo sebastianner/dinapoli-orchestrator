@@ -103,6 +103,8 @@ export interface OrderRow {
   customer_address_id: number | null;
   notes: string | null;
   promo_type: string | null;
+  /** "Delivery #N of the day" as printed, assigned at creation. NULL for non-delivery orders and pre-column rows. */
+  delivery_day_number: number | null;
   total: number;
   created_at: string;
   completed_at: string | null;
@@ -178,6 +180,8 @@ export interface OrderItemRow {
   quantity: number;
   unit_price: number;
   notes: string | null;
+  /** 1 when this row is part of the order's promo rather than a normally-priced extra (see schema.sql). */
+  promo_item: 0 | 1;
   printed_at: string | null;
 }
 

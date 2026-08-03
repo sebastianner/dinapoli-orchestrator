@@ -3,25 +3,12 @@ import { Trash2 } from "lucide-react";
 import { Modal } from "@/components/common/Modal";
 import { formatCOP } from "@/lib/format";
 import { completeOrder } from "@/lib/api";
+import { settlementTotals, toPaymentRequest, validateSettlement, type PaymentSplitDraft } from "@/lib/paymentSplits";
 import { randomUUID } from "@/lib/uuid";
 import { useOrderStore } from "@/store/useOrderStore";
 import type { Order, PaymentMethod } from "@/types/api";
 
-interface PaymentSplitRow {
-  clientId: string;
-  method: PaymentMethod;
-  /**
-   * Net amount actually collected via this method (tip/delivery fee in, this
-   * split's discount already out) - what the cashier hands back change
-   * against. Deliberately NOT named the same as the API's `grossAmount`
-   * (= netAmount + discount, added back in handleSubmit) so the two can't be
-   * confused with each other while editing.
-   */
-  netAmount: string;
-  tipAmount: string;
-  deliveryFee: string;
-  discount: string;
-}
+type PaymentSplitRow = PaymentSplitDraft;
 
 const methodLabels: Record<PaymentMethod, string> = {
   cash: "Efectivo",
@@ -78,21 +65,12 @@ export function PaymentModal({
   // hands back change against); the GROSS amount (netAmount + discount) is
   // what's sent to and stored by the API, so the pre-discount price is
   // never lost - see OrderPayment.grossAmount.
-  const sumTip = splits.reduce((sum, s) => sum + (Number(s.tipAmount) || 0), 0);
-  const sumDeliveryFee = splits.reduce(
-    (sum, s) => sum + (Number(s.deliveryFee) || 0),
-    0,
-  );
-  const sumDiscount = splits.reduce(
-    (sum, s) => sum + (Number(s.discount) || 0),
-    0,
-  );
-  const grossOwed = order.total + sumTip + sumDeliveryFee;
-  const totalOwed = grossOwed - sumDiscount;
-  const sumNetAmount = splits.reduce((sum, s) => sum + (Number(s.netAmount) || 0), 0);
-  const remaining = totalOwed - sumNetAmount;
-  const isValid =
-    sumNetAmount === totalOwed && splits.every((s) => Number(s.netAmount) > 0);
+  //
+  // Validation lives in lib/paymentSplits so it mirrors what the server
+  // enforces per split, not just in aggregate - see the note there.
+  const { grossOwed, totalOwed, assigned: sumNetAmount, remaining, discounts: sumDiscount } =
+    settlementTotals(order.total, splits);
+  const { isValid, problem, problemIndex } = validateSettlement(order.total, splits, order.orderType);
 
   const reset = () => {
     setSplits([
@@ -191,21 +169,7 @@ export function PaymentModal({
     setSubmitting(true);
     setError(null);
     try {
-      const completedOrder = await completeOrder(
-        order.id,
-        splits.map((s) => {
-          const discount = Number(s.discount) || 0;
-          // The API always stores the GROSS amount (net collected + its discount
-          // slice), so the pre-discount price stays on record - see OrderPayment.grossAmount.
-          return {
-            method: s.method,
-            grossAmount: (Number(s.netAmount) || 0) + discount,
-            tipAmount: Number(s.tipAmount) || 0,
-            deliveryFee: Number(s.deliveryFee) || 0,
-            discount,
-          };
-        }),
-      );
+      const completedOrder = await completeOrder(order.id, toPaymentRequest(splits));
       reset();
       onSuccess(completedOrder);
     } catch (err) {
@@ -257,10 +221,14 @@ export function PaymentModal({
           <span />
         </div>
 
-        {splits.map((split) => (
+        {splits.map((split, index) => (
           <div
             key={split.clientId}
-            className="grid items-center gap-2"
+            className={
+              index === problemIndex
+                ? "grid items-center gap-2 rounded-lg ring-1 ring-danger"
+                : "grid items-center gap-2"
+            }
             style={{ gridTemplateColumns: paymentRowColumns }}
           >
             <select
@@ -363,6 +331,12 @@ export function PaymentModal({
         )}
       </div>
 
+      {/* Say why the charge can't go through instead of just greying the
+          button out - the per-split rules (a tip bigger than the amount on
+          that method, say) aren't guessable from looking at the row. */}
+      {!isValid && problem && !error && (
+        <p className="mt-2 text-sm text-text-secondary">{problem}</p>
+      )}
       {error && <p className="mt-2 text-sm text-danger">{error}</p>}
 
       <button
