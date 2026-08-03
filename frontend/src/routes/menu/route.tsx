@@ -67,7 +67,15 @@ function MenuLayout() {
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto p-4 pb-20 sm:p-6 md:pb-6">
+        {/* Extra bottom padding below md: the mobile cart-summary bar
+            (bottom-16, see OrderOverview) sits on top of the bottom nav bar
+            (Sidebar) - together they occlude ~110-145px of the viewport's
+            bottom edge (more on notched phones, via safe-area-inset-bottom),
+            which used to hide the flavor-picker pages' "Agregar a la orden"
+            button. sm:pb-40 matters too: sm:p-6 alone would drop back to 24px
+            of clearance from 640-767px, where both bars are still visible
+            (they only disappear at md, not sm). */}
+        <div className="flex-1 overflow-y-auto p-4 pb-40 sm:p-6 sm:pb-40 md:pb-6">
           {isLoading ? <p className="text-sm text-text-secondary">Cargando menú...</p> : <Outlet />}
         </div>
       </div>
