@@ -18,8 +18,12 @@ function parseReportId(param: string): number {
 // reports is open to any employee too - staff may need to check the day's
 // numbers while closing, not just admins. Reprinting (below) stays
 // admin-only, since that's a physical-document action, not just viewing.
-router.post('/close', requireAuth, (_req, res) => {
-  res.json(closeDay());
+router.post('/close', requireAuth, async (_req, res, next) => {
+  try {
+    res.json(await closeDay());
+  } catch (err) {
+    next(err);
+  }
 });
 
 router.get('/', requireAuth, (_req, res) => {
@@ -30,10 +34,14 @@ router.get('/:id', requireAuth, (req, res) => {
   res.json(getClosingReport(parseReportId(req.params.id)));
 });
 
-router.post('/:id/reprint', requireAuth, requireAdmin, (req, res) => {
-  const id = parseReportId(req.params.id);
-  reprintClosingReport(id);
-  res.json({ status: 'reprinted', id });
+router.post('/:id/reprint', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const id = parseReportId(req.params.id);
+    await reprintClosingReport(id);
+    res.json({ status: 'reprinted', id });
+  } catch (err) {
+    next(err);
+  }
 });
 
 export default router;

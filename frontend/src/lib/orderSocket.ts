@@ -3,12 +3,21 @@ import type { Order, OrderRequest, OrderSocketServerMessage } from '@/types/api'
 type PendingSubmission = {
   resolve: (order: Order) => void;
   reject: (err: Error) => void;
+  /** Set once this submission has been answered, timed out, or failed - see the queue note in submitOrder. */
+  settled: boolean;
 };
 
 type BroadcastListener = (msg: OrderSocketServerMessage) => void;
 
 const RECONNECT_BASE_DELAY_MS = 1000;
 const RECONNECT_MAX_DELAY_MS = 10000;
+/**
+ * How long to wait for the server's ack before giving up on a submission.
+ * Order intake is a single synchronous insert, so a reply that hasn't arrived
+ * in 20s isn't coming - but without this the promise simply never settled and
+ * the "Enviar orden" button span forever with nothing to tell the user.
+ */
+const SUBMIT_TIMEOUT_MS = 20000;
 
 /**
  * Single shared connection to /ws/orders, used for two things:
@@ -53,7 +62,11 @@ class OrderSocketClient {
         for (const listener of this.listeners) listener(msg);
 
         if (msg.type !== 'order_created' && msg.type !== 'error') return;
-        const pending = this.queue.shift();
+        // Replies come back in the order they were sent, so the queue is
+        // positional - a timed-out submission therefore can't just be spliced
+        // out (that would hand its late reply to the next one). It stays in
+        // place, flagged settled, and gets skipped here instead.
+        const pending = this.takeNextPending();
         if (!pending) return;
         if (msg.type === 'order_created') pending.resolve(msg.order);
         else pending.reject(new Error(msg.message));
@@ -63,6 +76,8 @@ class OrderSocketClient {
         this.socket = null;
         this.connecting = null;
         for (const pending of this.queue.splice(0)) {
+          if (pending.settled) continue;
+          pending.settled = true;
           pending.reject(new Error('conexión perdida antes de recibir respuesta'));
         }
         if (this.stayConnected) this.scheduleReconnect();
@@ -101,10 +116,36 @@ class OrderSocketClient {
     return () => this.listeners.delete(listener);
   }
 
+  /** Shifts off any already-settled (timed out) entries and returns the next one still waiting. */
+  private takeNextPending(): PendingSubmission | undefined {
+    let pending = this.queue.shift();
+    while (pending?.settled) pending = this.queue.shift();
+    return pending;
+  }
+
   async submitOrder(orderRequest: OrderRequest): Promise<Order> {
     const socket = await this.connect();
     return new Promise<Order>((resolve, reject) => {
-      this.queue.push({ resolve, reject });
+      const entry: PendingSubmission = {
+        settled: false,
+        resolve: (order) => {
+          if (entry.settled) return;
+          entry.settled = true;
+          clearTimeout(timer);
+          resolve(order);
+        },
+        reject: (err) => {
+          if (entry.settled) return;
+          entry.settled = true;
+          clearTimeout(timer);
+          reject(err);
+        },
+      };
+      const timer = setTimeout(() => {
+        entry.reject(new Error('el servidor no respondió a tiempo - revisa si la orden se creó antes de reintentar'));
+      }, SUBMIT_TIMEOUT_MS);
+
+      this.queue.push(entry);
       socket.send(JSON.stringify(orderRequest));
     });
   }

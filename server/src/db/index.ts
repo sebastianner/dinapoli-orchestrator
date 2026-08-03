@@ -4,7 +4,11 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = path.resolve(__dirname, '../../data');
+// Overridable so a test/audit run can point at a throwaway database instead of
+// the live one. Unset (the normal case) keeps the historical ../../data path.
+const DATA_DIR = process.env.DINAPOLI_DATA_DIR
+  ? path.resolve(process.env.DINAPOLI_DATA_DIR)
+  : path.resolve(__dirname, '../../data');
 const DB_PATH = path.join(DATA_DIR, 'dinapoli.sqlite');
 
 fs.mkdirSync(DATA_DIR, { recursive: true });

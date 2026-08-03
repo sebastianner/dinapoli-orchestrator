@@ -199,7 +199,7 @@ function CajaContent({ current }: { current: CashFlowDay }) {
       </div>
 
       <div className="flex flex-wrap items-start gap-6">
-        <Calendar selectedDate={selectedDate} onSelectDate={setSelectedDate} highlightedDates={highlightedDates} />
+        <Calendar selectedDate={selectedDate} onSelectDate={setSelectedDate} highlightedDates={highlightedDates} maxDate={current.date} />
 
         <div className="min-w-64 flex-1 rounded-2xl border border-border bg-surface p-4">
           <h2 className="mb-3 font-semibold text-text-primary">Gastos del {formatDateLong(selectedDate)}</h2>

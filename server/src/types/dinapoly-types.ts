@@ -69,6 +69,18 @@ export interface PizzaFlavor {
   description: string;
   /** False for a sold-out flavor - still present (not filtered out of the menu) so it can render disabled instead of disappearing, same as Product.isAvailable. */
   isAvailable: boolean;
+  /**
+   * Surcharge this flavor adds on top of the group+size price, integer COP,
+   * usually 0. On a pizza it is charged pro-rata by portion (half a premium
+   * flavor adds half its surcharge - see orderService.resolvePizzaItem); on a
+   * product that takes a pizza flavor (gratinado, calzone) it is added whole.
+   *
+   * Exposed because the server charges it and the cart has to be able to show
+   * the same number. It used to be server-only, which meant that the moment a
+   * non-zero value existed the cart quoted one price and the bill charged
+   * another, with no way for the frontend to tell.
+   */
+  extraCost: number;
 }
 
 export interface ProductCategory {
@@ -442,6 +454,14 @@ export interface OrderItem {
   /** Price snapshot at order time, integer COP. */
   unitPrice: number;
   notes: string | null;
+  /**
+   * True when this line is one of the items the order's promo is made of, as
+   * opposed to a normally-priced item sharing the same order. Can't be inferred
+   * from unitPrice (a promo item is priced at the flat promo price, 0, or a
+   * soda surcharge - none of which are distinguishable from a regular price),
+   * so it's recorded at creation. Always false for items added afterwards.
+   */
+  promoItem: boolean;
   /** Null until the queue worker includes this item in a kitchen ticket (original or addendum). */
   printedAt: string | null;
 }

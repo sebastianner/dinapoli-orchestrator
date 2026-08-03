@@ -58,6 +58,13 @@ export interface PizzaFlavor {
   description: string;
   /** False for a sold-out flavor - still present (not filtered out of the menu) so it can render disabled instead of disappearing, same as Product.isAvailable. */
   isAvailable: boolean;
+  /**
+   * Surcharge this flavor adds on top of the group+size price, integer COP,
+   * usually 0. Charged pro-rata by portion on a pizza (half a premium flavor
+   * adds half its surcharge) and whole on a product that takes a pizza flavor.
+   * Mirrored in lib/pricing so the cart quotes what the server charges.
+   */
+  extraCost: number;
 }
 
 export interface ProductCategory {

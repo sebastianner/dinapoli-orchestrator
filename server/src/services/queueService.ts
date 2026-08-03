@@ -29,14 +29,27 @@ const markPrinting = db.prepare<[number]>(
 const markActive = db.prepare<[number]>(
   `UPDATE orders SET status = 'ACTIVE' WHERE id = ?`,
 );
-const markItemsPrinted = db.prepare<[number]>(
-  `UPDATE order_items SET printed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE order_id = ? AND printed_at IS NULL`,
+const markPending = db.prepare<[number]>(
+  `UPDATE orders SET status = 'PENDING' WHERE id = ?`,
 );
+// Stamped per item id rather than "every unprinted item on the order": printing
+// is asynchronous now, so items can be added to this order *while its ticket is
+// in flight (see the note in processOrder). A blanket UPDATE would mark those
+// as printed even though they were never on the paper.
+const markItemPrinted = db.prepare<[number]>(
+  `UPDATE order_items SET printed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND printed_at IS NULL`,
+);
+const countUnprintedItems = db.prepare<[number], { count: number }>(
+  `SELECT COUNT(*) AS count FROM order_items WHERE order_id = ? AND printed_at IS NULL`,
+);
+const markItemsPrinted = db.transaction((ids: number[]) => {
+  for (const id of ids) markItemPrinted.run(id);
+});
 
 let isTicking = false;
 let intervalHandle: ReturnType<typeof setInterval> | null = null;
 
-function processOrder(id: number): void {
+async function processOrder(id: number): Promise<void> {
   markPrinting.run(id);
   broadcastOrderUpdate(id);
   const order = getOrderById(id);
@@ -49,12 +62,23 @@ function processOrder(id: number): void {
   const isAddition = order.items.length > newItems.length;
   try {
     if (isAddition) {
-      printKitchenTicketAddendum(order, newItems);
+      await printKitchenTicketAddendum(order, newItems);
     } else {
-      printKitchenTicket(order);
+      await printKitchenTicket(order);
     }
-    markItemsPrinted.run(id);
-    markActive.run(id);
+    // Everything below is about the window that the `await` above opens up.
+    // Printing no longer blocks the event loop (it used to, via execFileSync),
+    // so staff can add items to this very order while its ticket is printing.
+    // Only the items that were actually on the paper get stamped...
+    markItemsPrinted(newItems.map((item) => item.id));
+    // ...and if anything arrived meanwhile it's still unprinted, so the order
+    // goes back to PENDING for an addendum rather than to ACTIVE, which the
+    // queue would never look at again.
+    if (countUnprintedItems.get(id)!.count > 0) {
+      markPending.run(id);
+    } else {
+      markActive.run(id);
+    }
     broadcastOrderUpdate(id);
   } catch (err) {
     // Leave status as PRINTING; the next tick (or the next boot, after a
@@ -66,13 +90,26 @@ function processOrder(id: number): void {
   }
 }
 
-function tick(): void {
+async function tick(): Promise<void> {
   if (isTicking) return;
   isTicking = true;
   try {
-    const rows = getPendingOrPrinting.all();
-    for (const row of rows) {
-      processOrder(row.id);
+    // Re-scanned rather than iterating one snapshot: an order placed while an
+    // earlier ticket is printing would otherwise wait for the next poll, which
+    // it never used to (printing was synchronous, so a tick always finished
+    // before the next order could be handled at all).
+    //
+    // `attempted` is what stops a permanently-failing printer from spinning
+    // this loop: a row that fails stays PENDING/PRINTING but isn't retried
+    // until the next poll, preserving the existing once-every-2s retry pace.
+    const attempted = new Set<number>();
+    for (;;) {
+      const rows = getPendingOrPrinting.all().filter((row) => !attempted.has(row.id));
+      if (rows.length === 0) break;
+      for (const row of rows) {
+        attempted.add(row.id);
+        await processOrder(row.id);
+      }
     }
   } finally {
     isTicking = false;
@@ -80,8 +117,8 @@ function tick(): void {
 }
 
 export function startQueueWorker(): void {
-  tick(); // recovery pass: catches PRINTING rows left over from a crash/blackout
-  intervalHandle = setInterval(tick, POLL_INTERVAL_MS);
+  void tick(); // recovery pass: catches PRINTING rows left over from a crash/blackout
+  intervalHandle = setInterval(() => void tick(), POLL_INTERVAL_MS);
   console.log(`[queue] worker started (poll interval ${POLL_INTERVAL_MS}ms)`);
 }
 
@@ -93,8 +130,9 @@ export function stopQueueWorker(): void {
 /**
  * Nudge the worker to process immediately instead of waiting for the next
  * poll tick - used both for a brand new order and for items added to an
- * existing one.
+ * existing one. A no-op while a tick is already running, which is fine: that
+ * tick re-scans until the queue is empty before it finishes.
  */
 export function notifyPrintQueue(): void {
-  setImmediate(tick);
+  setImmediate(() => void tick());
 }

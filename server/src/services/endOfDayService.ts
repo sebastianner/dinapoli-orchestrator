@@ -1,6 +1,6 @@
 import db from '../db/index.js';
 import { NotFoundError, ConflictError } from '../utils/errors.js';
-import { todayDateStrBogota } from '../utils/date.js';
+import { currentBusinessDateBogota, BUSINESS_DAY_SQL_OFFSET } from '../utils/date.js';
 import { printPlainText, formatMoney, centerText, toAsciiText, RECEIPT_WIDTH } from './printerService.js';
 import type { ClosingReport } from '../types/dinapoly-types.js';
 import type { ClosingReportRow } from '../types/db.js';
@@ -49,13 +49,13 @@ export interface SalesAggregate {
 
 // completed_at is stored in UTC; Bogota has no DST (fixed UTC-5 year round),
 // so a static offset reliably matches the same business day computed in JS
-// via todayDateStrBogota(). Tip and delivery fee/discount only ever exist as
-// the per-method breakdown in order_payments (see schema comment), so an
-// order's sales figure is derived by summing (gross_amount - tip_amount - discount)
+// via currentBusinessDateBogota(). Tip and delivery fee/discount only ever
+// exist as the per-method breakdown in order_payments (see schema comment),
+// so an order's sales figure is derived by summing (gross_amount - tip_amount - discount)
 // across its payment rows - this excludes tips and discounts from sales
 // while keeping delivery fees in, exactly, with no proportional guessing.
 const getCompletedOrdersForDate = db.prepare<[string], { id: number; order_type: string; customer_id: number | null }>(
-  `SELECT id, order_type, customer_id FROM orders WHERE status = 'COMPLETED' AND date(completed_at, '-5 hours') = ?`
+  `SELECT id, order_type, customer_id FROM orders WHERE status = 'COMPLETED' AND date(completed_at, '${BUSINESS_DAY_SQL_OFFSET}') = ?`
 );
 
 const getPaymentsForOrder = db.prepare<[number], { method: string; gross_amount: number; tip_amount: number; discount: number }>(
@@ -68,7 +68,7 @@ const getItemsSoldForDate = db.prepare<[string], { total: number | null }>(
   `SELECT COALESCE(SUM(oi.quantity), 0) AS total
    FROM order_items oi
    JOIN orders o ON o.id = oi.order_id
-   WHERE o.status = 'COMPLETED' AND date(o.completed_at, '-5 hours') = ?`
+   WHERE o.status = 'COMPLETED' AND date(o.completed_at, '${BUSINESS_DAY_SQL_OFFSET}') = ?`
 );
 
 export function aggregateSales(date: string): SalesAggregate {
@@ -201,10 +201,16 @@ const listClosingReportRows = db.prepare<[], ClosingReportRow>('SELECT * FROM cl
 
 // Closing the day while orders are still open would silently under-report
 // sales (an order that completes later would never make it into this
-// snapshot) - block it instead, same "today" business-day window as
-// aggregateSales/order-history's date filter.
-const getOpenOrderCountForDate = db.prepare<[string], { count: number }>(
-  `SELECT COUNT(*) AS count FROM orders WHERE status != 'COMPLETED' AND date(created_at, '-5 hours') = ?`
+// snapshot) - block it instead.
+//
+// Deliberately NOT scoped to today's business day. Sales are aggregated by
+// completed_at, so an order left open from an earlier day still lands in
+// whichever day it is eventually settled on, and scoping the guard to
+// created_at let exactly that order slip past unnoticed. Any open order is a
+// reason to stop and deal with it, however old.
+const getOpenOrders = db.prepare<[], { id: number; business_day: string }>(
+  `SELECT id, date(created_at, '${BUSINESS_DAY_SQL_OFFSET}') AS business_day
+   FROM orders WHERE status != 'COMPLETED' ORDER BY id`
 );
 
 /**
@@ -217,13 +223,22 @@ const getOpenOrderCountForDate = db.prepare<[string], { count: number }>(
  * call this (see routes/endOfDay.ts) as long as every one of today's orders
  * is already COMPLETED.
  */
-export function closeDay(): ClosingReport {
-  const date = todayDateStrBogota();
+export async function closeDay(): Promise<ClosingReport> {
+  const date = currentBusinessDateBogota();
 
-  const openOrders = getOpenOrderCountForDate.get(date)!.count;
-  if (openOrders > 0) {
+  const openOrders = getOpenOrders.all();
+  if (openOrders.length > 0) {
+    const one = openOrders.length === 1;
+    // Naming the orders matters when one of them is from an earlier day - staff
+    // would otherwise look through today's floor for something that isn't there.
+    const listed = openOrders
+      .slice(0, 10)
+      .map((o) => (o.business_day === date ? `#${o.id}` : `#${o.id} (${o.business_day})`))
+      .join(', ');
+    const andMore = openOrders.length > 10 ? ` y ${openOrders.length - 10} más` : '';
     throw new ConflictError(
-      `${openOrders} orden${openOrders === 1 ? '' : 'es'} de hoy ${openOrders === 1 ? 'no está completada' : 'no están completadas'} - complétala${openOrders === 1 ? '' : 's'} o cancélala${openOrders === 1 ? '' : 's'} antes de cerrar el día`
+      `${openOrders.length} orden${one ? '' : 'es'} ${one ? 'sigue abierta' : 'siguen abiertas'}: ${listed}${andMore} - ` +
+        `complétala${one ? '' : 's'} o elimínala${one ? '' : 's'} antes de cerrar el día`
     );
   }
 
@@ -254,7 +269,7 @@ export function closeDay(): ClosingReport {
   );
 
   try {
-    printPlainText(content);
+    await printPlainText(content);
   } catch (err) {
     // The report is already durably saved above (content included) - a failure
     // to print (no printer/CUPS on this machine, say) shouldn't undo it or stop
@@ -276,8 +291,8 @@ export function getClosingReport(id: number): ClosingReport {
 }
 
 /** Re-sends a previously generated closing report to the printer without recomputing it. */
-export function reprintClosingReport(id: number): void {
+export async function reprintClosingReport(id: number): Promise<void> {
   const row = getClosingReportRow.get(id);
   if (!row) throw new NotFoundError(`informe de cierre ${id} no encontrado`);
-  printPlainText(row.content);
+  await printPlainText(row.content);
 }

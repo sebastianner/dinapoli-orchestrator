@@ -2,8 +2,10 @@ import { useState } from 'react';
 import { Info } from 'lucide-react';
 import type { HeatmapCell } from '@/types/api';
 
-// dow from the API is 0 (Sunday) - 6 (Saturday); reordered to start the week
-// on Monday since that reads more naturally for a restaurant's weekly rhythm.
+// dow from the API is 0 (Sunday) - 6 (Saturday), the real calendar day an
+// order happened on (not shifted to a business day - see analyticsService's
+// getHeatmapRows) - reordered to start the week on Monday since that reads
+// more naturally for a restaurant's weekly rhythm.
 const DAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
 const DAY_LABELS: Record<number, string> = { 0: 'Dom', 1: 'Lun', 2: 'Mar', 3: 'Mié', 4: 'Jue', 5: 'Vie', 6: 'Sáb' };
 const HOURS = Array.from({ length: 24 }, (_, h) => h);

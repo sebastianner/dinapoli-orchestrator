@@ -2,12 +2,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import puppeteer, { type Browser } from "puppeteer";
 import { PNG } from "pngjs";
 import db from "../db/index.js";
 import { NotFoundError } from "../utils/errors.js";
+import { BUSINESS_DAY_SQL_OFFSET } from "../utils/date.js";
 import type {
   Order,
   OrderItem,
@@ -50,7 +52,12 @@ const TICKET_TEXT_WIDTH = RECEIPT_WIDTH / 2;
 const KITCHEN_PRINTER_QUEUE = process.env.KITCHEN_PRINTER_QUEUE ?? "kitchen_printer";
 const COUNTER_PRINTER_QUEUE = process.env.COUNTER_PRINTER_QUEUE ?? "counter_printer";
 
+const execFileAsync = promisify(execFile);
+
 const IS_WINDOWS = process.platform === "win32";
+// How often the print queues are un-paused. See ensurePrinterEnabled for why
+// this is a timer rather than something that runs before each job.
+const PRINTER_MAINTENANCE_INTERVAL_MS = 30_000;
 const WINDOWS_RAW_PRINT_SCRIPT = path.resolve(__dirname, "../assets/print-raw.ps1");
 
 const LOGO_PATH = path.resolve(__dirname, "../assets/dinapoli_pizza_logo.png");
@@ -171,18 +178,23 @@ export function toAsciiText(text: string): string {
  * downstream (writeToDevice throwing, the kitchen-ticket retry queue,
  * completeOrder's try/catch) ever notices the job didn't actually print -
  * orders/receipts silently stop coming out with no error anywhere.
- * Re-enabling/resuming before every job is a cheap no-op when the queue's
- * already running, and self-heals the common case instead of requiring a
- * manual `cupsenable` / "Resume Printing" click.
+ *
+ * Note this can only ever be *periodic* self-healing, never reactive: since a
+ * paused queue accepts the job without error, there is no failure to react to.
+ * It runs on a timer (see startPrinterMaintenance) rather than before every
+ * job, which is what it used to do - `Resume-Printer` costs ~566ms of process
+ * startup and CIM module loading, and paying that per ticket made it more than
+ * half the cost of printing. Nothing is lost by resuming late: a job spooled
+ * against a paused queue sits there and flushes the moment it resumes.
  */
-function ensurePrinterEnabled(queue: string): void {
+async function ensurePrinterEnabled(queue: string): Promise<void> {
   try {
     if (IS_WINDOWS) {
       // Resume-Printer ships with Windows' built-in PrintManagement module
       // (Windows 8+ / Server 2012+) - no extra install needed. Quoting the
       // name defensively even though it only ever comes from our own env
       // vars, never user input.
-      execFileSync("powershell.exe", [
+      await execFileAsync("powershell.exe", [
         "-NoProfile",
         "-ExecutionPolicy",
         "Bypass",
@@ -190,7 +202,7 @@ function ensurePrinterEnabled(queue: string): void {
         `Resume-Printer -Name '${queue.replace(/'/g, "''")}'`,
       ]);
     } else {
-      execFileSync("cupsenable", [queue]);
+      await execFileAsync("cupsenable", [queue]);
     }
   } catch (err) {
     console.error(
@@ -200,16 +212,41 @@ function ensurePrinterEnabled(queue: string): void {
   }
 }
 
-function writeToDeviceWindows(payload: Buffer, queue: string): void {
+let maintenanceHandle: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * Keeps both print queues un-paused, on a timer and off the printing hot path.
+ * Called from server.ts alongside the queue worker. Worst case after a queue
+ * pauses itself is one interval of tickets sitting spooled, then all of them
+ * printing at once - versus paying the resume cost on every single ticket.
+ */
+export function startPrinterMaintenance(): void {
+  if (PRINTER_EMULATION_DIR) return; // nothing to resume
+  const sweep = () => {
+    for (const queue of new Set([KITCHEN_PRINTER_QUEUE, COUNTER_PRINTER_QUEUE])) {
+      void ensurePrinterEnabled(queue);
+    }
+  };
+  sweep(); // one pass at boot, so the first ticket of the night isn't the one that waits
+  maintenanceHandle = setInterval(sweep, PRINTER_MAINTENANCE_INTERVAL_MS);
+  console.log(`[printer:thermal-80mm] queue maintenance started (every ${PRINTER_MAINTENANCE_INTERVAL_MS}ms)`);
+}
+
+export function stopPrinterMaintenance(): void {
+  if (maintenanceHandle) clearInterval(maintenanceHandle);
+  maintenanceHandle = null;
+}
+
+async function writeToDeviceWindows(payload: Buffer, queue: string): Promise<void> {
   // WinSpool (unlike CUPS's `lp`) has no "pipe bytes in via stdin" story, so
   // the payload goes to a scratch file first and print-raw.ps1 (a WritePrinter
   // P/Invoke wrapper, see server/src/assets/print-raw.ps1) reads it back and
   // sends it to the named queue with datatype RAW - the Windows equivalent
   // of `lp -o raw`, bypassing driver-side rendering entirely.
   const tempFile = path.join(os.tmpdir(), `dinapoli-print-${randomUUID()}.bin`);
-  fs.writeFileSync(tempFile, payload);
+  await fs.promises.writeFile(tempFile, payload);
   try {
-    execFileSync("powershell.exe", [
+    await execFileAsync("powershell.exe", [
       "-NoProfile",
       "-ExecutionPolicy",
       "Bypass",
@@ -221,19 +258,131 @@ function writeToDeviceWindows(payload: Buffer, queue: string): void {
       tempFile,
     ]);
   } finally {
-    fs.rmSync(tempFile, { force: true });
+    await fs.promises.rm(tempFile, { force: true }).catch(() => {
+      // best-effort cleanup of the scratch payload
+    });
   }
 }
 
-function writeToDevice(payload: Buffer, queue: string): void {
-  ensurePrinterEnabled(queue);
-  if (IS_WINDOWS) {
-    writeToDeviceWindows(payload, queue);
+/** `lp` takes the payload on stdin; the async execFile has no `input` option, so it's piped by hand. */
+function writeToDeviceCups(payload: Buffer, queue: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = execFile("lp", ["-d", queue, "-o", "raw"], (err) => (err ? reject(err) : resolve()));
+    // A child that dies before reading stdin turns the write into EPIPE; the
+    // exec callback above already carries the real failure, so don't let the
+    // stream error double-reject.
+    child.stdin?.on("error", () => {});
+    child.stdin?.end(payload);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Emulated printer (no hardware attached)
+// ---------------------------------------------------------------------------
+//
+// Set PRINTER_EMULATION_DIR to a directory and every job that would go to a
+// physical queue is written there instead: the exact ESC/POS byte stream as
+// `<seq>-<queue>-<kind>.bin`, plus a human-readable decode of it as `.txt`
+// (control sequences stripped/annotated). Raster jobs additionally drop the
+// pre-dither PNG next to them (see printHtmlAsImage). Nothing else changes -
+// the same payload builders, the same call sites, the same failure semantics -
+// so this exercises the whole print path end to end with no printer present.
+const PRINTER_EMULATION_DIR = process.env.PRINTER_EMULATION_DIR ?? null;
+let emulatedJobSeq: number | null = null;
+
+/** Resumes numbering after the highest job already in the directory, so a server restart appends to the spool instead of overwriting it from 0001. */
+function nextEmulatedJobPath(queue: string, extension: string): string {
+  if (emulatedJobSeq == null) {
+    const existing = fs.existsSync(PRINTER_EMULATION_DIR!)
+      ? fs.readdirSync(PRINTER_EMULATION_DIR!).map((f) => Number(f.slice(0, 5))).filter((n) => Number.isInteger(n))
+      : [];
+    emulatedJobSeq = existing.length ? Math.max(...existing) : 0;
+  }
+  emulatedJobSeq += 1;
+  const seq = String(emulatedJobSeq).padStart(5, "0");
+  return path.join(PRINTER_EMULATION_DIR!, `${seq}-${queue}.${extension}`);
+}
+
+/**
+ * Turns an ESC/POS payload back into something readable: raster bands become a
+ * one-line summary, every other command becomes a `<TAG>` marker, and the
+ * printable bytes come through as latin1 text (which is how they were encoded).
+ */
+function decodeEscPos(payload: Buffer): string {
+  let out = "";
+  let i = 0;
+  while (i < payload.length) {
+    const b = payload[i];
+    if (b === ESC && payload[i + 1] === 0x40) { out += "<INIT>\n"; i += 2; continue; }
+    if (b === ESC && payload[i + 1] === 0x74) { out += `<CODEPAGE ${payload[i + 2]}>\n`; i += 3; continue; }
+    if (b === ESC && payload[i + 1] === 0x20) { out += `<CHAR-SPACING ${payload[i + 2]}>\n`; i += 3; continue; }
+    if (b === ESC && payload[i + 1] === 0x45) { out += payload[i + 2] ? "<B>" : "</B>"; i += 3; continue; }
+    if (b === ESC && payload[i + 1] === 0x64) { out += `\n<FEED ${payload[i + 2]}>\n`; i += 3; continue; }
+    if (b === GS && payload[i + 1] === 0x21) { out += `<SIZE 0x${payload[i + 2].toString(16).padStart(2, "0")}>\n`; i += 3; continue; }
+    if (b === GS && payload[i + 1] === 0x56) { out += `<CUT>\n`; i += 3; continue; }
+    if (b === GS && payload[i + 1] === 0x76 && payload[i + 2] === 0x30) {
+      const bytesPerRow = payload[i + 4] | (payload[i + 5] << 8);
+      const rows = payload[i + 6] | (payload[i + 7] << 8);
+      out += `<RASTER ${bytesPerRow * 8}px x ${rows}px>\n`;
+      i += 8 + bytesPerRow * rows;
+      continue;
+    }
+    out += Buffer.from([b]).toString("latin1");
+    i += 1;
+  }
+  return out;
+}
+
+// Writing a file is effectively instant, while a real printer costs real time
+// (~1s per ticket on Windows, measured). Set this to model that cost against
+// the emulated printer so the knock-on effect on everything else the server is
+// doing can be measured without hardware. Unset (the default) is instant.
+//
+// The wait is asynchronous, matching how the real path now behaves: the cost is
+// a child process, which the OS runs while this event loop stays free.
+// PRINTER_EMULATION_BLOCKING=1 makes it a *synchronous* block instead, which is
+// what execFileSync used to do - kept so the original pathology can still be
+// reproduced on demand and the regression test can prove it detects it.
+const PRINTER_EMULATION_DELAY_MS = Number(process.env.PRINTER_EMULATION_DELAY_MS ?? 0);
+const PRINTER_EMULATION_BLOCKING = process.env.PRINTER_EMULATION_BLOCKING === "1";
+const blockingSleepBuffer = new Int32Array(new SharedArrayBuffer(4));
+
+/** Blocks the event loop, exactly like execFileSync did - a setTimeout would not reproduce the problem. */
+function blockFor(ms: number): void {
+  Atomics.wait(blockingSleepBuffer, 0, 0, ms);
+}
+
+async function writeToEmulatedPrinter(payload: Buffer, queue: string): Promise<void> {
+  fs.mkdirSync(PRINTER_EMULATION_DIR!, { recursive: true });
+  const binPath = nextEmulatedJobPath(queue, "bin");
+  fs.writeFileSync(binPath, payload);
+  fs.writeFileSync(binPath.replace(/\.bin$/, ".txt"), decodeEscPos(payload), "latin1");
+  if (PRINTER_EMULATION_DELAY_MS <= 0) return;
+  if (PRINTER_EMULATION_BLOCKING) blockFor(PRINTER_EMULATION_DELAY_MS);
+  else await new Promise((resolve) => setTimeout(resolve, PRINTER_EMULATION_DELAY_MS));
+}
+
+/**
+ * Hands the payload to the OS print spooler. Asynchronous on purpose: this
+ * used to be execFileSync, which blocks the entire Node event loop - measured
+ * at ~1s per ticket on Windows, during which the server answered nothing. No
+ * WebSocket ack, no HTTP response, no live update on any screen, for every
+ * ticket printed. Nothing here needs to be synchronous: the queue worker
+ * already treats a failed print as "leave the row PRINTING and retry next
+ * tick", so awaiting is enough.
+ */
+async function writeToDevice(payload: Buffer, queue: string): Promise<void> {
+  if (PRINTER_EMULATION_DIR) {
+    await writeToEmulatedPrinter(payload, queue);
     return;
   }
-  execFileSync("lp", ["-d", queue, "-o", "raw"], {
-    input: payload,
-  });
+  // Note: no ensurePrinterEnabled() here any more - it runs on a timer
+  // instead (startPrinterMaintenance), because it cost more than the printing.
+  if (IS_WINDOWS) {
+    await writeToDeviceWindows(payload, queue);
+    return;
+  }
+  await writeToDeviceCups(payload, queue);
 }
 
 // ---------------------------------------------------------------------------
@@ -246,21 +395,25 @@ const upsertPrintJob = db.prepare<[number, PrintJobKind, string]>(
    ON CONFLICT(order_id, kind) DO UPDATE SET content = excluded.content, created_at = excluded.created_at`,
 );
 
-// Delivery orders aren't given their own day-scoped sequence column
-// anywhere (orders.id is a single global AUTOINCREMENT, never reset) - so
-// the kitchen comanda's "delivery #N of the day" is derived here by
-// counting how many delivery orders were created up to and including this
-// one, the same Bogota-local day. `-5 hours` mirrors the fixed-offset
-// day-boundary convention used elsewhere (see endOfDayService.ts,
-// orderService.ts's order-history filter) rather than a real timezone
-// conversion, since Colombia doesn't observe DST. `id <= ?` (not `<`) makes
-// this 1-indexed - the day's first delivery order is #1, not #0.
+// "Delivery #N of the day" for the kitchen comanda. orders.id is a single
+// global AUTOINCREMENT that never resets, so this is its own per-business-day
+// sequence, assigned once at creation (orderService.assignDeliveryDayNumber)
+// and read back here. It used to be counted live on every render, which meant
+// deleting an earlier delivery order silently renumbered every later one - a
+// reprint then disagreed with the ticket the kitchen already had.
+const getDeliveryDayNumber = db.prepare<[number], { delivery_day_number: number | null }>(
+  "SELECT delivery_day_number FROM orders WHERE id = ?",
+);
+// Fallback for delivery orders created before the column existed (it is NULL
+// for those). Same live count as before, 1-indexed via `id <= ?`.
 const countEarlierDeliveryOrdersToday = db.prepare<[number, string], { count: number }>(
   `SELECT COUNT(*) AS count FROM orders
-   WHERE order_type = 'delivery' AND id <= ? AND date(created_at, '-5 hours') = date(?, '-5 hours')`,
+   WHERE order_type = 'delivery' AND id <= ? AND date(created_at, '${BUSINESS_DAY_SQL_OFFSET}') = date(?, '${BUSINESS_DAY_SQL_OFFSET}')`,
 );
 
 function deliveryOrderNumberOfDay(order: Order): number {
+  const stored = getDeliveryDayNumber.get(order.id)?.delivery_day_number;
+  if (stored != null) return stored;
   return countEarlierDeliveryOrdersToday.get(order.id, order.createdAt)!.count;
 }
 
@@ -292,14 +445,14 @@ function buildTextPayload(text: string, copies: number): Buffer {
   return Buffer.concat([CMD_INIT, ...Array(copies).fill(body)]);
 }
 
-function printText(
+async function printText(
   orderId: number,
   kind: PrintJobKind,
   text: string,
   queue: string,
   copies = 1,
-): void {
-  writeToDevice(buildTextPayload(text, copies), queue);
+): Promise<void> {
+  await writeToDevice(buildTextPayload(text, copies), queue);
   console.log(
     `[printer:thermal-80mm] printed '${kind}' for order ${orderId} (${copies}x)`,
   );
@@ -324,8 +477,8 @@ function buildPlainTextPayload(text: string): Buffer {
 }
 
 /** Prints an arbitrary plain-text document not tied to a specific order (e.g. the End-of-Day closing receipt) - a cashier/register document, so it goes to counter_printer like the bill. */
-export function printPlainText(text: string): void {
-  writeToDevice(buildPlainTextPayload(text), COUNTER_PRINTER_QUEUE);
+export async function printPlainText(text: string): Promise<void> {
+  await writeToDevice(buildPlainTextPayload(text), COUNTER_PRINTER_QUEUE);
   console.log("[printer:thermal-80mm] printed plain-text document");
 }
 
@@ -344,10 +497,35 @@ const bogotaDateTimeFormat = new Intl.DateTimeFormat("es-CO", {
   second: "2-digit",
   hour12: false,
 });
+const bogotaDateOnlyFormat = new Intl.DateTimeFormat("es-CO", {
+  timeZone: BOGOTA_TZ,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+const bogotaTimeOnlyFormat = new Intl.DateTimeFormat("es-CO", {
+  timeZone: BOGOTA_TZ,
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
 
 /** Renders a stored UTC timestamp (e.g. order.createdAt) in Colombia local time for print output. */
 export function formatDateTimeCO(isoUtc: string): string {
   return bogotaDateTimeFormat.format(new Date(isoUtc));
+}
+
+/**
+ * Date and time separately, for the kitchen ticket. "Fecha: 01/08/2026, 19:16:56"
+ * is 27 characters against a 24-column double-width line, so it always wrapped
+ * mid-timestamp; two short labelled lines never do. Seconds are dropped - the
+ * kitchen cares what minute an order came in, not what second.
+ */
+export function formatDateCO(isoUtc: string): string {
+  return bogotaDateOnlyFormat.format(new Date(isoUtc));
+}
+export function formatTimeCO(isoUtc: string): string {
+  return bogotaTimeOnlyFormat.format(new Date(isoUtc));
 }
 
 export function centerText(
@@ -408,20 +586,32 @@ export function describeOrderType(orderType: Order["orderType"]): string {
 }
 
 /**
- * The flat promo price actually charged for THIS order, derived from its
- * own item snapshot rather than the currently-configured price (which may
- * have changed since - see promoSettingsService) - so a reprinted/
- * historical ticket always matches what was actually charged at the time.
+ * The flat promo price actually charged for THIS order, derived from its own
+ * item snapshot rather than the currently-configured price (which may have
+ * changed since - see promoSettingsService), so a reprinted/historical ticket
+ * always matches what was actually charged at the time.
+ *
+ * Scoped to `promoItem` rows specifically. It used to scan every item, which
+ * printed the wrong figure the moment a promo shared an order with a
+ * normally-priced extra: `duo` took the highest price on the order (an extra
+ * XL pizza would be reported as the duo's price), and `pizza_xl` took the
+ * first pizza on the order (an extra pizza added to the cart before the promo
+ * would win). Both are real orders the frontend lets staff build.
+ *
+ * Falls back to the old whole-order scan for orders placed before promo_item
+ * existed, where every row reads as `false`.
  */
 function promoBasePrice(order: Order): number {
+  const promoItems = order.items.filter((item) => item.promoItem);
+  const scope = promoItems.length > 0 ? promoItems : order.items;
+
   if (order.promoType === "duo") {
-    // One item carries the full price, the other is 0 - whichever is larger.
-    return Math.max(...order.items.map((item) => item.unitPrice));
+    // One of the two carries the full price, the other is 0.
+    return Math.max(...scope.map((item) => item.unitPrice));
   }
-  // pizza_xl: the pizza item carries the base price; the soda's own
-  // unitPrice is just its surcharge (0 or the configured extra), not part
-  // of this label.
-  const pizzaItem = order.items.find((item) => item.pizzaRef != null);
+  // pizza_xl: the pizza carries the base price; the soda's own unitPrice is
+  // just its surcharge (0 or the configured extra), not part of this label.
+  const pizzaItem = scope.find((item) => item.pizzaRef != null);
   return pizzaItem?.unitPrice ?? 0;
 }
 
@@ -623,7 +813,8 @@ export function renderKitchenTicket(order: Order): string {
   if (order.customerName) pushLabeled("Cliente", order.customerName);
   if (order.phone) pushLabeled("Tel", order.phone);
   if (order.address) pushLabeled("Dir", order.address);
-  pushLabeled("Fecha", formatDateTimeCO(order.createdAt));
+  lines.push(`Fecha: ${formatDateCO(order.createdAt)}`);
+  lines.push(`Hora: ${formatTimeCO(order.createdAt)}`);
   lines.push("-".repeat(width));
   for (const item of groupItemsForTicket(order.items)) {
     const [firstLine, ...restLines] = describeItemTicketLines(item, width - 3);
@@ -645,10 +836,10 @@ export function renderKitchenTicket(order: Order): string {
 const KITCHEN_TICKET_COPIES = 1;
 const KITCHEN_TICKET_ADDENDUM_COPIES = 1;
 
-export function printKitchenTicket(order: Order): void {
+export async function printKitchenTicket(order: Order): Promise<void> {
   const text = renderKitchenTicket(order);
   savePrintJob(order.id, "kitchen_ticket", text);
-  printText(order.id, "kitchen_ticket", text, KITCHEN_PRINTER_QUEUE, KITCHEN_TICKET_COPIES);
+  await printText(order.id, "kitchen_ticket", text, KITCHEN_PRINTER_QUEUE, KITCHEN_TICKET_COPIES);
 }
 
 /**
@@ -688,12 +879,12 @@ export function renderKitchenTicketAddendum(
   return toAsciiText(lines.join("\n"));
 }
 
-export function printKitchenTicketAddendum(
+export async function printKitchenTicketAddendum(
   order: Order,
   newItems: OrderItem[],
-): void {
+): Promise<void> {
   const text = renderKitchenTicketAddendum(order, newItems);
-  writeToDevice(buildTextPayload(text, KITCHEN_TICKET_ADDENDUM_COPIES), KITCHEN_PRINTER_QUEUE);
+  await writeToDevice(buildTextPayload(text, KITCHEN_TICKET_ADDENDUM_COPIES), KITCHEN_PRINTER_QUEUE);
   console.log(
     `[printer:thermal-80mm] printed kitchen ticket addendum for order ${order.id} (${KITCHEN_TICKET_ADDENDUM_COPIES}x)`,
   );
@@ -711,15 +902,80 @@ export function printKitchenTicketAddendum(
 // HTML -> rasterized image printing (bill)
 // ---------------------------------------------------------------------------
 
+// Every Chrome DevTools Protocol call gets this deadline. Puppeteer's default
+// is 180s, which is long enough that a wedged render looks like a hang rather
+// than an error - the cashier waits three minutes and then gets a 500. A bill
+// that hasn't rasterized in 30s is not going to.
+const PROTOCOL_TIMEOUT_MS = 30_000;
+// Hard ceiling on one whole render (launch + setContent + decode + screenshot),
+// independent of the per-call protocol timeout above: a page can stop
+// responding without any single protocol call outliving its own deadline, and
+// that is exactly what was observed wedging a settlement indefinitely.
+const RENDER_TIMEOUT_MS = 45_000;
+
 let browserPromise: Promise<Browser> | null = null;
+
+/**
+ * The shared headless Chromium, launched on first use.
+ *
+ * The promise is dropped on failure and on disconnect, so the next caller
+ * launches a fresh browser instead of re-awaiting a rejected promise or
+ * handing back a dead one forever. Without that, a single failed launch (or a
+ * browser killed by the OS) meant no bill printed again until the whole
+ * service was restarted - and since completeOrder swallows print failures,
+ * nobody would notice until someone went looking for receipts.
+ */
 function getBrowser(): Promise<Browser> {
   if (!browserPromise) {
-    browserPromise = puppeteer.launch({
-      headless: true,
-      args: ["--no-sandbox"],
-    });
+    const pending = puppeteer
+      .launch({
+        headless: true,
+        args: ["--no-sandbox"],
+        protocolTimeout: PROTOCOL_TIMEOUT_MS,
+      })
+      .then((browser) => {
+        browser.on("disconnected", () => {
+          if (browserPromise === pending) browserPromise = null;
+        });
+        return browser;
+      })
+      .catch((err) => {
+        if (browserPromise === pending) browserPromise = null;
+        throw err;
+      });
+    browserPromise = pending;
   }
   return browserPromise;
+}
+
+/**
+ * Bill rasterization runs one at a time.
+ *
+ * Each render opens its own Chromium page, and nothing used to bound how many
+ * were open at once - completeOrder is called once per settlement, so a rush of
+ * cashiers closing tables together opened a page each. Measured on this
+ * hardware: fine to 4 concurrent, ~6s each at 8, and at 16 only 2 of 16
+ * finished at all (the rest timed out after ~3 minutes); at 260 the pages never
+ * closed and the browser leaked ~170 processes and 10GB. Serializing costs
+ * roughly half a second per bill and removes the entire failure mode - a
+ * thermal printer can't lay them down any faster than that anyway.
+ */
+let renderChain: Promise<unknown> = Promise.resolve();
+function withRenderLock<T>(task: () => Promise<T>): Promise<T> {
+  const result = renderChain.then(task, task);
+  // The chain must not stay rejected, or every later render inherits the failure.
+  renderChain = result.catch(() => undefined);
+  return result;
+}
+
+function withTimeout<T>(task: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  return Promise.race([
+    task,
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    }),
+  ]).finally(() => clearTimeout(timer)) as Promise<T>;
 }
 
 let logoDataUri: string | null = null;
@@ -750,7 +1006,12 @@ type BrowserGlobal = {
   };
 };
 
-async function renderHtmlToPng(html: string): Promise<Buffer> {
+/** Serialized and time-boxed (see withRenderLock/RENDER_TIMEOUT_MS) so one bad page can never hang the settlement that asked for it. */
+function renderHtmlToPng(html: string): Promise<Buffer> {
+  return withRenderLock(() => withTimeout(renderHtmlToPngUnguarded(html), RENDER_TIMEOUT_MS, "bill rasterization"));
+}
+
+async function renderHtmlToPngUnguarded(html: string): Promise<Buffer> {
   const resolvedHtml = html.split(LOGO_PLACEHOLDER).join(getLogoDataUri());
   const browser = await getBrowser();
   const page = await browser.newPage();
@@ -784,7 +1045,12 @@ async function renderHtmlToPng(html: string): Promise<Buffer> {
       }),
     );
   } finally {
-    await page.close();
+    // Closing must never throw or hang here: this runs on the failure path too,
+    // where the page is already misbehaving, and letting it reject would mask
+    // the real error (or wedge the renderer that a leaked page belongs to).
+    await withTimeout(page.close(), 5_000, "page close").catch((err) => {
+      console.error("[printer:thermal-80mm] failed to close the render page:", (err as Error).message);
+    });
   }
 }
 
@@ -865,7 +1131,14 @@ async function printHtmlAsImage(
 ): Promise<void> {
   const pngBuffer = await renderHtmlToPng(html);
   const png = PNG.sync.read(pngBuffer);
-  writeToDevice(buildRasterPayload(png), queue);
+  if (PRINTER_EMULATION_DIR) {
+    // The raster payload alone is only readable as a dithered bitmap - keep the
+    // rendered PNG alongside it so an emulated bill can actually be looked at.
+    fs.mkdirSync(PRINTER_EMULATION_DIR, { recursive: true });
+    fs.writeFileSync(path.join(PRINTER_EMULATION_DIR, `order-${orderId}-${kind}.png`), pngBuffer);
+    fs.writeFileSync(path.join(PRINTER_EMULATION_DIR, `order-${orderId}-${kind}.html`), html);
+  }
+  await writeToDevice(buildRasterPayload(png), queue);
   console.log(
     `[printer:thermal-80mm] printed '${kind}' for order ${orderId} (raster ${png.width}x${png.height})`,
   );
@@ -877,6 +1150,22 @@ export async function printBillHtml(
 ): Promise<void> {
   savePrintJob(orderId, "bill", html);
   await printHtmlAsImage(orderId, "bill", html, COUNTER_PRINTER_QUEUE);
+}
+
+/** True once a bill has been generated for this order (so a correction knows whether there's a saved copy to refresh). */
+export function hasSavedBill(orderId: number): boolean {
+  return getPrintJob.get(orderId, "bill") != null;
+}
+
+/**
+ * Replaces an order's saved bill without printing anything. Used after a
+ * payment split is corrected on an already-completed order
+ * (orderService.updateOrderPayments): the saved copy is what a later reprint
+ * sends out, so leaving it alone meant a reprinted bill still showed the
+ * payment methods from before the correction.
+ */
+export function updateSavedBill(orderId: number, html: string): void {
+  savePrintJob(orderId, "bill", html);
 }
 
 // ---------------------------------------------------------------------------
@@ -900,7 +1189,7 @@ export async function reprintJob(
     // the kitchen line - kitchen_printer is reserved for the original ticket
     // and live addition notifications only (see printKitchenTicketAddendum);
     // any reprint is a cashier/register action, same as the bill below.
-    printText(orderId, kind, row.content, COUNTER_PRINTER_QUEUE, 1);
+    await printText(orderId, kind, row.content, COUNTER_PRINTER_QUEUE, 1);
   } else {
     await printHtmlAsImage(orderId, kind, row.content, COUNTER_PRINTER_QUEUE);
   }
@@ -921,5 +1210,5 @@ export async function printDeliveryComandaCopy(orderId: number): Promise<void> {
       `no hay un 'kitchen_ticket' guardado para la orden ${orderId}`,
     );
   }
-  printText(orderId, "kitchen_ticket", row.content, COUNTER_PRINTER_QUEUE, 1);
+  await printText(orderId, "kitchen_ticket", row.content, COUNTER_PRINTER_QUEUE, 1);
 }

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { createFileRoute } from '@tanstack/react-router';
 import { ChevronLeft, ChevronRight, Printer, Info } from 'lucide-react';
-import { useClosingReports, useClosingReport, useOrdersByFilter } from '@/lib/queries';
+import { useClosingReports, useClosingReport, useCurrentCashFlow, useOrdersByFilter } from '@/lib/queries';
 import { reprintClosingReport } from '@/lib/api';
 import { formatCOP } from '@/lib/format';
 import { formatMonthLong, formatDateLong, shiftMonth } from '@/lib/date';
@@ -41,9 +41,16 @@ function firstDowMondayIndex(monthStr: string): number {
   return (jsDay + 6) % 7;
 }
 
-const todayStr = () => new Date().toISOString().slice(0, 10);
-
 function ClosingReportsPage() {
+  const { data: current } = useCurrentCashFlow();
+  // Wait for the backend's Bogotá business day instead of seeding "today"
+  // from the browser's raw UTC date, which can be a day ahead/behind (see
+  // order-history/index.tsx and caja.tsx, which already do this).
+  if (!current) return <p className="p-4 text-sm text-text-secondary sm:p-6">Cargando...</p>;
+  return <ClosingReportsContent today={current.date} />;
+}
+
+function ClosingReportsContent({ today }: { today: string }) {
   const { reportId } = Route.useSearch();
   const { data: reports = [], isLoading } = useClosingReports();
   // Chronological order (not id order - a same-day reprint/re-close wouldn't
@@ -67,7 +74,7 @@ function ClosingReportsPage() {
   const activeReport = reports.find((r) => r.id === activeId);
 
   const [viewMonth, setViewMonth] = useState<string | null>(null);
-  const effectiveMonth = viewMonth ?? activeReport?.date.slice(0, 7) ?? sortedByDate[0]?.date.slice(0, 7) ?? todayStr().slice(0, 7);
+  const effectiveMonth = viewMonth ?? activeReport?.date.slice(0, 7) ?? sortedByDate[0]?.date.slice(0, 7) ?? today.slice(0, 7);
 
   // A date can have more than one report (closing the day again is
   // explicitly supported - see endOfDayService.closeDay, history is never
@@ -92,8 +99,6 @@ function ClosingReportsPage() {
     ...Array(leadingBlanks).fill(null),
     ...Array.from({ length: daysInMonth(effectiveMonth) }, (_, i) => `${effectiveMonth}-${String(i + 1).padStart(2, '0')}`),
   ];
-
-  const today = todayStr();
 
   return (
     <div className="p-4 sm:p-6">

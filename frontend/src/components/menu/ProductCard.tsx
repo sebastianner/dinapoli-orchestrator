@@ -33,7 +33,13 @@ export function ProductCard({ categoryId, product, pizzaFlavors, excludedFlavorI
   const pushToast = useToastStore((s) => s.push);
   const { data: promoSettings = [] } = usePromoSettings();
 
-  const price = productUnitPrice(product);
+  // Gratinados et al. take a pizza flavor whose surcharge the server adds in
+  // full (see orderService.resolveProductItem), so it belongs in the quoted
+  // price too - otherwise the cart understates the bill for any non-zero one.
+  const flavorSurcharge = product.pizzaFlavor
+    ? (availableFlavors.find((f) => f.id === flavorId)?.extraCost ?? 0)
+    : 0;
+  const price = productUnitPrice(product) + flavorSurcharge;
 
   const handleAdd = () => {
     if (!product.isAvailable) {

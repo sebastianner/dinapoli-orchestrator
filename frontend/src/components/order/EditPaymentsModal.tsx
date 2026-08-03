@@ -3,18 +3,11 @@ import { Trash2 } from "lucide-react";
 import { Modal } from "@/components/common/Modal";
 import { formatCOP } from "@/lib/format";
 import { updateOrderPayments } from "@/lib/api";
+import { settlementTotals, toPaymentRequest, validateSettlement, type PaymentSplitDraft } from "@/lib/paymentSplits";
 import { randomUUID } from "@/lib/uuid";
 import type { Order, PaymentMethod } from "@/types/api";
 
-interface PaymentSplitRow {
-  clientId: string;
-  method: PaymentMethod;
-  /** Net amount actually collected via this method (tip/delivery fee in, this split's discount already out) - same convention as PaymentModal, so the two never get confused with the API's `grossAmount`. */
-  netAmount: string;
-  tipAmount: string;
-  deliveryFee: string;
-  discount: string;
-}
+type PaymentSplitRow = PaymentSplitDraft;
 
 const methodLabels: Record<PaymentMethod, string> = {
   cash: "Efectivo",
@@ -55,14 +48,11 @@ export function EditPaymentsModal({ open, order, onClose, onSuccess }: EditPayme
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const sumTip = splits.reduce((sum, s) => sum + (Number(s.tipAmount) || 0), 0);
-  const sumDeliveryFee = splits.reduce((sum, s) => sum + (Number(s.deliveryFee) || 0), 0);
-  const sumDiscount = splits.reduce((sum, s) => sum + (Number(s.discount) || 0), 0);
-  const grossOwed = order.total + sumTip + sumDeliveryFee;
-  const totalOwed = grossOwed - sumDiscount;
-  const sumNetAmount = splits.reduce((sum, s) => sum + (Number(s.netAmount) || 0), 0);
-  const remaining = totalOwed - sumNetAmount;
-  const isValid = splits.length > 0 && sumNetAmount === totalOwed && splits.every((s) => Number(s.netAmount) > 0);
+  // Shared with PaymentModal so a correction is held to exactly the same rules
+  // as the original charge - including the per-split ones the server enforces.
+  const { grossOwed, totalOwed, assigned: sumNetAmount, remaining, discounts: sumDiscount } =
+    settlementTotals(order.total, splits);
+  const { isValid, problem, problemIndex } = validateSettlement(order.total, splits, order.orderType);
 
   const reset = () => {
     setSplits(splitsFromOrder(order));
@@ -127,19 +117,7 @@ export function EditPaymentsModal({ open, order, onClose, onSuccess }: EditPayme
     setSubmitting(true);
     setError(null);
     try {
-      const updatedOrder = await updateOrderPayments(
-        order.id,
-        splits.map((s) => {
-          const discount = Number(s.discount) || 0;
-          return {
-            method: s.method,
-            grossAmount: (Number(s.netAmount) || 0) + discount,
-            tipAmount: Number(s.tipAmount) || 0,
-            deliveryFee: Number(s.deliveryFee) || 0,
-            discount,
-          };
-        }),
-      );
+      const updatedOrder = await updateOrderPayments(order.id, toPaymentRequest(splits));
       onSuccess(updatedOrder);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudieron actualizar los pagos");
@@ -172,8 +150,12 @@ export function EditPaymentsModal({ open, order, onClose, onSuccess }: EditPayme
           <span />
         </div>
 
-        {splits.map((split) => (
-          <div key={split.clientId} className="grid items-center gap-2" style={{ gridTemplateColumns: paymentRowColumns }}>
+        {splits.map((split, index) => (
+          <div
+            key={split.clientId}
+            className={index === problemIndex ? "grid items-center gap-2 rounded-lg ring-1 ring-danger" : "grid items-center gap-2"}
+            style={{ gridTemplateColumns: paymentRowColumns }}
+          >
             <select
               value={split.method}
               onChange={(e) => updateSplit(split.clientId, { method: e.target.value as PaymentMethod })}
@@ -252,6 +234,7 @@ export function EditPaymentsModal({ open, order, onClose, onSuccess }: EditPayme
         )}
       </div>
 
+      {!isValid && problem && !error && <p className="mt-2 text-sm text-text-secondary">{problem}</p>}
       {error && <p className="mt-2 text-sm text-danger">{error}</p>}
 
       <button

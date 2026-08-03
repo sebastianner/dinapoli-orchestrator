@@ -3,12 +3,13 @@ import { ValidationError, NotFoundError, ConflictError } from '../utils/errors.j
 import { markTableBusy, refreshTableStatus, tableExists } from './tableService.js';
 import { processPayment } from './paymentService.js';
 import type { PaymentSplit } from './paymentService.js';
-import { printBill } from './billingService.js';
-import { reprintJob, printDeliveryComandaCopy } from './printerService.js';
+import { printBill, renderBillHtml } from './billingService.js';
+import { reprintJob, printDeliveryComandaCopy, hasSavedBill, updateSavedBill } from './printerService.js';
 import { getEmployeeById } from './employeeService.js';
 import { getCustomerById } from './customerService.js';
 import { getPromoSettings } from './promoSettingsService.js';
 import { broadcastOrderUpdate } from '../ws/broadcast.js';
+import { BUSINESS_DAY_SQL_OFFSET } from '../utils/date.js';
 import type {
   Order,
   OrderItem,
@@ -89,6 +90,8 @@ interface InsertOrderItemParams {
   quantity: number;
   unitPrice: number;
   notes: string | null;
+  /** 1 for the items the promo is made of, 0 for normally-priced items sharing the order. */
+  promoItem: 0 | 1;
 }
 
 const insertOrder = db.prepare<InsertOrderParams>(
@@ -98,13 +101,28 @@ const insertOrder = db.prepare<InsertOrderParams>(
 const insertOrderItem = db.prepare<InsertOrderItemParams>(
   `INSERT INTO order_items
      (order_id, item_type, product_id, product_size_id, drink_flavor_id,
-      pizza_group_id, pizza_size_id, pizza_flavor_id, quantity, unit_price, notes)
+      pizza_group_id, pizza_size_id, pizza_flavor_id, quantity, unit_price, notes, promo_item)
    VALUES
      (@orderId, @itemType, @productId, @productSizeId, @drinkFlavorId,
-      @pizzaGroupId, @pizzaSizeId, @pizzaFlavorId, @quantity, @unitPrice, @notes)`
+      @pizzaGroupId, @pizzaSizeId, @pizzaFlavorId, @quantity, @unitPrice, @notes, @promoItem)`
 );
 const insertOrderItemFlavor = db.prepare<[number, number, number]>(
   'INSERT INTO order_item_flavors (order_item_id, flavor_id, portion) VALUES (?, ?, ?)'
+);
+
+// "Delivery #N of the day", assigned once inside the creating transaction (see
+// orders.delivery_day_number). Counting this live at print time meant deleting
+// an earlier delivery order renumbered every later one, so a reprint stopped
+// matching the ticket the kitchen was already holding. `id <= ?` (not `<`)
+// makes it 1-indexed - the day's first delivery order is #1.
+const assignDeliveryDayNumber = db.prepare<[number, number, number]>(
+  `UPDATE orders SET delivery_day_number = (
+     SELECT COUNT(*) FROM orders o
+     WHERE o.order_type = 'delivery' AND o.id <= ?
+       AND date(o.created_at, '${BUSINESS_DAY_SQL_OFFSET}')
+         = (SELECT date(created_at, '${BUSINESS_DAY_SQL_OFFSET}') FROM orders WHERE id = ?)
+   )
+   WHERE id = ?`
 );
 
 function isPositiveInt(n: unknown): n is number {
@@ -127,6 +145,8 @@ interface ResolvedItem {
   unitPrice: number;
   notes: string | null;
   flavorPortions: { flavorId: number; portion: number }[];
+  /** Set by applyPromoPricing for the items the promo is made of; persisted so the ticket doesn't have to guess later. */
+  promoItem: 0 | 1;
 }
 
 function resolvePizzaItem(item: PizzaItemRequest, index: number): ResolvedItem {
@@ -207,6 +227,7 @@ function resolvePizzaItem(item: PizzaItemRequest, index: number): ResolvedItem {
     unitPrice,
     notes: item.notes ?? null,
     flavorPortions: flavors.map((f) => ({ flavorId: f.id, portion: f.portion })),
+    promoItem: 0,
   };
 }
 
@@ -273,6 +294,7 @@ function resolveProductItem(item: ProductItemRequest, index: number): ResolvedIt
     unitPrice,
     notes: item.notes ?? null,
     flavorPortions: [],
+    promoItem: 0,
   };
 }
 
@@ -449,6 +471,11 @@ function applyPromoPricing(promoType: PromoType, items: OrderItemRequest[], reso
     if (item.promoItem) acc.push(index);
     return acc;
   }, []);
+  // Recorded on the row itself so the kitchen ticket can name the promo's real
+  // price later instead of inferring it from prices (see printerService
+  // .promoBasePrice) - a promo item and a normally-priced extra item are
+  // indistinguishable by price alone.
+  for (const index of promoIndexes) resolvedItems[index].promoItem = 1;
 
   if (promoType === 'duo') {
     resolvedItems[promoIndexes[0]].unitPrice = settings.price;
@@ -544,6 +571,7 @@ export function createOrder(input: unknown): Order {
         quantity: item.quantity,
         unitPrice: item.unitPrice,
         notes: item.notes,
+        promoItem: item.promoItem,
       });
       const orderItemId = Number(itemResult.lastInsertRowid);
       for (const fp of item.flavorPortions) {
@@ -553,6 +581,11 @@ export function createOrder(input: unknown): Order {
 
     if (orderRequest.orderType === 'dine_in') {
       markTableBusy(orderRequest.tableNumber as number);
+    }
+    if (orderRequest.orderType === 'delivery') {
+      // Inside the transaction so two deliveries created at once can't be
+      // handed the same number.
+      assignDeliveryDayNumber.run(newOrderId, newOrderId, newOrderId);
     }
 
     return newOrderId;
@@ -651,6 +684,7 @@ function rowToOrderItem(row: OrderItemRow): OrderItem {
     quantity: row.quantity,
     unitPrice: row.unit_price,
     notes: row.notes,
+    promoItem: row.promo_item === 1,
     printedAt: row.printed_at,
   };
 
@@ -804,7 +838,9 @@ export function listOrders({ status, date, orderType, page, pageSize, sort }: Li
     params.push(status);
   }
   if (date) {
-    conditions.push(`date(created_at, '-5 hours') = ?`);
+    // Business-day match, not the literal Bogota calendar day - a 1am order
+    // still belongs to the previous day's list (see BUSINESS_DAY_SQL_OFFSET).
+    conditions.push(`date(created_at, '${BUSINESS_DAY_SQL_OFFSET}') = ?`);
     params.push(date);
   }
   if (orderType) {
@@ -874,6 +910,7 @@ export function addOrderItems(id: number, items: unknown): Order {
         quantity: item.quantity,
         unitPrice: item.unitPrice,
         notes: item.notes,
+        promoItem: item.promoItem,
       });
       const orderItemId = Number(itemResult.lastInsertRowid);
       for (const fp of item.flavorPortions) {
@@ -1038,6 +1075,14 @@ export async function completeOrder(id: number, { payments }: { payments?: unkno
   }
 
   const resolvedPayments = resolvePayments(payments, order);
+  // Checked here rather than inside processPayment, which used to run *after*
+  // the transaction below: an order that failed this check came back as a 4xx
+  // to the client while already sitting COMPLETED and paid in the database.
+  // Nothing can currently produce a non-positive total (every price path
+  // enforces positive integers), but the ordering was wrong either way.
+  if (!Number.isInteger(order.total) || order.total <= 0) {
+    throw new ValidationError(`el total de la orden ${id} debe ser un monto entero positivo en COP`);
+  }
 
   // Payments and the COMPLETED flip must land atomically - previously these were
   // two separate statements with bill printing (an external, failure-prone side
@@ -1127,7 +1172,26 @@ export function updateOrderPayments(id: number, payments: unknown): Order {
   })();
   broadcastOrderUpdate(id);
 
-  return getOrderById(id);
+  const corrected = getOrderById(id);
+
+  // The saved bill is what a reprint re-sends (see printerService.reprintJob),
+  // so it has to be re-rendered to match - otherwise correcting "card" to
+  // "cash + card" left every later reprint showing the original, wrong split.
+  // Regenerated, not reprinted: correcting a record shouldn't push paper.
+  if (hasSavedBill(id)) {
+    try {
+      updateSavedBill(id, renderBillHtml(corrected, {
+        orderId: id,
+        payments: resolvedPayments,
+        amountCOP: corrected.grandTotal,
+        processedAt: new Date().toISOString(),
+      }));
+    } catch (err) {
+      console.error(`[billing] failed to refresh the saved bill for order ${id} (payments were corrected regardless):`, (err as Error).message);
+    }
+  }
+
+  return corrected;
 }
 
 const PRINT_JOB_KINDS = new Set<PrintJobKind>(['kitchen_ticket', 'bill']);

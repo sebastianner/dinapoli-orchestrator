@@ -50,14 +50,15 @@ to type `better-sqlite3` prepared statements live in `src/types/db.ts`.
   Pizza items pass only `size` + `flavors` — the group (classic/special) isn't
   chosen by the client; `orderService.resolvePizzaItem` derives it from the
   flavors picked, so mixing in a single `special` flavor upgrades the whole
-  pizza to the special price for that size. `OrderRequest.tip` is optional
-  (defaults to 0) and can also be set/overwritten later at any status via
-  `PUT /api/orders/:id/tip` — it's stored separately from `total` (which is
-  items-only) so it can be excluded from End-of-Day sales totals.
-  `OrderRequest.deliveryFee` works the same way (optional, defaults to 0,
-  updatable via `PUT /api/orders/:id/delivery-fee`) but is restricted to
-  `orderType: 'delivery'` and — unlike tip — is meant to be *included* in
-  sales totals (see End-of-Day Closing below).
+  pizza to the special price for that size. Tip and delivery fee are *not*
+  part of `OrderRequest` at all: there is nowhere to put them before a payment
+  method is chosen, so both are declared once, per method, in the `payments`
+  array at `POST /api/orders/:id/complete` (see Billing + payment below) and
+  derived back onto the order by summing `order_payments`. Tip is kept out of
+  `orders.total` (which is items-only) so it can be excluded from End-of-Day
+  sales totals; delivery fee is likewise excluded from `total` but — unlike
+  tip — is *included* in sales (see End-of-Day Closing below), and is rejected
+  outright on anything other than `orderType: 'delivery'`.
 - **Live status broadcasts** (`src/ws/broadcast.js`): every `/ws/orders`
   connection is tracked in a client registry, separate from the request/reply
   order-intake flow above. Whenever an order is created, gains items, changes
@@ -80,11 +81,14 @@ to type `better-sqlite3` prepared statements live in `src/types/db.ts`.
   Mia) / pasta (not Marinera) / gratinado, excluding 5 "special" flavors
   (campesina, madrileña, atarraya, tricaccio, ardiente) wherever they'd
   otherwise apply. `'pizza_xl'` requires exactly an XL pizza + a Gaseosa
-  Personal + a Panes al Gratín, the soda and bread priced at $0 — except
-  choosing the Coca-Cola or Quatro soda option adds a surcharge. Either way
-  the *first* qualifying item (the pizza, for `pizza_xl`) carries the full
-  promo price and the rest are priced $0, so the sum of `order_items.unit_price`
-  always equals `orders.total`. Persisted as `orders.promo_type`, set once at
+  1.5L (`soft_drink_1_5l`) + a Panes al Gratín, the soda and bread priced at
+  $0 — except choosing the Coca-Cola, Quatro or Premio soda flavor adds a
+  surcharge. Either way the *first* qualifying item (the pizza, for
+  `pizza_xl`) carries the full promo price and the rest are priced $0, so the
+  sum of `order_items.unit_price` always equals `orders.total`. Whichever
+  items make up the promo are flagged `order_items.promo_item`, so the
+  kitchen ticket can name the promo's real price instead of inferring it from
+  prices it can't tell apart from a normally-priced extra item. Persisted as `orders.promo_type`, set once at
   creation and never changed; printed on the kitchen ticket via
   `printerService.describePromoType`, which derives the printed price from the
   order's own stored `order_items.unit_price` rather than the current setting,
@@ -92,7 +96,7 @@ to type `better-sqlite3` prepared statements live in `src/types/db.ts`.
   - **Promo pricing** (`promoSettingsService`, `promo_settings` table — one row
     per `promo_type`, `price` + `soda_surcharge` for `pizza_xl`, `soda_surcharge`
     always 0 and unused for `duo`): admin-editable rather than hardcoded, seeded
-    with `duo = $37,000` / `pizza_xl = $80,000` + `$2,000` soda surcharge.
+    with `duo = $37,000` / `pizza_xl = $86,000` + `$2,000` soda surcharge.
     `applyPromoPricing` reads the current row live at order-creation time (no
     caching, no restart needed for an edit to take effect) — same
     server-is-authoritative principle as every other price. `GET /api/promos`
@@ -437,8 +441,8 @@ to type `better-sqlite3` prepared statements live in `src/types/db.ts`.
   and re-sets both cookies. No body.
 - `POST /api/auth/logout` — revokes the current refresh token and clears both
   cookies. No body.
-- `GET /api/auth/me` — the employee for the current `access_token` cookie.
-  401s if missing/expired/invalid.
+- `GET /api/auth/me` — `{ "employee": Employee }` for the current
+  `access_token` cookie. 401s if missing/expired/invalid.
 - `GET /api/menu` — full menu, shaped exactly like `menu_simple_english_keys_v2.json`.
 - `GET /api/menu/search?q=` — fuzzy product search across every category (see
   Product search above). Each result is a `Product` plus `categoryId`.
@@ -469,12 +473,15 @@ to type `better-sqlite3` prepared statements live in `src/types/db.ts`.
   behind an explicit two-step confirmation (a "remove mode" toggle, then a
   per-order confirm dialog, see `ajustes/order-history`), but the server
   enforces the admin check independently.
-- `PUT /api/orders/:id/tip` — sets (or overwrites) the order's tip. Allowed at
-  any order status. Body: `{ "tip": number }` (non-negative integer COP).
-- `PUT /api/orders/:id/delivery-fee` — sets (or overwrites) the order's delivery
-  fee. Allowed at any order status, but a non-zero value is rejected unless the
-  order's `orderType` is `delivery`. Body: `{ "deliveryFee": number }`
-  (non-negative integer COP).
+- `PUT /api/orders/:id/payments` — corrects an already-`COMPLETED` order's
+  payment split. Same body and validation as `complete` above; the client sends
+  the full desired set of splits, not a diff. 409s unless the order is
+  `COMPLETED`. Also re-renders the order's saved bill so a later reprint shows
+  the corrected methods (it does not print anything by itself).
+- `PUT /api/orders/:id/customer` — attaches or changes an order's customer
+  (mainly for `dine_in`, which never requires one up front). Any logged-in
+  employee. Body: `{ "customerId": number, "customerAddressId"?: number }`.
+  409s if the order is already `COMPLETED`.
 - `PUT /api/orders/:id/table` — **admin only.** Reassigns a `dine_in` order to a
   different table. Body: `{ "tableNumber": number }` (must be one of the
   restaurant's current tables). 409s if the order is already `COMPLETED`.
@@ -556,15 +563,29 @@ to type `better-sqlite3` prepared statements live in `src/types/db.ts`.
   date). 409s if any of today's orders isn't `COMPLETED` yet. Safe to call
   more than once a day otherwise; each call appends a new report rather than
   overwriting.
-- `GET /api/end-of-day` — **admin only.** Every closing report ever
+- `GET /api/end-of-day` — any logged-in employee. Every closing report ever
   generated, newest first.
-- `GET /api/end-of-day/:id` — **admin only.** One closing report.
+- `GET /api/end-of-day/:id` — any logged-in employee. One closing report.
 - `POST /api/end-of-day/:id/reprint` — **admin only.** Re-sends a previously
   generated closing report's exact saved receipt to the printer.
 - `GET /api/promos` — open, no auth (every order-placing screen needs it for
   display). Current price/soda surcharge for both promo types.
 - `PUT /api/promos/:type` — **admin only.** `{ "price": number, "sodaSurcharge"?: number }`.
   `sodaSurcharge` is only accepted for `pizza_xl`; sending it for `duo` 400s.
+- `GET /api/analytics/{summary,sales-trend,breakdown,heatmap,products,customers,employees,promotions}` —
+  **admin only** (the whole router is gated). All take
+  `?range=today|week|month|custom`, plus `from`/`to` (YYYY-MM-DD) when
+  `range=custom`. `week`/`month` are trailing windows, not calendar-aligned, so
+  growth figures compare equal spans. Sales figures are bucketed by business
+  day and computed the same way End-of-Day computes them
+  (`gross_amount - tip_amount - discount`), so the two always agree; the
+  heatmap is the deliberate exception, bucketing by `created_at` on the plain
+  Bogotá offset and counting orders regardless of status, because "when are we
+  busy" is a kitchen-load question rather than a sales one.
+- `GET /api/menu/flavors/search?q=` — fuzzy pizza-flavor search, same trigram
+  approach as the product/customer searches. Each result carries `groupIds`.
+- `PUT /api/products/:id/sizes/:sizeKey` — **admin only.** `{ "price": number }`
+  for a product priced per size (the calzone).
 
 ## Trying it out
 

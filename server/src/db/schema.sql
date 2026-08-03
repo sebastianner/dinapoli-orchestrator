@@ -41,9 +41,6 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
   created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
--- One row per delivery-fee zone. delivery_fee seeds orders.deliveryFee for a
--- new delivery order when the client doesn't explicitly override it (see
--- orderService.createOrder) - staff can still always override per order.
 CREATE TABLE IF NOT EXISTS cities (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   name       TEXT NOT NULL,
@@ -51,6 +48,10 @@ CREATE TABLE IF NOT EXISTS cities (
   country    TEXT NOT NULL DEFAULT 'Colombia'
 );
 
+-- One row per delivery-fee zone. delivery_fee is only ever a *suggestion*: it
+-- rides along on every address the frontend fetches so checkout can pre-fill
+-- the fee, but nothing applies it server-side - staff confirm or adjust it at
+-- completion like any other payments[].deliveryFee.
 CREATE TABLE IF NOT EXISTS neighborhoods (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   name          TEXT NOT NULL,
@@ -274,6 +275,14 @@ CREATE TABLE IF NOT EXISTS orders (
   notes               TEXT,
   -- Nullable - most orders aren't a promo. Set once at creation, never changed.
   promo_type          TEXT CHECK (promo_type IS NULL OR promo_type IN ('duo', 'pizza_xl')),
+  -- "Delivery #N of the day" as printed on the kitchen comanda. Assigned once,
+  -- inside the creating transaction, rather than counted live at print time:
+  -- counting live meant deleting an earlier delivery order silently renumbered
+  -- every later one, so a reprint no longer matched the ticket the kitchen
+  -- already had. NULL for non-delivery orders (and for delivery rows that
+  -- predate this column - see printerService.deliveryOrderNumberOfDay, which
+  -- falls back to the old live count for those).
+  delivery_day_number INTEGER,
   -- Items only - excludes tip/deliveryFee/discount (those live in order_payments,
   -- see grandTotal for the "everything included" figure this deliberately isn't).
   total               INTEGER NOT NULL DEFAULT 0,
@@ -304,6 +313,17 @@ CREATE TABLE IF NOT EXISTS order_items (
   quantity          INTEGER NOT NULL CHECK (quantity > 0),
   unit_price        INTEGER NOT NULL,
   notes             TEXT,
+  -- Whether this row is one of the items the order's promo is made of, as
+  -- opposed to a normally-priced item sharing the same order (promos and
+  -- extra items can be mixed - see orderService.applyPromoPricing). Recorded
+  -- because it cannot be inferred afterwards: a promo item's unit_price is
+  -- the flat promo price, 0, or a soda surcharge, none of which are
+  -- distinguishable from a regular item's price. printerService.promoBasePrice
+  -- used to guess (max price / first pizza) and printed the wrong figure on
+  -- the kitchen ticket whenever a pricier extra item shared the order.
+  -- Always 0 for items added later via addOrderItems - a promo is fixed at
+  -- creation (see orders.promo_type).
+  promo_item        INTEGER NOT NULL DEFAULT 0 CHECK (promo_item IN (0, 1)),
   printed_at        TEXT
 );
 
@@ -326,13 +346,13 @@ CREATE TABLE IF NOT EXISTS order_item_flavors (
 -- one row here; a mixed payment (e.g. part cash, part card) has several,
 -- whose amounts must sum to (total + the payments' own declared tip/delivery
 -- fee totals) - enforced in orderService.resolvePayments, not by the DB.
--- `amount` is always the GROSS charge for that split, before its own
+-- `gross_amount` is always the GROSS charge for that split, before its own
 -- discount slice - discount is never subtracted from it, so the full
 -- pre-discount price is always on record; the actual cash collected for a
--- split is derived as (amount - discount) whenever needed, never stored
+-- split is derived as (gross_amount - discount) whenever needed, never stored
 -- directly. tip_amount, delivery_fee, and discount are each a slice of
--- `amount` (e.g. $30 owed + a $5 tip charged to the card, cash covering a
--- separate $20: that row is amount=35, tip_amount=5) - this lets End-of-Day
+-- `gross_amount` (e.g. $30 owed + a $5 tip charged to the card, cash covering
+-- a separate $20: that row is gross_amount=35, tip_amount=5) - this lets End-of-Day
 -- exclude tips and discounts (while keeping delivery fees, where relevant)
 -- from sales per payment method exactly instead of guessing via a
 -- proportional split.
