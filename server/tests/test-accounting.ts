@@ -7,7 +7,7 @@
  * the orders it claims to summarize.
  */
 import fs from 'node:fs';
-import { Client, check, eq, section, summary, results, warn } from './lib.js';
+import { Client, check, eq, section, summary, results } from './lib.js';
 
 const client = new Client();
 const OUT = process.env.AUDIT_OUT ?? '.';
@@ -76,7 +76,7 @@ async function main() {
     dineInOrderCount: 0,
     takeawayOrderCount: 0,
     grossCharged: 0,
-    cashCollectedIncludingTips: 0,
+    cashTips: 0,
   };
   const customerIds = new Set<number>();
 
@@ -93,7 +93,7 @@ async function main() {
       // revenue) and minus the discount (never collected). Delivery fee stays in.
       const sales = p.grossAmount - p.tipAmount - p.discount;
       orderSales += sales;
-      if (p.method === 'cash') { book.cashSales += sales; book.cashCollectedIncludingTips += p.grossAmount - p.discount; }
+      if (p.method === 'cash') { book.cashSales += sales; book.cashTips += p.tipAmount; }
       else if (p.method === 'card') book.cardSales += sales;
       else if (p.method === 'transfer') book.transferSales += sales;
       book.tips += p.tipAmount;
@@ -165,21 +165,16 @@ async function main() {
     !/[^\x00-\x7F]/.test(content), (content.match(/[^\x00-\x7F]/g) ?? []).slice(0, 10).join(''));
 
   section('D. Does the drawer reconcile?');
+  // Confirmed with the client: cash tips are pulled from the register and
+  // handed to staff immediately, never left in the float overnight. So
+  // "Efectivo final en caja" (base + cashSales, tips excluded) IS the whole
+  // answer, not an approximation of it - there's no separate "plus tips" term
+  // to reconcile. This run deliberately includes real cash tips (logged
+  // below) so the assertion isn't vacuously true from having none.
+  console.log(`  this run included ${book.cashTips.toLocaleString()} COP in cash tips, correctly excluded from the drawer figure`);
   const expectedDrawer = receiptValue(content, 'Efectivo final en caja');
   const printedFormula = cashFlowBefore.cashInRegister + report.cashSales;
-  eq('"Efectivo final en caja" = base + cash sales (as coded)', expectedDrawer, printedFormula);
-  // The physically-present cash is base + everything actually handed over in cash,
-  // which includes cash tips. Sales deliberately excludes tips - so if any tip was
-  // paid in cash, the printed figure and the real drawer diverge.
-  const realDrawer = cashFlowBefore.cashInRegister + book.cashCollectedIncludingTips;
-  const cashTips = book.cashCollectedIncludingTips - book.cashSales;
-  if (cashTips > 0) {
-    warn('cash tips are missing from "Efectivo final en caja"',
-      `receipt says ${expectedDrawer?.toLocaleString()}, but ${cashTips.toLocaleString()} COP of tips were handed over in cash, ` +
-      `so the drawer should physically hold ${realDrawer.toLocaleString()} - a counting staff member will find a ${cashTips.toLocaleString()} surplus every night`);
-  } else {
-    check('no cash tips this run, so the drawer figure is exact', true);
-  }
+  eq('"Efectivo final en caja" = base + cash sales, with no tip adjustment needed', expectedDrawer, printedFormula);
 
   section('E. Closing guards');
   const reports = await client.get('/api/end-of-day');

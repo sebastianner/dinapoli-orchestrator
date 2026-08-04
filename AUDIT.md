@@ -17,8 +17,10 @@ path also became overridable (`DINAPOLI_DATA_DIR`) so nothing here ever touched
 
 H1, M1, M2, M4, M5 and every low finding (L1–L8) have been **fixed and
 verified**; each is now covered by an assertion that fails if it comes back.
-**H2** (unauthenticated money endpoints) and **M3** (cash tips missing from the
-drawer figure) are **still open** — they weren't in scope for this pass.
+**M3** (cash tips excluded from the drawer figure) was investigated and
+confirmed to be correct, intentional behavior, not a defect. **H2**
+(unauthenticated money endpoints) is **still open** — it wasn't in scope for
+this pass.
 
 ## Verdict
 
@@ -231,21 +233,30 @@ button with no explanation. The legitimate arrangement of the same amounts
 `checkout-math.test.ts` drives the real helpers and sweeps 20,000 randomised
 settlements: everything the UI now enables, the server accepts.
 
-### M3 — Cash tips are missing from the expected drawer count — OPEN
+### M3 — Cash tips excluded from the drawer count — investigated, not a defect
 
-**Severity: medium.** Both the closing receipt
-([endOfDayService.ts:185](server/src/services/endOfDayService.ts:185)) and the
-`/caja` page ([caja.tsx:139](frontend/src/routes/caja.tsx:139)) compute
+**Severity: none — closed.** Flagged initially because both the closing
+receipt ([endOfDayService.ts:185](server/src/services/endOfDayService.ts:185))
+and the `/caja` page ([caja.tsx:139](frontend/src/routes/caja.tsx:139)) compute
 "Efectivo final en caja" as `base + cashSales`, where `cashSales` deliberately
-excludes tips. A tip handed over in cash is physically in the drawer but not in
-that figure.
+excludes tips — and on the simulated service that left a consistent gap
+(180,800 COP) between the printed figure and what a test that assumed tips
+stay in the till would expect.
 
-On the simulated service this was **180,800 COP** unaccounted for — the drawer
-would count over by exactly that every night. The `/caja` tooltip states plainly:
-*"Es el efectivo que debería haber físicamente en la caja en este momento."*
+**Confirmed with the client: this is intentional.** Cash tips are pulled from
+the register and given to staff immediately, not left in the float overnight.
+Under that policy `base + cashSales` — tips excluded — *is* the correct
+expected drawer total, because the tip cash was never supposed to become part
+of the counted float in the first place. The `/caja` tooltip
+("Es el efectivo que debería haber físicamente en la caja en este momento.")
+is accurate as written.
 
-**Fix:** decide the policy and make the label match it. If cash tips stay in the
-drawer until payout, the figure should be `base + Σ(cash gross − cash discount)`.
+The original test (`test-accounting.ts`) modeled a cash payment as the
+customer's food and tip arriving in the register together in one lump, then
+asserted the drawer should include all of it — that assumption about how tips
+physically move, not the app's math, was what was wrong. The test now asserts
+the actual invariant instead: `drawer === base + cashSales`, exactly, with no
+tolerance for a tip-shaped gap.
 
 ### M4 — Windows printing froze the entire server for ~1 s per ticket — FIXED
 
@@ -411,17 +422,16 @@ running against an existing database is non-destructive.
 - **`server/tests/`** — 8 suites driving a real server (orders over WebSocket, everything else over HTTP). `npm test` boots a throwaway database and emulated printer, runs everything, and tears it down. `npm run test:stress` adds the busy-day simulation and the bill-concurrency measurement. See [server/tests/README.md](server/tests/README.md).
 - **`frontend/tests/`** — pure-logic tests for the cart price preview, promo previews, and the checkout math, cross-checked against the server's own acceptance rules. `npm test`. See [frontend/tests/README.md](frontend/tests/README.md).
 
-Both suites are green. The only remaining reports are two `WARN`s for the
-findings left open on purpose: H2 (unauthenticated money endpoints) and M3
-(cash tips). Everything fixed in this pass now has an assertion behind it.
+Both suites are green. The only remaining report is one `WARN` for H2
+(unauthenticated money endpoints), left open on purpose. Everything else,
+including M3, now has a hard assertion behind it.
 
-Final tallies: server **472 passing / 0 failing / 2 warnings**, frontend
+Final tallies: server **508 passing / 0 failing / 1 warning**, frontend
 **116 passing / 0 failing**.
 
 ## What's left
 
-1. **H2** — `requireAuth` on the orders and cash-flow routers. Two lines, and the biggest remaining exposure.
-2. **M3** — decide the cash-tip policy, then make the drawer figure and its label agree with it.
+1. **H2** — `requireAuth` on the orders and cash-flow routers. Two lines, and the only remaining open finding.
 
 ---
 

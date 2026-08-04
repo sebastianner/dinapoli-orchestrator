@@ -62,19 +62,13 @@ the regression it exists to catch.
 ## Known defects these suites still report
 
 Reported as `WARN`, not `FAIL`, so the suites stay green as a regression gate
-while still surfacing what the audit found. Turn them into failures once fixed.
+while still surfacing what the audit found. Turn it into a failure once fixed.
 
 1. **Every money-moving endpoint is reachable with no session**
    (`test-robustness.ts`, section E). `POST /orders/:id/complete`,
    `PUT /orders/:id/payments`, `POST /cash-flow/expenses` and
    `PUT /cash-flow/current/amount` all accept an unauthenticated caller on the
    LAN. Admin-gated endpoints are correctly gated; these simply have no gate.
-
-2. **Cash tips are missing from "Efectivo final en caja"**
-   (`test-accounting.ts`, section D). The closing receipt computes the expected
-   drawer as `base + cashSales`, and `cashSales` deliberately excludes tips — so
-   a tip handed over in cash sits in the drawer without being accounted for, and
-   the nightly count comes up over by exactly the cash tips.
 
 ## Regressions these suites now guard
 
@@ -100,3 +94,9 @@ Fixed during the audit, and asserted here so they can't come back:
   dropped. Section F covers the race that change introduced: an item added while
   its own order's ticket is printing must not be stamped printed without
   appearing on paper.
+- **The drawer figure excludes cash tips - confirmed intentional, not a defect**
+  (`test-accounting.ts`, section D). Cash tips are pulled from the register and
+  handed to staff immediately rather than staying in the float overnight, so
+  `base + cashSales` (tips excluded) is the whole answer, not an approximation
+  needing a "plus tips" adjustment. The suite runs with real cash tips present
+  and asserts the printed figure matches that formula exactly.
