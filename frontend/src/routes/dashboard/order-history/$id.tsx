@@ -12,6 +12,7 @@ import { useDebouncedCallback } from '@/lib/useDebouncedCallback';
 import { useOrderStore } from '@/store/useOrderStore';
 import { useToastStore } from '@/store/useToastStore';
 import { EditPaymentsModal } from '@/components/order/EditPaymentsModal';
+import { PromoBadge } from '@/components/common/PromoBadge';
 import type { Order, OrderStatus, PaymentMethod } from '@/types/api';
 
 export const Route = createFileRoute('/dashboard/order-history/$id')({
@@ -215,8 +216,9 @@ function OrderDetailPage() {
             {items.map((item) => (
               <div key={item.key} className="flex items-center justify-between gap-2 border-b border-border py-2.5 last:border-b-0">
                 <div className="min-w-0">
-                  <p className="text-sm text-text-primary">
-                    {item.quantity}x {item.description}
+                  <p className="flex items-center gap-1.5 text-sm text-text-primary">
+                    <span className="truncate">{item.quantity}x {item.description}</span>
+                    {item.promoItem && <PromoBadge />}
                   </p>
                   {item.notes && <p className="text-xs text-text-secondary">{item.notes}</p>}
                 </div>

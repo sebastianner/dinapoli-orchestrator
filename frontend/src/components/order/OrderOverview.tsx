@@ -12,6 +12,7 @@ import { addOrderItems, printInvoice, updateOrderCustomer } from '@/lib/api';
 import { orderSocketClient } from '@/lib/orderSocket';
 import { PaymentModal } from '@/components/order/PaymentModal';
 import { CustomerInfoModal } from '@/components/table/CustomerInfoModal';
+import { PromoBadge } from '@/components/common/PromoBadge';
 import { groupOrderItems } from '@/lib/pricing';
 import { useOrderNotificationStore } from '@/store/useOrderNotificationStore';
 import type { Order } from '@/types/api';
@@ -287,8 +288,9 @@ export function OrderOverview() {
         {groupOrderItems(menu, existingOrder?.items ?? []).map((group) => (
           <div key={group.key} className="flex items-center justify-between gap-2 border-b border-border py-2 text-sm">
             <div className="min-w-0">
-              <p className="truncate text-text-primary">
-                {group.quantity}x {group.description}
+              <p className="flex items-center gap-1.5 text-text-primary">
+                <span className="truncate">{group.quantity}x {group.description}</span>
+                {group.promoItem && <PromoBadge />}
               </p>
               {group.notes && <p className="truncate text-xs text-text-secondary">{group.notes}</p>}
             </div>
@@ -484,6 +486,7 @@ interface GroupedCartItem {
   label: string;
   unitPrice: number;
   quantity: number;
+  promoItem: boolean;
   /** Cart entries folded into this row, most-recently-added last - removing the row pops from the end. */
   clientIds: string[];
 }
@@ -498,7 +501,14 @@ function groupCartItems(cart: CartItem[]): GroupedCartItem[] {
       existing.quantity += item.quantity;
       existing.clientIds.push(item.clientId);
     } else {
-      groups.set(key, { key, label: item.label, unitPrice: item.unitPrice, quantity: item.quantity, clientIds: [item.clientId] });
+      groups.set(key, {
+        key,
+        label: item.label,
+        unitPrice: item.unitPrice,
+        quantity: item.quantity,
+        promoItem: item.request.promoItem ?? false,
+        clientIds: [item.clientId],
+      });
     }
   }
   return [...groups.values()];
@@ -534,9 +544,12 @@ function CartRow({ group, onRemoveOne, onRemoveAll }: { group: GroupedCartItem; 
   return (
     <div className="flex items-center justify-between gap-2 border-b border-border py-2 text-sm">
       <div className="min-w-0">
-        <p className="truncate text-text-primary">
-          {group.quantity > 1 ? `${group.quantity}x ` : ''}
-          {group.label}
+        <p className="flex items-center gap-1.5 text-text-primary">
+          <span className="truncate">
+            {group.quantity > 1 ? `${group.quantity}x ` : ''}
+            {group.label}
+          </span>
+          {group.promoItem && <PromoBadge />}
         </p>
       </div>
       <div className="flex shrink-0 items-center gap-2">

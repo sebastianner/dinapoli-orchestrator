@@ -189,13 +189,14 @@ export interface GroupedOrderItem {
   notes: string | null;
   unitPrice: number;
   quantity: number;
+  promoItem: boolean;
 }
 
 /** Collapses repeated additions of the same item (same ref + notes + price) into one row with a summed quantity. */
 export function groupOrderItems(menu: Menu | undefined, items: OrderItem[]): GroupedOrderItem[] {
   const groups = new Map<string, GroupedOrderItem>();
   for (const item of items) {
-    const key = JSON.stringify([item.pizzaRef, item.menuItemRef, item.notes, item.unitPrice]);
+    const key = JSON.stringify([item.pizzaRef, item.menuItemRef, item.notes, item.unitPrice, item.promoItem]);
     const existing = groups.get(key);
     if (existing) {
       existing.quantity += item.quantity;
@@ -206,6 +207,7 @@ export function groupOrderItems(menu: Menu | undefined, items: OrderItem[]): Gro
         notes: item.notes,
         unitPrice: item.unitPrice,
         quantity: item.quantity,
+        promoItem: item.promoItem,
       });
     }
   }

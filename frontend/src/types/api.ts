@@ -324,6 +324,8 @@ export interface OrderItem {
   unitPrice: number;
   notes: string | null;
   printedAt: string | null;
+  /** True when this line is one of the items a promo (duo, pizza_xl) is made of. */
+  promoItem: boolean;
 }
 
 export interface OrderPayment {
