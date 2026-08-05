@@ -31,8 +31,17 @@ function itemRow(item: OrderItem): string {
     </tr>`;
 }
 
-export function renderBillHtml(order: Order, payment: Payment): string {
+export function renderBillHtml(order: Order, payment: Payment | null, previewTotals?: { tip: number; discount: number }): string {
   const rows = groupItemsForBill(order.items).map(itemRow).join('');
+  // `payment` is null for a pre-payment preview (dine-in, still ACTIVE) - there's
+  // no order_payments row yet, so order.tip/discount are always 0 (see
+  // getOrderById) and the caller supplies whatever's currently staged in the
+  // Order Overview instead. Once `payment` is set (completed order, real or
+  // reconstructed from order.payments), everything below reads exactly as it
+  // always has - zero behavior change for the existing completion/reprint paths.
+  const tip = payment ? order.tip : (previewTotals?.tip ?? 0);
+  const discount = payment ? order.discount : (previewTotals?.discount ?? 0);
+  const grandTotal = order.total + order.deliveryFee + tip;
 
   return `<!doctype html>
 <html>
@@ -83,15 +92,17 @@ export function renderBillHtml(order: Order, payment: Payment): string {
   <hr>
   <div class="totals-row"><span>Subtotal</span><span>${formatMoney(order.total)}</span></div>
   ${order.deliveryFee > 0 ? `<div class="totals-row"><span>Domicilio</span><span>${formatMoney(order.deliveryFee)}</span></div>` : ''}
-  ${order.tip > 0 ? `<div class="totals-row"><span>Propina</span><span>${formatMoney(order.tip)}</span></div>` : ''}
-  ${order.discount > 0 ? `<div class="totals-row"><span>Descuento</span><span>-${formatMoney(order.discount)}</span></div>` : ''}
-  <div class="totals-row grand"><span>TOTAL</span><span>${formatMoney(order.grandTotal - order.discount)}</span></div>
-  ${payment.payments
-    .map(
-      (p) =>
-        `<div class="totals-row"><span>Pago (${escapeHtml(describePaymentMethod(p.method))})</span><span>${formatMoney(p.grossAmount - p.discount)}</span></div>`
-    )
-    .join('')}
+  ${tip > 0 ? `<div class="totals-row"><span>Propina</span><span>${formatMoney(tip)}</span></div>` : ''}
+  ${discount > 0 ? `<div class="totals-row"><span>Descuento</span><span>-${formatMoney(discount)}</span></div>` : ''}
+  <div class="totals-row grand"><span>TOTAL</span><span>${formatMoney(grandTotal - discount)}</span></div>
+  ${payment
+    ? payment.payments
+        .map(
+          (p) =>
+            `<div class="totals-row"><span>Pago (${escapeHtml(describePaymentMethod(p.method))})</span><span>${formatMoney(p.grossAmount - p.discount)}</span></div>`
+        )
+        .join('')
+    : ''}
   <div class="thanks">Gracias por su compra!</div>
 </body>
 </html>`;

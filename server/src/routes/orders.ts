@@ -9,6 +9,7 @@ import {
   updateOrderTable,
   updateOrderCustomer,
   updateOrderPayments,
+  printInvoice,
 } from '../services/orderService.js';
 import { notifyPrintQueue } from '../services/queueService.js';
 import { ValidationError } from '../utils/errors.js';
@@ -103,6 +104,23 @@ router.delete('/:id', requireAuth, requireAdmin, (req, res, next) => {
   try {
     deleteOrder(parseOrderId(req.params.id));
     res.json({ status: 'deleted', orderId: parseOrderId(req.params.id) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// No auth, same reasoning as /reprint below - any employee should be able to
+// show/print a bill, whether that's a pre-payment preview (still ACTIVE,
+// dine-in) or the final invoice (COMPLETED). See orderService.printInvoice
+// for how it picks between "resend what's already saved" and "generate now".
+router.post('/:id/invoice', async (req, res, next) => {
+  try {
+    const order = await printInvoice(parseOrderId(req.params.id), {
+      tip: typeof req.body?.tip === 'number' ? req.body.tip : undefined,
+      discount: typeof req.body?.discount === 'number' ? req.body.discount : undefined,
+      force: req.body?.force === true,
+    });
+    res.json(order);
   } catch (err) {
     next(err);
   }

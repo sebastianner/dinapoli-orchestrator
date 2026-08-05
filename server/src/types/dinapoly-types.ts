@@ -7,7 +7,7 @@
 
 export type OrderType = "dine_in" | "takeaway" | "delivery";
 
-export type PaymentMethod = "cash" | "card" | "transfer";
+export type PaymentMethod = "cash" | "card" | "transfer" | "rappi";
 
 export type OrderStatus = "PENDING" | "PRINTING" | "ACTIVE" | "COMPLETED";
 
@@ -408,6 +408,15 @@ export interface Order {
    * `grandTotal`.
    */
   payments: OrderPayment[];
+  /**
+   * True once a bill/invoice document has been generated and saved for this
+   * order (print_jobs, kind 'bill') - via a dine-in pre-payment preview
+   * ("Ver o imprimir factura"), the post-payment "Imprimir factura", or the
+   * automatic print at completion for takeaway/delivery. Drives the Order
+   * Overview button's preview-vs-checkout state and Order History's
+   * reprint-vs-generate branch (see orderService.printInvoice).
+   */
+  hasBill: boolean;
 }
 
 export interface OrderPayment {
@@ -544,6 +553,7 @@ export interface ClosingReport {
   cashSales: number;
   cardSales: number;
   transferSales: number;
+  rappiSales: number;
   /** COP. Grand total sales: deliverySales + dineInTakeawaySales. Tips excluded. */
   totalSales: number;
   /** COP. Total tips collected across all payment methods (not part of totalSales). */
@@ -617,7 +627,7 @@ export interface OrderTypeBreakdown {
 }
 
 export interface SalesBreakdown {
-  /** Always all 3 methods, 0 for any unused in the range. */
+  /** Always all 4 methods, 0 for any unused in the range. */
   paymentMethods: PaymentMethodBreakdown[];
   /** Always all 3 order types, 0 for any unused in the range. */
   orderTypes: OrderTypeBreakdown[];

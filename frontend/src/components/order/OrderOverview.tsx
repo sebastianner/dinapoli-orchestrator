@@ -2,13 +2,13 @@ import { useRef, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { mutate } from 'swr';
 import classNames from 'classnames';
-import { CreditCard, Send, Trash2, UserPlus, Pencil, Percent, X, ShoppingCart, ChevronUp, ChevronDown } from 'lucide-react';
+import { CreditCard, Receipt, Send, Trash2, UserPlus, Pencil, Percent, X, ShoppingCart, ChevronUp, ChevronDown } from 'lucide-react';
 import { useOrderStore, type CartItem, type CustomerDisplayInfo } from '@/store/useOrderStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useToastStore } from '@/store/useToastStore';
 import { useMenu, useOrder } from '@/lib/queries';
 import { formatCOP } from '@/lib/format';
-import { addOrderItems, updateOrderCustomer } from '@/lib/api';
+import { addOrderItems, printInvoice, updateOrderCustomer } from '@/lib/api';
 import { orderSocketClient } from '@/lib/orderSocket';
 import { PaymentModal } from '@/components/order/PaymentModal';
 import { CustomerInfoModal } from '@/components/table/CustomerInfoModal';
@@ -56,6 +56,7 @@ export function OrderOverview() {
   const [customTipOpen, setCustomTipOpen] = useState(false);
   const [discountOpen, setDiscountOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [printingInvoice, setPrintingInvoice] = useState(false);
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [customerModalOpen, setCustomerModalOpen] = useState(false);
   // Desktop keeps this docked open (see the `md:` classes below) - this only
@@ -193,6 +194,21 @@ export function OrderOverview() {
     // The neighborhood's fee (already known client-side, no extra DB round trip) - pre-fills
     // the "Domicilio" field below instead of making staff type it in every time.
     if (deliveryFee != null) setPendingDeliveryFee(deliveryFee);
+  };
+
+  /** Dine-in only - prints the pre-payment preview (items + whatever tip/discount is currently staged) so the customer can see the bill before "Cobrar orden" becomes available. See orderService.printInvoice. */
+  const handlePrintInvoice = async () => {
+    if (!existingOrder) return;
+    setPrintingInvoice(true);
+    try {
+      const updated = await printInvoice(existingOrder.id, { tip: pendingTip, discount: pendingDiscount });
+      upsertActiveOrder(updated);
+      await mutate(`/orders/${existingOrder.id}`, updated, { revalidate: false });
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : 'No se pudo imprimir la factura', 'error');
+    } finally {
+      setPrintingInvoice(false);
+    }
   };
 
   const handlePaymentSuccess = (completedOrder: Order) => {
@@ -421,13 +437,26 @@ export function OrderOverview() {
         )}
 
         {existingOrder && (
-          <button
-            type="button"
-            onClick={() => setPaymentOpen(true)}
-            className="flex cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-success py-2 text-sm font-semibold text-white transition-colors duration-fast hover:opacity-90"
-          >
-            <CreditCard size={15} /> Cobrar orden
-          </button>
+          existingOrder.orderType === 'dine_in' && !existingOrder.hasBill ? (
+            <button
+              key="print-invoice"
+              type="button"
+              onClick={handlePrintInvoice}
+              disabled={printingInvoice}
+              className="anim-scale-in flex cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-success py-2 text-sm font-semibold text-white transition-colors duration-fast hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Receipt size={15} /> {printingInvoice ? 'Imprimiendo...' : 'Ver o imprimir factura'}
+            </button>
+          ) : (
+            <button
+              key="charge-order"
+              type="button"
+              onClick={() => setPaymentOpen(true)}
+              className="anim-scale-in flex cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-success py-2 text-sm font-semibold text-white transition-colors duration-fast hover:opacity-90"
+            >
+              <CreditCard size={15} /> Cobrar orden
+            </button>
+          )
         )}
       </div>
 

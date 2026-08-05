@@ -17,7 +17,7 @@
 import { suite, check, eq, summary, makeRandom, resetResults, isEntrypoint } from './harness.js';
 import { settlementTotals, toPaymentRequest, validateSettlement, type PaymentSplitDraft } from '../src/lib/paymentSplits.js';
 
-type Method = 'cash' | 'card' | 'transfer';
+type Method = 'cash' | 'card' | 'transfer' | 'rappi';
 
 interface SplitSpec {
   method: Method;
@@ -199,7 +199,7 @@ export function run(standalone = true) {
       nets.push(remaining);
 
       const splits = nets.map((netAmount, s) =>
-        draft({ method: rnd.pick(['cash', 'card', 'transfer'] as const), netAmount, tipAmount: tips[s], deliveryFee: fees[s], discount: discounts[s] }),
+        draft({ method: rnd.pick(['cash', 'card', 'transfer', 'rappi'] as const), netAmount, tipAmount: tips[s], deliveryFee: fees[s], discount: discounts[s] }),
       );
 
       if (!validateSettlement(orderTotal, splits, isDelivery ? 'delivery' : 'dine_in').isValid) continue;

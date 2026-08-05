@@ -4,7 +4,7 @@ import { mutate } from 'swr';
 import classNames from 'classnames';
 import { Printer, Receipt, CreditCard, Pencil } from 'lucide-react';
 import { useMenu, useOrder } from '@/lib/queries';
-import { reprintOrderDocument } from '@/lib/api';
+import { printInvoice, reprintOrderDocument } from '@/lib/api';
 import { groupOrderItems } from '@/lib/pricing';
 import { formatCOP } from '@/lib/format';
 import { formatDateTime, formatTime } from '@/lib/date';
@@ -36,6 +36,7 @@ const paymentMethodLabels: Record<PaymentMethod, string> = {
   cash: 'Efectivo',
   card: 'Tarjeta',
   transfer: 'Transferencia',
+  rappi: 'Rappi',
 };
 
 const STEPS: { status: OrderStatus; label: string }[] = [
@@ -117,12 +118,26 @@ function OrderDetailPage() {
     pushToast('Pagos actualizados');
   };
 
-  const handleReprint = useDebouncedCallback(async (kind: 'kitchen_ticket' | 'bill') => {
+  const handleReprintTicket = useDebouncedCallback(async () => {
     try {
-      await reprintOrderDocument(orderId, kind);
+      await reprintOrderDocument(orderId, 'kitchen_ticket');
       pushToast('Reimpresión enviada');
     } catch (err) {
       pushToast(err instanceof Error ? err.message : 'No se pudo reimprimir', 'error');
+    }
+  });
+
+  // Resends the saved invoice if one already exists (identical to today's
+  // reprint), or generates one now if it doesn't - a preview if the order is
+  // still an open dine-in one nobody's printed yet, the final invoice if it's
+  // COMPLETED (see orderService.printInvoice).
+  const handlePrintInvoice = useDebouncedCallback(async () => {
+    try {
+      const updated = await printInvoice(orderId, {});
+      mutate(`/orders/${orderId}`, updated, { revalidate: false });
+      pushToast('Factura enviada a impresión');
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : 'No se pudo imprimir la factura', 'error');
     }
   });
 
@@ -169,14 +184,14 @@ function OrderDetailPage() {
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={() => handleReprint('kitchen_ticket')}
+              onClick={handleReprintTicket}
               className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-border py-2 text-sm font-medium text-text-secondary transition-colors duration-fast hover:border-brand-400 hover:text-brand-600"
             >
               <Printer size={15} /> Comanda
             </button>
             <button
               type="button"
-              onClick={() => handleReprint('bill')}
+              onClick={handlePrintInvoice}
               className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-border py-2 text-sm font-medium text-text-secondary transition-colors duration-fast hover:border-brand-400 hover:text-brand-600"
             >
               <Receipt size={15} /> Factura

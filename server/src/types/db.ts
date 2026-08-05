@@ -91,7 +91,7 @@ export interface RefreshTokenRow {
 
 export type OrderTypeDb = 'dine_in' | 'takeaway' | 'delivery';
 export type OrderStatusDb = 'PENDING' | 'PRINTING' | 'ACTIVE' | 'COMPLETED';
-export type PaymentMethodDb = 'cash' | 'card' | 'transfer';
+export type PaymentMethodDb = 'cash' | 'card' | 'transfer' | 'rappi';
 
 export interface OrderRow {
   id: number;
@@ -231,6 +231,7 @@ export interface ClosingReportRow {
   cash_sales: number;
   card_sales: number;
   transfer_sales: number;
+  rappi_sales: number;
   total_sales: number;
   tips: number;
   discounts: number;

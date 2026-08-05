@@ -205,6 +205,10 @@ async function main() {
   section('H. Bill for a discounted order');
   const disc = await place(dineIn([pizza('large', [{ flavor: 'margherita', portion: 100 }])]));
   await client.post(`/api/orders/${disc.id}/complete`, { payments: [{ method: 'card', grossAmount: disc.total, discount: 6000 }] });
+  // Dine-in no longer auto-prints a bill at completion (see H3 below) - print
+  // the final invoice explicitly so the rest of this section/H2 can exercise
+  // the exact same arithmetic checks as before against a real saved file.
+  await client.post(`/api/orders/${disc.id}/invoice`, {});
   await sleep(2500);
   const discHtml = fs.readFileSync(path.join(PRINTOUTS, `order-${disc.id}-bill.html`), 'utf8');
   const discOrder = (await client.get(`/api/orders/${disc.id}`)).body;
@@ -236,6 +240,56 @@ async function main() {
     check('correcting a payment prints nothing by itself',
       jobsSince(marker).filter((j) => j.text.includes('<RASTER')).length === 1,
       'exactly one raster job expected, from the explicit reprint above');
+  }
+
+  section('H3. Dine-in manual invoice: preview, invalidation, and the final print');
+  {
+    const dinein = await place(dineIn([pizza('large', [{ flavor: 'margherita', portion: 100 }])]));
+    const fresh = (await client.get(`/api/orders/${dinein.id}`)).body;
+    eq('a fresh dine-in order has no bill yet', fresh.hasBill, false);
+
+    const preview = await client.post(`/api/orders/${dinein.id}/invoice`, { tip: 5000 });
+    check('the preview call succeeds', preview.status === 200, JSON.stringify(preview.body).slice(0, 200));
+    eq('hasBill flips true once the preview is printed', preview.body.hasBill, true);
+    await sleep(2500);
+    const previewHtml = fs.readFileSync(path.join(PRINTOUTS, `order-${dinein.id}-bill.html`), 'utf8');
+    check('the preview has no payment-method line (nothing has been paid yet)', !previewHtml.includes('Pago ('), previewHtml.slice(previewHtml.indexOf('TOTAL')));
+    check('the preview reflects the staged tip', previewHtml.includes('<span>Propina</span><span>$5.000</span>'), previewHtml);
+
+    const completeStart = currentMarker();
+    await client.post(`/api/orders/${dinein.id}/complete`, { payments: [{ method: 'card', grossAmount: dinein.total }] });
+    await sleep(600);
+    eq('completing a dine-in order does not auto-print a bill',
+      jobsSince(completeStart).filter((j) => j.text.includes('<RASTER')).length, 0);
+    const preFinal = (await client.get(`/api/orders/${dinein.id}`)).body;
+    check('the stale pre-payment preview is still the saved copy right after completion', preFinal.hasBill, JSON.stringify(preFinal.hasBill));
+
+    const notForced = await client.post(`/api/orders/${dinein.id}/invoice`, {});
+    await sleep(2500);
+    const resent = fs.readFileSync(path.join(PRINTOUTS, `order-${dinein.id}-bill.html`), 'utf8');
+    check('without force, printing again just resends the stale saved preview (no payment line yet)',
+      notForced.status === 200 && !resent.includes('Pago ('), JSON.stringify(notForced.status));
+
+    const final = await client.post(`/api/orders/${dinein.id}/invoice`, { force: true });
+    check('force:true regenerates even though something was already saved', final.status === 200, JSON.stringify(final.body).slice(0, 200));
+    await sleep(2500);
+    const finalHtml = fs.readFileSync(path.join(PRINTOUTS, `order-${dinein.id}-bill.html`), 'utf8');
+    check('the forced final invoice includes the real payment method', finalHtml.includes('Pago (Tarjeta)'), finalHtml.slice(finalHtml.indexOf('TOTAL')));
+
+    // Invalidation: adding an item to a still-open dine-in order clears its saved preview.
+    const openOrder = await place(dineIn([pizza('personal', [{ flavor: 'margherita', portion: 100 }])]));
+    await client.post(`/api/orders/${openOrder.id}/invoice`, {});
+    await sleep(2500);
+    const beforeAdd = (await client.get(`/api/orders/${openOrder.id}`)).body;
+    eq('the open order has a saved preview before more items are added', beforeAdd.hasBill, true);
+    await client.post(`/api/orders/${openOrder.id}/items`, { items: [product('drinks', 'soft_drink', { drinkFlavor: 'agua' })] });
+    await waitForStatus(client, openOrder.id, 'ACTIVE');
+    const afterAdd = (await client.get(`/api/orders/${openOrder.id}`)).body;
+    eq('adding an item invalidates the saved preview (hasBill reverts false)', afterAdd.hasBill, false);
+
+    // A still-open order can't get the final (payment-bearing) invoice.
+    const tooEarly = await client.post(`/api/orders/${openOrder.id}/invoice`, { force: true });
+    check('force:true on a still-open order still renders a preview, not an error', tooEarly.status === 200, JSON.stringify(tooEarly.status));
   }
 
   section('I. Reprint guards');

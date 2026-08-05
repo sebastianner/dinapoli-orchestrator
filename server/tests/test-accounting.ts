@@ -69,6 +69,7 @@ async function main() {
     cashSales: 0,
     cardSales: 0,
     transferSales: 0,
+    rappiSales: 0,
     tips: 0,
     discounts: 0,
     deliveryFees: 0,
@@ -96,6 +97,7 @@ async function main() {
       if (p.method === 'cash') { book.cashSales += sales; book.cashTips += p.tipAmount; }
       else if (p.method === 'card') book.cardSales += sales;
       else if (p.method === 'transfer') book.transferSales += sales;
+      else if (p.method === 'rappi') book.rappiSales += sales;
       book.tips += p.tipAmount;
       book.discounts += p.discount;
       book.deliveryFees += p.deliveryFee;
@@ -108,12 +110,12 @@ async function main() {
   book.customersServed = customerIds.size;
 
   console.log(`  orders=${book.orderCount} items=${book.itemsSold} customers=${book.customersServed}`);
-  console.log(`  sales=${book.totalSales.toLocaleString()} (cash ${book.cashSales.toLocaleString()} / card ${book.cardSales.toLocaleString()} / transfer ${book.transferSales.toLocaleString()})`);
+  console.log(`  sales=${book.totalSales.toLocaleString()} (cash ${book.cashSales.toLocaleString()} / card ${book.cardSales.toLocaleString()} / transfer ${book.transferSales.toLocaleString()} / rappi ${book.rappiSales.toLocaleString()})`);
   console.log(`  tips=${book.tips.toLocaleString()} discounts=${book.discounts.toLocaleString()} deliveryFees=${book.deliveryFees.toLocaleString()}`);
 
   check('payment-method buckets add up to total sales',
-    book.cashSales + book.cardSales + book.transferSales === book.totalSales,
-    `${book.cashSales + book.cardSales + book.transferSales} vs ${book.totalSales}`);
+    book.cashSales + book.cardSales + book.transferSales + book.rappiSales === book.totalSales,
+    `${book.cashSales + book.cardSales + book.transferSales + book.rappiSales} vs ${book.totalSales}`);
   check('order-type buckets add up to total sales',
     book.deliverySales + book.dineInTakeawaySales === book.totalSales);
   check('order-type counts add up to the order count',
@@ -135,6 +137,7 @@ async function main() {
   eq('report cashSales', report.cashSales, book.cashSales);
   eq('report cardSales', report.cardSales, book.cardSales);
   eq('report transferSales', report.transferSales, book.transferSales);
+  eq('report rappiSales', report.rappiSales, book.rappiSales);
   eq('report deliverySales', report.deliverySales, book.deliverySales);
   eq('report dineInTakeawaySales', report.dineInTakeawaySales, book.dineInTakeawaySales);
   eq('report tips', report.tips, book.tips);
@@ -152,6 +155,7 @@ async function main() {
   eq('receipt Ventas en efectivo', receiptValue(content, 'Ventas en efectivo'), report.cashSales);
   eq('receipt Ventas en tarjeta', receiptValue(content, 'Ventas en tarjeta'), report.cardSales);
   eq('receipt Ventas en transferencia', receiptValue(content, 'Ventas en transferencia'), report.transferSales);
+  eq('receipt Ventas en Rappi', receiptValue(content, 'Ventas en Rappi'), report.rappiSales);
   eq('receipt Propinas', receiptValue(content, 'Propinas'), report.tips);
   eq('receipt Descuentos', receiptValue(content, 'Descuentos'), report.discounts);
   eq('receipt Gastos del dia', receiptValue(content, 'Gastos del dia'), report.totalExpenses);
@@ -194,6 +198,7 @@ async function main() {
   eq('analytics cash bucket matches', breakdown.paymentMethods.find((m: any) => m.method === 'cash').sales, report.cashSales);
   eq('analytics card bucket matches', breakdown.paymentMethods.find((m: any) => m.method === 'card').sales, report.cardSales);
   eq('analytics transfer bucket matches', breakdown.paymentMethods.find((m: any) => m.method === 'transfer').sales, report.transferSales);
+  eq('analytics rappi bucket matches', breakdown.paymentMethods.find((m: any) => m.method === 'rappi').sales, report.rappiSales);
   const byType = breakdown.orderTypes;
   eq('analytics delivery sales matches', byType.find((t: any) => t.orderType === 'delivery').sales, report.deliverySales);
   eq('analytics dine_in + takeaway sales matches',

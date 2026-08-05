@@ -28,8 +28,14 @@ async function chromeCount(): Promise<number> {
 
 async function main() {
   await client.loginAdmin(1, 'audit1234');
-  const orders = (await client.get('/api/orders?status=COMPLETED&page=1&pageSize=100&sort=newest')).body;
-  check('there are settled orders to reprint', orders.length >= 47, `${orders.length}`);
+  // Dine-in orders no longer auto-print a bill at completion (see
+  // orderService.printInvoice) - a COMPLETED dine-in order the staff never
+  // manually printed an invoice for has nothing saved to reprint, so it's
+  // excluded here rather than producing an expected 404 that would look like
+  // a rasterization regression.
+  const completedOrders = (await client.get('/api/orders?status=COMPLETED&page=1&pageSize=200&sort=newest')).body;
+  const orders = completedOrders.filter((o: any) => o.hasBill);
+  check('there are settled orders with a saved bill to reprint', orders.length >= 47, `${orders.length} of ${completedOrders.length} completed`);
 
   section('Bill rasterization latency vs. concurrency');
   console.log('  concurrency | ok/total | p50 ms | max ms  | chrome procs after');

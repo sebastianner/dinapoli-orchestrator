@@ -13,6 +13,7 @@ const methodLabels: Record<PaymentMethod, string> = {
   cash: "Efectivo",
   card: "Tarjeta",
   transfer: "Transferencia",
+  rappi: "Rappi",
 };
 
 function splitsFromOrder(order: Order): PaymentSplitRow[] {

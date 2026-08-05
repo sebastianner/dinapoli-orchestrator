@@ -294,6 +294,16 @@ export const completeOrder = (id: number, payments?: PaymentSplitRequest[]) => p
 export const updateOrderPayments = (id: number, payments: PaymentSplitRequest[]) => put<Order>(`/orders/${id}/payments`, { payments });
 export const reprintOrderDocument = (id: number, kind: 'kitchen_ticket' | 'bill') =>
   post<{ status: string; orderId: number; kind: string }>(`/orders/${id}/reprint`, { kind });
+/**
+ * Generates/prints the bill "now": resends whatever's already saved for this
+ * order unless `force`, in which case it always regenerates - the payment
+ * modal's post-payment "Imprimir factura" passes `force: true` so a stale
+ * pre-payment preview never gets resent in place of the real invoice. `tip`/
+ * `discount` only matter for a still-open dine-in order's first preview
+ * (see orderService.printInvoice server-side).
+ */
+export const printInvoice = (id: number, opts: { tip?: number; discount?: number; force?: boolean } = {}) =>
+  post<Order>(`/orders/${id}/invoice`, opts);
 /** Admin only, irreversible - deletes the order and everything derived from it (items, payments, print jobs). */
 export const deleteOrder = (id: number) => del<{ status: string; orderId: number }>(`/orders/${id}`);
 export const updateOrderTable = (id: number, tableNumber: number) => put<Order>(`/orders/${id}/table`, { tableNumber });

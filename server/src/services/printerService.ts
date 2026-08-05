@@ -575,6 +575,7 @@ const PAYMENT_METHOD_ES: Record<PaymentMethod, string> = {
   cash: "Efectivo",
   card: "Tarjeta",
   transfer: "Transferencia",
+  rappi: "Rappi",
 };
 const PROMO_LABEL_ES: Record<NonNullable<Order["promoType"]>, string> = {
   duo: "PROMO DUO",
@@ -1155,6 +1156,15 @@ export async function printBillHtml(
 /** True once a bill has been generated for this order (so a correction knows whether there's a saved copy to refresh). */
 export function hasSavedBill(orderId: number): boolean {
   return getPrintJob.get(orderId, "bill") != null;
+}
+
+const deletePrintJobStmt = db.prepare<[number, PrintJobKind]>(
+  "DELETE FROM print_jobs WHERE order_id = ? AND kind = ?",
+);
+
+/** Clears a saved job so it stops being reprintable and hasSavedBill reports false - used to invalidate a dine-in bill preview once the order it describes has changed (see orderService.addOrderItems). */
+export function deletePrintJob(orderId: number, kind: PrintJobKind): void {
+  deletePrintJobStmt.run(orderId, kind);
 }
 
 /**

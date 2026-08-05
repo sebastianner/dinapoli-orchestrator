@@ -332,13 +332,13 @@ async function main() {
     if (rnd() < 0.25 && grandTotal > 20000) {
       // Mixed payment: cash covers a chunk, the second method carries the tip + fee + discount.
       const cashPart = Math.floor((grandTotal - tip - fee) / 2);
-      const other = pick(['card', 'transfer']);
+      const other = pick(['card', 'transfer', 'rappi']);
       splits = [
         { method: 'cash', grossAmount: cashPart },
         { method: other, grossAmount: grandTotal - cashPart, tipAmount: tip, deliveryFee: fee, discount },
       ];
     } else {
-      splits = [{ method: pick(['cash', 'card', 'transfer']), grossAmount: grandTotal, tipAmount: tip, deliveryFee: fee, discount }];
+      splits = [{ method: pick(['cash', 'card', 'transfer', 'rappi']), grossAmount: grandTotal, tipAmount: tip, deliveryFee: fee, discount }];
     }
 
     const r = await client.post(`/api/orders/${p.id}/complete`, { payments: splits });

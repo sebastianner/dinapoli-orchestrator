@@ -15,6 +15,7 @@ function rowToClosingReport(row: ClosingReportRow): ClosingReport {
     cashSales: row.cash_sales,
     cardSales: row.card_sales,
     transferSales: row.transfer_sales,
+    rappiSales: row.rappi_sales,
     totalSales: row.total_sales,
     tips: row.tips,
     discounts: row.discounts,
@@ -37,6 +38,7 @@ export interface SalesAggregate {
   cashSales: number;
   cardSales: number;
   transferSales: number;
+  rappiSales: number;
   totalSales: number;
   tips: number;
   discounts: number;
@@ -80,6 +82,7 @@ export function aggregateSales(date: string): SalesAggregate {
     cashSales: 0,
     cardSales: 0,
     transferSales: 0,
+    rappiSales: 0,
     totalSales: 0,
     tips: 0,
     discounts: 0,
@@ -94,6 +97,7 @@ export function aggregateSales(date: string): SalesAggregate {
     if (method === 'cash') agg.cashSales += amount;
     else if (method === 'card') agg.cardSales += amount;
     else if (method === 'transfer') agg.transferSales += amount;
+    else if (method === 'rappi') agg.rappiSales += amount;
   }
 
   // "Customers served" = distinct customers, not distinct orders - the same
@@ -174,6 +178,7 @@ function renderClosingReceipt(date: string, sales: SalesAggregate, totalExpenses
   lines.push(moneyRow('Ventas en efectivo', sales.cashSales, width));
   lines.push(moneyRow('Ventas en tarjeta', sales.cardSales, width));
   lines.push(moneyRow('Ventas en transferencia', sales.transferSales, width));
+  lines.push(moneyRow('Ventas en Rappi', sales.rappiSales, width));
   lines.push('='.repeat(width));
   lines.push(moneyRow('TOTAL VENTAS', sales.totalSales, width));
   lines.push(moneyRow('Propinas', sales.tips, width));
@@ -189,12 +194,12 @@ function renderClosingReceipt(date: string, sales: SalesAggregate, totalExpenses
 }
 
 const insertClosingReport = db.prepare<
-  [string, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, string]
+  [string, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, string]
 >(
   `INSERT INTO closing_reports
-     (date, order_count, delivery_sales, dine_in_takeaway_sales, cash_sales, card_sales, transfer_sales, total_sales, tips, discounts,
+     (date, order_count, delivery_sales, dine_in_takeaway_sales, cash_sales, card_sales, transfer_sales, rappi_sales, total_sales, tips, discounts,
       items_sold, customers_served, delivery_order_count, dine_in_order_count, takeaway_order_count, total_expenses, cash_in_register, content)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 );
 const getClosingReportRow = db.prepare<[number], ClosingReportRow>('SELECT * FROM closing_reports WHERE id = ?');
 const listClosingReportRows = db.prepare<[], ClosingReportRow>('SELECT * FROM closing_reports ORDER BY id DESC');
@@ -255,6 +260,7 @@ export async function closeDay(): Promise<ClosingReport> {
     sales.cashSales,
     sales.cardSales,
     sales.transferSales,
+    sales.rappiSales,
     sales.totalSales,
     sales.tips,
     sales.discounts,

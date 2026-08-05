@@ -2,9 +2,9 @@ import db from '../db/index.js';
 import { ValidationError, NotFoundError, ConflictError } from '../utils/errors.js';
 import { markTableBusy, refreshTableStatus, tableExists } from './tableService.js';
 import { processPayment } from './paymentService.js';
-import type { PaymentSplit } from './paymentService.js';
+import type { PaymentSplit, Payment } from './paymentService.js';
 import { printBill, renderBillHtml } from './billingService.js';
-import { reprintJob, printDeliveryComandaCopy, hasSavedBill, updateSavedBill } from './printerService.js';
+import { reprintJob, printDeliveryComandaCopy, hasSavedBill, updateSavedBill, printBillHtml, deletePrintJob } from './printerService.js';
 import { getEmployeeById } from './employeeService.js';
 import { getCustomerById } from './customerService.js';
 import { getPromoSettings } from './promoSettingsService.js';
@@ -43,7 +43,7 @@ import type {
 } from '../types/db.js';
 
 const ORDER_TYPES = new Set<OrderType>(['dine_in', 'takeaway', 'delivery']);
-const PAYMENT_METHODS = new Set<PaymentMethod>(['cash', 'card', 'transfer']);
+const PAYMENT_METHODS = new Set<PaymentMethod>(['cash', 'card', 'transfer', 'rappi']);
 
 const getPizzaSizeByKey = db.prepare<[string], PizzaSizeRow>('SELECT * FROM pizza_sizes WHERE key = ?');
 const getGroupSize = db.prepare<[number, number], PizzaGroupSizeRow>(
@@ -762,6 +762,7 @@ export function getOrderById(id: number): Order {
     completedAt: row.completed_at,
     items,
     payments,
+    hasBill: hasSavedBill(row.id),
   };
 }
 
@@ -921,6 +922,12 @@ export function addOrderItems(id: number, items: unknown): Order {
     if (order.status === 'ACTIVE') {
       markOrderPending.run(id);
     }
+    // A saved bill (dine-in pre-payment preview, most likely) no longer
+    // matches what's on the table once more items land - clearing it reverts
+    // "Cobrar orden" back to "Ver o imprimir factura" until it's regenerated.
+    // Harmless no-op for takeaway/delivery, which never have one saved yet at
+    // this point (they only ever get billed at completion).
+    deletePrintJob(id, 'bill');
   })();
 
   broadcastOrderUpdate(id);
@@ -1125,17 +1132,68 @@ export async function completeOrder(id: number, { payments }: { payments?: unkno
     }
   }
 
-  try {
-    await printBill(orderForPayment, payment);
-  } catch (err) {
-    // The bill's content is already saved to print_jobs (see printBillHtml), so
-    // it's recoverable via POST /orders/:id/reprint once a printer is available -
-    // no reason a print failure should undo a already-settled payment.
-    console.error(`[billing] failed to print bill for order ${id} (payment recorded, order completed):`, (err as Error).message);
+  // Dine-in bills print manually now (see printInvoice) - the customer
+  // typically already saw a pre-payment preview via "Ver o imprimir factura",
+  // and the post-payment copy is an optional "Imprimir factura" click in the
+  // payment modal rather than something that fires the instant they're
+  // charged. Takeaway/delivery have no such preview step, so they keep
+  // printing automatically here exactly as before.
+  if (order.orderType !== 'dine_in') {
+    try {
+      await printBill(orderForPayment, payment);
+    } catch (err) {
+      // The bill's content is already saved to print_jobs (see printBillHtml), so
+      // it's recoverable via POST /orders/:id/reprint once a printer is available -
+      // no reason a print failure should undo a already-settled payment.
+      console.error(`[billing] failed to print bill for order ${id} (payment recorded, order completed):`, (err as Error).message);
+    }
   }
 
   if (order.orderType === 'dine_in') {
     refreshTableStatus(order.tableNumber as number);
+  }
+
+  return getOrderById(id);
+}
+
+/**
+ * Generates and prints the bill/invoice for an order "now", on demand -
+ * either a pre-payment preview (dine-in, still ACTIVE - no order_payments
+ * exist yet, so tip/discount come from the caller's current draft instead)
+ * or the final invoice (COMPLETED - real payment methods, from
+ * order.payments). Used by three call sites: Order Overview's "Ver o
+ * imprimir factura" (first-time preview), Order History's "Factura" button
+ * (reprint-if-saved, else generate), and the payment modal's post-payment
+ * "Imprimir factura" (force: true, so a stale saved preview never gets
+ * resent in place of the real thing).
+ *
+ * Unless `force` is set, a document already saved for this order is just
+ * resent verbatim (same as reprintOrderDocument) rather than regenerated -
+ * this is what makes "if generated already, reprint the same thing" and "if
+ * not, generate it" the same call from the caller's point of view.
+ */
+export async function printInvoice(id: number, opts: { tip?: number; discount?: number; force?: boolean } = {}): Promise<Order> {
+  const order = getOrderById(id);
+
+  if (!opts.force && hasSavedBill(id)) {
+    await reprintJob(id, 'bill');
+    return getOrderById(id);
+  }
+
+  if (order.status === 'COMPLETED') {
+    const payment: Payment = {
+      orderId: order.id,
+      payments: order.payments,
+      amountCOP: order.grandTotal,
+      processedAt: new Date().toISOString(),
+    };
+    await printBill(order, payment);
+  } else if (order.orderType === 'dine_in' && order.status === 'ACTIVE') {
+    const tip = Number.isInteger(opts.tip) && (opts.tip as number) >= 0 ? (opts.tip as number) : 0;
+    const discount = Number.isInteger(opts.discount) && (opts.discount as number) >= 0 ? (opts.discount as number) : 0;
+    await printBillHtml(id, renderBillHtml(order, null, { tip, discount }));
+  } else {
+    throw new ValidationError(`no se puede generar la factura de la orden ${id} en su estado actual (${order.status})`);
   }
 
   return getOrderById(id);

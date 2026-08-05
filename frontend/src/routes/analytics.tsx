@@ -45,11 +45,12 @@ const TABS: { key: TabKey; label: string }[] = [
 ];
 
 const ORDER_TYPE_LABELS: Record<string, string> = { delivery: 'Domicilio', dine_in: 'Mesa', takeaway: 'Para llevar' };
-const PAYMENT_LABELS: Record<string, string> = { cash: 'Efectivo', card: 'Tarjeta', transfer: 'Transferencia' };
+const PAYMENT_LABELS: Record<string, string> = { cash: 'Efectivo', card: 'Tarjeta', transfer: 'Transferencia', rappi: 'Rappi' };
 const PAYMENT_COLORS: Record<string, string> = {
   cash: 'var(--color-brand-500)',
   card: 'var(--color-success)',
   transfer: 'var(--color-text-secondary)',
+  rappi: 'var(--color-warning)',
 };
 
 // Visually distinct (not just brand-shade steps, which read as one flat

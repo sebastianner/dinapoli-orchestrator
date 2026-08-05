@@ -235,7 +235,7 @@ export function getBreakdown(resolved: ResolvedRange): SalesBreakdown {
   );
 
   return {
-    paymentMethods: (['cash', 'card', 'transfer'] as const).map((method) => ({
+    paymentMethods: (['cash', 'card', 'transfer', 'rappi'] as const).map((method) => ({
       method,
       sales: paymentRows.get(method) ?? 0,
     })),

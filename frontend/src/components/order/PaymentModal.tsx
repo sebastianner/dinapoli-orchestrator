@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { Trash2 } from "lucide-react";
+import { Printer, Receipt, Trash2 } from "lucide-react";
 import { Modal } from "@/components/common/Modal";
 import { formatCOP } from "@/lib/format";
-import { completeOrder } from "@/lib/api";
+import { completeOrder, printInvoice } from "@/lib/api";
 import { settlementTotals, toPaymentRequest, validateSettlement, type PaymentSplitDraft } from "@/lib/paymentSplits";
 import { randomUUID } from "@/lib/uuid";
 import { useOrderStore } from "@/store/useOrderStore";
+import { useToastStore } from "@/store/useToastStore";
 import type { Order, PaymentMethod } from "@/types/api";
 
 type PaymentSplitRow = PaymentSplitDraft;
@@ -14,6 +15,7 @@ const methodLabels: Record<PaymentMethod, string> = {
   cash: "Efectivo",
   card: "Tarjeta",
   transfer: "Transferencia",
+  rappi: "Rappi",
 };
 
 interface PaymentModalProps {
@@ -60,6 +62,15 @@ export function PaymentModal({
   ]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Set once a dine-in order is settled, in place of calling onSuccess right
+  // away - lets the modal offer an optional "Imprimir factura" (the final
+  // invoice, real payment info now that it exists) before the staff taps
+  // "Listo" to actually close out. Non-dine-in orders never set this -
+  // they keep printing automatically at completion and close immediately,
+  // same as before this feature existed.
+  const [settledOrder, setSettledOrder] = useState<Order | null>(null);
+  const [printingInvoice, setPrintingInvoice] = useState(false);
+  const pushToast = useToastStore((s) => s.push);
 
   // `netAmount` per split is what's actually collected (what the cashier
   // hands back change against); the GROSS amount (netAmount + discount) is
@@ -89,6 +100,14 @@ export function PaymentModal({
   };
 
   const handleClose = () => {
+    // Once settled there's nothing left to "cancel" - the payment already
+    // went through, so dismissing the success panel any way (X button,
+    // clicking outside) does the same cleanup/navigation "Listo" does,
+    // rather than leaving Order Overview pointed at a now-COMPLETED order.
+    if (settledOrder) {
+      onSuccess(settledOrder);
+      return;
+    }
     reset();
     onClose();
   };
@@ -171,7 +190,13 @@ export function PaymentModal({
     try {
       const completedOrder = await completeOrder(order.id, toPaymentRequest(splits));
       reset();
-      onSuccess(completedOrder);
+      if (order.orderType === "dine_in") {
+        // Bill doesn't auto-print for dine-in (see orderService.completeOrder) -
+        // offer it instead of closing right away.
+        setSettledOrder(completedOrder);
+      } else {
+        onSuccess(completedOrder);
+      }
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "No se pudo completar la orden",
@@ -181,13 +206,61 @@ export function PaymentModal({
     }
   };
 
+  /** Always regenerates (force: true) - order.id is now COMPLETED, so this is the real invoice with actual payment method(s)/tip/discount, never a stale pre-payment preview even if one was saved earlier. Optional and repeatable - staff can print it as many times as needed. */
+  const handlePrintFinalInvoice = async () => {
+    if (!settledOrder) return;
+    setPrintingInvoice(true);
+    try {
+      await printInvoice(settledOrder.id, { force: true });
+      pushToast("Factura enviada a impresión");
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : "No se pudo imprimir la factura", "error");
+    } finally {
+      setPrintingInvoice(false);
+    }
+  };
+
+  const handleDone = () => {
+    if (!settledOrder) return;
+    onSuccess(settledOrder);
+  };
+
   return (
     <Modal
       open={open}
       onClose={handleClose}
-      title="Cobrar orden"
+      title={settledOrder ? "Orden cobrada" : "Cobrar orden"}
       className="max-w-2xl"
     >
+      {settledOrder ? (
+        <div className="flex flex-col items-center gap-4 py-4 text-center">
+          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-success-bg text-success">
+            <Receipt size={28} />
+          </div>
+          <div>
+            <p className="text-lg font-semibold text-text-primary">Orden cobrada exitosamente</p>
+            <p className="text-sm text-text-secondary">Total: {formatCOP(settledOrder.grandTotal - settledOrder.discount)}</p>
+          </div>
+          <div className="flex w-full flex-col gap-2 sm:flex-row">
+            <button
+              type="button"
+              onClick={handlePrintFinalInvoice}
+              disabled={printingInvoice}
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-border py-2.5 text-sm font-semibold text-text-secondary transition-colors duration-fast hover:border-brand-400 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Printer size={15} /> {printingInvoice ? "Imprimiendo..." : "Imprimir factura"}
+            </button>
+            <button
+              type="button"
+              onClick={handleDone}
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-brand-500 py-2.5 text-sm font-semibold text-white transition-colors duration-fast hover:bg-brand-600"
+            >
+              Listo
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
       <div className="mb-4 flex items-center justify-between rounded-lg bg-brand-500/10 px-4 py-3">
         <span className="text-sm font-medium text-text-secondary">
           Total a pagar
@@ -347,6 +420,8 @@ export function PaymentModal({
       >
         {submitting ? "Procesando..." : "Confirmar cobro"}
       </button>
+        </>
+      )}
     </Modal>
   );
 }

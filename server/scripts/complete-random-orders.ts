@@ -33,7 +33,7 @@ function round100(n: number): number {
   return Math.round(n / 100) * 100;
 }
 
-const METHODS: PaymentMethod[] = ["cash", "cash", "card", "card", "transfer"]; // cash/card weighted heavier than transfer
+const METHODS: PaymentMethod[] = ["cash", "cash", "card", "card", "transfer", "rappi"]; // cash/card weighted heavier than transfer/rappi
 
 function randomTip(subtotal: number): number {
   const roll = Math.random();

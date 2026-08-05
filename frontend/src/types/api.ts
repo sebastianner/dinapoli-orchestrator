@@ -5,7 +5,7 @@
 
 export type OrderType = 'dine_in' | 'takeaway' | 'delivery';
 
-export type PaymentMethod = 'cash' | 'card' | 'transfer';
+export type PaymentMethod = 'cash' | 'card' | 'transfer' | 'rappi';
 
 export type OrderStatus = 'PENDING' | 'PRINTING' | 'ACTIVE' | 'COMPLETED';
 
@@ -379,6 +379,8 @@ export interface Order {
   completedAt: string | null;
   items: OrderItem[];
   payments: OrderPayment[];
+  /** True once a bill/invoice has been generated and saved for this order (see orderService.printInvoice server-side). Drives the Order Overview button's preview-vs-checkout state and Order History's reprint-vs-generate branch. */
+  hasBill: boolean;
 }
 
 // ---------- Cash flow ----------
@@ -417,6 +419,7 @@ export interface ClosingReport {
   cashSales: number;
   cardSales: number;
   transferSales: number;
+  rappiSales: number;
   /** COP. Net of discounts already, tips excluded (see tips below) - the real money sold. */
   totalSales: number;
   tips: number;

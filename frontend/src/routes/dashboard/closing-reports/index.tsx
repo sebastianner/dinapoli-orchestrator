@@ -300,6 +300,7 @@ function ReportDetail({
         />
         <StatCard label="Ventas en tarjeta" value={formatCOP(report.cardSales)} />
         <StatCard label="Ventas en transferencia" value={formatCOP(report.transferSales)} />
+        <StatCard label="Ventas en Rappi" value={formatCOP(report.rappiSales)} />
 
         {/* Deductions */}
         <StatCard label="Descuentos" value={formatCOP(report.discounts)} tone="danger" />

@@ -81,6 +81,8 @@ function TodosPage() {
 
   const pizzaCategory = menu ? getPizzaCategory(menu) : undefined;
   const flavors = pizzaCategory ? allPizzaFlavors(pizzaCategory) : [];
+  // Own size/flavor flow, like calzone - not a search match, browse view only.
+  const showPizzaTile = !isSearching && !!pizzaCategory && (!allowedCategories || allowedCategories.has('pizzas'));
 
   return (
     <div>
@@ -103,10 +105,18 @@ function TodosPage() {
         <p className="text-sm text-text-secondary">Cargando...</p>
       ) : isSearching && isSearchLoading ? (
         <p className="text-sm text-text-secondary">Buscando...</p>
-      ) : groups.length === 0 ? (
+      ) : groups.length === 0 && !showPizzaTile ? (
         <p className="text-sm text-text-secondary">{isSearching ? `Nada coincide con "${trimmed}".` : 'No hay productos disponibles.'}</p>
       ) : (
         <div className="flex flex-col gap-8">
+          {showPizzaTile && (
+            <section>
+              <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-text-secondary">{pizzaCategory!.name}</h2>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <PizzaCategoryLink />
+              </div>
+            </section>
+          )}
           {groups.map((group) => (
             <section key={group.categoryId}>
               <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-text-secondary">{group.categoryName}</h2>
@@ -134,6 +144,31 @@ function TodosPage() {
         </div>
       )}
     </div>
+  );
+}
+
+/** Like SizedProductLink, but for the whole pizza category - no single price to show until size+flavors are picked. */
+function PizzaCategoryLink() {
+  const Icon = categoryIcon('pizzas');
+
+  return (
+    <Link
+      to="/menu/pizzas"
+      className="anim-scale-in flex cursor-pointer flex-col gap-2 rounded-2xl border border-border bg-surface p-4 shadow-sm transition-colors duration-fast hover:border-brand-400"
+    >
+      <div className="flex items-start gap-2.5">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-500/10 text-brand-600">
+          <Icon size={18} />
+        </span>
+        <div>
+          <h3 className="font-semibold text-text-primary">Pizza</h3>
+          <p className="mt-0.5 text-sm text-text-secondary">Elige el tamaño y los sabores</p>
+        </div>
+      </div>
+      <span className="mt-1 flex items-center justify-center rounded-lg bg-brand-500 py-2 text-sm font-semibold text-white transition-colors duration-fast hover:bg-brand-600">
+        Elegir tamaño
+      </span>
+    </Link>
   );
 }
 

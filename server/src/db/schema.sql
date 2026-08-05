@@ -368,7 +368,7 @@ CREATE TABLE IF NOT EXISTS order_item_flavors (
 CREATE TABLE IF NOT EXISTS order_payments (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   order_id     INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-  method       TEXT NOT NULL CHECK (method IN ('cash', 'card', 'transfer')),
+  method       TEXT NOT NULL CHECK (method IN ('cash', 'card', 'transfer', 'rappi')),
   gross_amount INTEGER NOT NULL CHECK (gross_amount > 0),
   tip_amount   INTEGER NOT NULL DEFAULT 0 CHECK (tip_amount >= 0 AND tip_amount <= gross_amount),
   delivery_fee INTEGER NOT NULL DEFAULT 0 CHECK (delivery_fee >= 0 AND delivery_fee <= gross_amount),
@@ -450,6 +450,7 @@ CREATE TABLE IF NOT EXISTS closing_reports (
   cash_sales             INTEGER NOT NULL,
   card_sales             INTEGER NOT NULL,
   transfer_sales         INTEGER NOT NULL,
+  rappi_sales            INTEGER NOT NULL DEFAULT 0,
   total_sales            INTEGER NOT NULL,
   tips                   INTEGER NOT NULL DEFAULT 0,
   discounts              INTEGER NOT NULL DEFAULT 0,

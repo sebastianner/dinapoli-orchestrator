@@ -101,6 +101,11 @@ function migrate(): void {
     "cash_in_register",
     "INTEGER NOT NULL DEFAULT 0",
   );
+  // Rappi (a third-party delivery platform payment) joining cash/card/transfer
+  // as a fourth settlement method - see widenPaymentMethodCheck for the
+  // matching order_payments.method CHECK, which needs a table rebuild instead
+  // of a plain ensureColumn since SQLite can't ALTER a CHECK in place.
+  ensureColumn("closing_reports", "rappi_sales", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(
     "orders",
     "promo_type",
@@ -159,6 +164,7 @@ function migrate(): void {
   backfillPizzaFlavorsFts();
   widenTableNumberBounds();
   migrateProductOptionsToDrinkFlavors();
+  widenPaymentMethodCheck();
 }
 
 /**
@@ -427,6 +433,52 @@ function addNetAmountToOrderPayments(): void {
     db.exec(`
       INSERT INTO order_payments_new (id, order_id, method, gross_amount, tip_amount, delivery_fee, net_amount, discount, created_at)
       SELECT id, order_id, method, gross_amount, tip_amount, delivery_fee, gross_amount - tip_amount - delivery_fee, discount, created_at
+      FROM order_payments;
+    `);
+    db.exec("DROP TABLE order_payments;");
+    db.exec("ALTER TABLE order_payments_new RENAME TO order_payments;");
+    db.exec(
+      "CREATE INDEX IF NOT EXISTS idx_order_payments_order_id ON order_payments(order_id);",
+    );
+  })();
+  db.pragma("foreign_keys = ON");
+}
+
+/**
+ * Widens order_payments.method's CHECK to allow 'rappi' alongside
+ * cash/card/transfer. Same rebuild reasoning as addNetAmountToOrderPayments
+ * above - SQLite can't ALTER a CHECK constraint in place. Guarded by
+ * inspecting the table's stored SQL (the column already exists; only the
+ * CHECK text changes), so this is a no-op once already migrated.
+ */
+function widenPaymentMethodCheck(): void {
+  const oldCheck = "method IN ('cash', 'card', 'transfer')";
+
+  const tableSql = db
+    .prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'order_payments'",
+    )
+    .get() as { sql: string } | undefined;
+  if (!tableSql?.sql.includes(oldCheck)) return;
+
+  db.pragma("foreign_keys = OFF");
+  db.transaction(() => {
+    db.exec(`
+      CREATE TABLE order_payments_new (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id     INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+        method       TEXT NOT NULL CHECK (method IN ('cash', 'card', 'transfer', 'rappi')),
+        gross_amount INTEGER NOT NULL CHECK (gross_amount > 0),
+        tip_amount   INTEGER NOT NULL DEFAULT 0 CHECK (tip_amount >= 0 AND tip_amount <= gross_amount),
+        delivery_fee INTEGER NOT NULL DEFAULT 0 CHECK (delivery_fee >= 0 AND delivery_fee <= gross_amount),
+        net_amount   INTEGER NOT NULL CHECK (net_amount >= 0),
+        discount     INTEGER NOT NULL DEFAULT 0 CHECK (discount >= 0 AND discount <= net_amount),
+        created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      );
+    `);
+    db.exec(`
+      INSERT INTO order_payments_new (id, order_id, method, gross_amount, tip_amount, delivery_fee, net_amount, discount, created_at)
+      SELECT id, order_id, method, gross_amount, tip_amount, delivery_fee, net_amount, discount, created_at
       FROM order_payments;
     `);
     db.exec("DROP TABLE order_payments;");
