@@ -146,19 +146,19 @@ function CajaContent({ current }: { current: CashFlowDay }) {
               {formatCOP(openingDelta)} vs. apertura por defecto
             </span>
           )}
-          <div className="mt-1 flex gap-2">
+          <div className="mt-1 flex flex-wrap gap-2">
             <input
               type="number"
               min={0}
               value={cashInput}
               onChange={(e) => setCashInput(e.target.value)}
               placeholder="Nueva base"
-              className="w-32 rounded-lg border border-border bg-surface px-2 py-1.5 text-sm text-text-primary outline-none focus:border-brand-400"
+              className="w-32 min-w-0 rounded-lg border border-border bg-surface px-2 py-1.5 text-sm text-text-primary outline-none focus:border-brand-400"
             />
             <button
               type="button"
               onClick={handleSaveCash}
-              className="rounded-lg bg-brand-500 px-3 py-1.5 text-sm font-semibold text-white transition-colors duration-fast hover:bg-brand-600"
+              className="shrink-0 rounded-lg bg-brand-500 px-3 py-1.5 text-sm font-semibold text-white transition-colors duration-fast hover:bg-brand-600"
             >
               Guardar
             </button>
