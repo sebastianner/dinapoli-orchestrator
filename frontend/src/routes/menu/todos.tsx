@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { Search } from 'lucide-react';
-import { useMenu, useProductSearch } from '@/lib/queries';
+import { useMenu, usePizzaFlavorSearch, useProductSearch } from '@/lib/queries';
 import { useDebouncedValue } from '@/lib/useDebouncedValue';
 import { allPizzaFlavors, getPizzaCategory } from '@/lib/pricing';
 import { ProductCard } from '@/components/menu/ProductCard';
@@ -32,6 +32,7 @@ function TodosPage() {
   const isSearching = trimmed !== '';
 
   const { data: searchResults = [], isLoading: isSearchLoading } = useProductSearch(trimmed);
+  const { data: flavorMatches = [] } = usePizzaFlavorSearch(trimmed);
 
   // Default (no query) view: every product across every non-pizza category,
   // flattened - pizzas keep their own dedicated size/flavor flow and can't
@@ -81,8 +82,13 @@ function TodosPage() {
 
   const pizzaCategory = menu ? getPizzaCategory(menu) : undefined;
   const flavors = pizzaCategory ? allPizzaFlavors(pizzaCategory) : [];
-  // Own size/flavor flow, like calzone - not a search match, browse view only.
-  const showPizzaTile = !isSearching && !!pizzaCategory && (!allowedCategories || allowedCategories.has('pizzas'));
+  const pizzaAllowed = !!pizzaCategory && (!allowedCategories || allowedCategories.has('pizzas'));
+  // Own size/flavor flow, like calzone - can't render through ProductCard, so
+  // a search match (by flavor name, or the category name itself) still has to
+  // route through the tile below rather than a normal result card.
+  const pizzaNameMatches = isSearching && !!pizzaCategory && pizzaCategory.name.toLowerCase().includes(trimmed.toLowerCase());
+  const matchedFlavorNames = isSearching ? flavorMatches.map((f) => f.name) : [];
+  const showPizzaTile = pizzaAllowed && (!isSearching || matchedFlavorNames.length > 0 || pizzaNameMatches);
 
   return (
     <div>
@@ -113,7 +119,7 @@ function TodosPage() {
             <section>
               <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-text-secondary">{pizzaCategory!.name}</h2>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                <PizzaCategoryLink />
+                <PizzaCategoryLink matchedFlavorNames={matchedFlavorNames} />
               </div>
             </section>
           )}
@@ -148,7 +154,7 @@ function TodosPage() {
 }
 
 /** Like SizedProductLink, but for the whole pizza category - no single price to show until size+flavors are picked. */
-function PizzaCategoryLink() {
+function PizzaCategoryLink({ matchedFlavorNames }: { matchedFlavorNames: string[] }) {
   const Icon = categoryIcon('pizzas');
 
   return (
@@ -162,7 +168,9 @@ function PizzaCategoryLink() {
         </span>
         <div>
           <h3 className="font-semibold text-text-primary">Pizza</h3>
-          <p className="mt-0.5 text-sm text-text-secondary">Elige el tamaño y los sabores</p>
+          <p className="mt-0.5 text-sm text-text-secondary">
+            {matchedFlavorNames.length > 0 ? `Coincide: ${matchedFlavorNames.join(', ')}` : 'Elige el tamaño y los sabores'}
+          </p>
         </div>
       </div>
       <span className="mt-1 flex items-center justify-center rounded-lg bg-brand-500 py-2 text-sm font-semibold text-white transition-colors duration-fast hover:bg-brand-600">
