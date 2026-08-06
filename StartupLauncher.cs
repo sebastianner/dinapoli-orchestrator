@@ -9,27 +9,17 @@ using System.Text;
 // Run at Windows logon. On each run:
 //   1. Fetches origin/main and compares it to the current HEAD.
 //   2. If they differ and the working tree is clean, fast-forward pulls.
-//   3. Always runs `npm install` in both server/ and frontend/, on every
-//      single run - not just when a pull touched that side. node_modules
-//      can drift out of sync with package.json for reasons a git diff
-//      can't see (a fresh clone, a manually cleared node_modules, etc.),
-//      and a missing/outdated dependency crashes the server or build. npm
-//      install is a fast no-op when nothing actually changed, so this is
-//      cheap insurance - same reasoning as the unconditional db:migrate
-//      below.
-//   4. Always runs `npm run db:migrate` in server/ before any build, on
-//      every single run - not just when a pull touched server/. The
-//      database can drift out of sync with the code for reasons a git diff
-//      can't see (a restored/reset db file, a manual schema tweak, etc.),
-//      and a missing column crashes the server at startup. migrate.ts's
-//      ensureColumn/etc. helpers are additive and safe to run repeatedly,
-//      so this is cheap insurance and a no-op on a day with no schema
-//      changes.
-//   5. Rebuilds server/frontend if the pull touched that side, or its
-//      dist/ was missing.
+//   3. For each side (server/frontend) independently: runs `npm install`
+//      if the pull touched that side, or if it's never been installed yet
+//      (no node_modules - e.g. a fresh clone). Otherwise skipped.
+//   4. Runs `npm run db:migrate` under the same condition as the server
+//      install (it needs server's node_modules anyway, and a server change
+//      is exactly when the schema might have moved). Otherwise skipped.
+//   5. Rebuilds server/frontend under that same per-side condition (pulled
+//      change on that side, or its dist/ was missing).
 //   6. If HEAD and origin/main are the same (or the tree is dirty, or the
-//      pull fails), it just launches whatever is already built - install
-//      and migrate still run regardless.
+//      pull fails), none of steps 3-5 run - it just launches whatever is
+//      already installed/migrated/built.
 //   7. Starts the server (npm start) and frontend (npm run preview) fully
 //      hidden (no console windows) with stdout/stderr redirected straight to
 //      a log file per service - one file per calendar day, so a restart on
@@ -105,6 +95,8 @@ class Program
     {
         bool serverBuilt = Directory.Exists(Path.Combine(repoRoot, "server", "dist"));
         bool frontendBuilt = Directory.Exists(Path.Combine(repoRoot, "frontend", "dist"));
+        bool serverInstalled = Directory.Exists(Path.Combine(repoRoot, "server", "node_modules"));
+        bool frontendInstalled = Directory.Exists(Path.Combine(repoRoot, "frontend", "node_modules"));
 
         RunCommand(repoRoot, "git fetch origin main");
 
@@ -158,18 +150,20 @@ class Program
             }
         }
 
-        // Always install dependencies for both sides before migrating or
-        // building, and on every run - not just when a pull touched that
-        // side. See the header comment for why this is safe to run
-        // unconditionally.
-        InstallDependencies(Path.Combine(repoRoot, "server"), "server");
-        InstallDependencies(Path.Combine(repoRoot, "frontend"), "frontend");
+        bool installServer = serverChanged || !serverInstalled;
+        bool installFrontend = frontendChanged || !frontendInstalled;
 
-        // Always migrate before building, and on every run - not just when
-        // a pull touched server/ - since the database can drift out of sync
-        // with the code for reasons a git diff can't see. See the header
-        // comment for why this is safe to run unconditionally.
-        RunMigrate();
+        if (installServer) InstallDependencies(Path.Combine(repoRoot, "server"), "server");
+        else Log("server: no pulled changes and dependencies already installed - skipping npm install.");
+
+        if (installFrontend) InstallDependencies(Path.Combine(repoRoot, "frontend"), "frontend");
+        else Log("frontend: no pulled changes and dependencies already installed - skipping npm install.");
+
+        // Same condition as the server install - migrate needs server's
+        // node_modules anyway, and a server-side pull is exactly when the
+        // schema might have moved.
+        if (installServer) RunMigrate();
+        else Log("server: no pulled changes - skipping db:migrate.");
 
         bool buildServer = serverChanged || !serverBuilt;
         bool buildFrontend = frontendChanged || !frontendBuilt;
