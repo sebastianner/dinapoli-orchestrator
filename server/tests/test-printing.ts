@@ -117,9 +117,9 @@ async function main() {
   // E1: duo promo alone - label should read the promo price.
   m = currentMarker();
   await place(dineIn([
-    pizza('personal', [{ flavor: 'margherita', portion: 100 }], { promoItem: true }),
-    product('pastas', 'alfredo', { promoItem: true }),
-  ], { promoType: 'duo' }));
+    pizza('personal', [{ flavor: 'margherita', portion: 100 }], { promoGroup: 0 }),
+    product('pastas', 'alfredo', { promoGroup: 0 }),
+  ], { promos: ['duo'] }));
   await sleep(500);
   let label = jobsSince(m)[0].text.split('\n').find((l) => l.includes('PROMO')) ?? '';
   check(`plain duo ticket shows the promo price (${duoPrice})`, label.includes(duoPrice.toLocaleString('es-CO')), label);
@@ -127,10 +127,10 @@ async function main() {
   // E2: duo promo sharing the order with a more expensive full-price item.
   m = currentMarker();
   const duoPlusXl = await place(dineIn([
-    pizza('personal', [{ flavor: 'margherita', portion: 100 }], { promoItem: true }),
-    product('pastas', 'alfredo', { promoItem: true }),
+    pizza('personal', [{ flavor: 'margherita', portion: 100 }], { promoGroup: 0 }),
+    product('pastas', 'alfredo', { promoGroup: 0 }),
     pizza('xlarge', [{ flavor: 'pepperoni', portion: 100 }]),   // 86.000, full price, NOT part of the promo
-  ], { promoType: 'duo' }));
+  ], { promos: ['duo'] }));
   await sleep(500);
   label = jobsSince(m)[0].text.split('\n').find((l) => l.includes('PROMO')) ?? '';
   check('duo label shows the promo price, not the pricier extra item sharing the order',
@@ -141,10 +141,10 @@ async function main() {
   m = currentMarker();
   const xlAfterExtra = await place(dineIn([
     pizza('small', [{ flavor: 'margherita', portion: 100 }]),    // extra pizza, added FIRST, 34.000
-    pizza('xlarge', [{ flavor: 'margherita', portion: 100 }], { promoItem: true }),
-    product('drinks', 'soft_drink_1_5l', { drinkFlavor: 'uva', promoItem: true }),
-    product('appetizers', 'garlic_bread', { promoItem: true }),
-  ], { promoType: 'pizza_xl' }));
+    pizza('xlarge', [{ flavor: 'margherita', portion: 100 }], { promoGroup: 0 }),
+    product('drinks', 'soft_drink_1_5l', { drinkFlavor: 'uva', promoGroup: 0 }),
+    product('appetizers', 'garlic_bread', { promoGroup: 0 }),
+  ], { promos: ['pizza_xl'] }));
   await sleep(500);
   label = jobsSince(m)[0].text.split('\n').find((l) => l.includes('PROMO')) ?? '';
   check('pizza_xl label shows the promo price even when an extra pizza is listed first',
@@ -154,12 +154,12 @@ async function main() {
   // The label now reads a persisted flag rather than guessing from prices, so
   // check the flag itself is recorded and exposed correctly.
   const xlOrder = (await client.get(`/api/orders/${xlAfterExtra.id}`)).body;
-  eq('exactly the three promo items are flagged', xlOrder.items.filter((i: any) => i.promoItem).length, 3);
+  eq('exactly the three promo items are flagged', xlOrder.items.filter((i: any) => i.promoGroup != null).length, 3);
   check('the extra full-price pizza is not flagged',
-    xlOrder.items.find((i: any) => i.unitPrice === 34000)?.promoItem === false,
-    JSON.stringify(xlOrder.items.map((i: any) => [i.unitPrice, i.promoItem])));
+    xlOrder.items.find((i: any) => i.unitPrice === 34000)?.promoGroup == null,
+    JSON.stringify(xlOrder.items.map((i: any) => [i.unitPrice, i.promoGroup])));
   const plainOrder = (await client.get(`/api/orders/${o1.id}`)).body;
-  check('an order with no promo flags nothing', plainOrder.items.every((i: any) => i.promoItem === false));
+  check('an order with no promo flags nothing', plainOrder.items.every((i: any) => i.promoGroup == null));
 
   // -------------------------------------------------------------------------
   section('F. Delivery: comanda copy + bill at settlement');

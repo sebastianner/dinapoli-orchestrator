@@ -54,8 +54,8 @@ function expectedProductPrice(categoryId: string, productId: string, sizeId?: st
 const XL_SURCHARGE_FLAVORS = new Set(['coca_cola', 'quatro', 'premio']);
 
 function expectedOrderTotal(req: any): number {
-  const nonPromo = req.items.filter((i: any) => !i.promoItem);
-  const promoItems = req.items.filter((i: any) => i.promoItem);
+  const nonPromo = req.items.filter((i: any) => i.promoGroup == null);
+  const promoItems = req.items.filter((i: any) => i.promoGroup != null);
   let total = 0;
   for (const it of nonPromo) {
     const unit = it.type === 'pizza'
@@ -63,8 +63,9 @@ function expectedOrderTotal(req: any): number {
       : expectedProductPrice(it.category, it.product, it.size);
     total += unit * it.quantity;
   }
-  if (!req.promoType) return total;
-  if (req.promoType === 'duo') return total + promoSettings.duo.price;
+  const promoType = req.promos?.[0];
+  if (!promoType) return total;
+  if (promoType === 'duo') return total + promoSettings.duo.price;
   // pizza_xl: flat price, plus a surcharge for three specific soda flavors
   const soda = promoItems.find((i: any) => i.type === 'product' && i.category === 'drinks');
   const surcharge = soda && XL_SURCHARGE_FLAVORS.has(soda.drinkFlavor) ? promoSettings.pizza_xl.sodaSurcharge : 0;
@@ -141,17 +142,17 @@ function duoPromoItems() {
   const eligible = ALL_FLAVORS.filter((f) => !excluded.has(f));
   const pastas = productCat('pastas').products.filter((p: any) => p.id !== 'seafood').map((p: any) => p.id);
   return [
-    { type: 'pizza', size: 'personal', flavors: [{ flavor: pick(eligible), portion: 100 }], quantity: 1, promoItem: true },
-    { type: 'product', category: 'pastas', product: pick(pastas), quantity: 1, promoItem: true },
+    { type: 'pizza', size: 'personal', flavors: [{ flavor: pick(eligible), portion: 100 }], quantity: 1, promoGroup: 0 },
+    { type: 'product', category: 'pastas', product: pick(pastas), quantity: 1, promoGroup: 0 },
   ];
 }
 
 function xlPromoItems() {
   const sodaFlavors = productCat('drinks').products.find((p: any) => p.id === 'soft_drink_1_5l').drinkFlavors.map((f: any) => f.id);
   return [
-    { type: 'pizza', size: 'xlarge', flavors: [{ flavor: pick(ALL_FLAVORS), portion: 100 }], quantity: 1, promoItem: true },
-    { type: 'product', category: 'drinks', product: 'soft_drink_1_5l', drinkFlavor: pick(sodaFlavors), quantity: 1, promoItem: true },
-    { type: 'product', category: 'appetizers', product: 'garlic_bread', quantity: 1, promoItem: true },
+    { type: 'pizza', size: 'xlarge', flavors: [{ flavor: pick(ALL_FLAVORS), portion: 100 }], quantity: 1, promoGroup: 0 },
+    { type: 'product', category: 'drinks', product: 'soft_drink_1_5l', drinkFlavor: pick(sodaFlavors), quantity: 1, promoGroup: 0 },
+    { type: 'product', category: 'appetizers', product: 'garlic_bread', quantity: 1, promoGroup: 0 },
   ];
 }
 
@@ -216,7 +217,7 @@ async function main() {
     if (typeRoll < 0.45) req = { orderType: 'dine_in', employeeId, tableNumber: intBetween(1, tableCount), items };
     else if (typeRoll < 0.68) { const c = pick(customers); req = { orderType: 'takeaway', employeeId, customerId: c.id, items }; }
     else { const c = pick(customers); req = { orderType: 'delivery', employeeId, customerId: c.id, customerAddressId: c.addressId, items, _fee: c.fee }; }
-    if (promoType) req.promoType = promoType;
+    if (promoType) req.promos = [promoType];
     if (rnd() < 0.15) req.notes = 'Sin cebolla, por favor. Mesa con niños.';
     requests.push(req);
   }

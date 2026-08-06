@@ -217,77 +217,77 @@ async function main() {
   section('E. Promotions');
 
   const duoItems = [
-    pizza('personal', [{ flavor: 'margherita', portion: 100 }], { promoItem: true }),
-    product('pastas', 'alfredo', { promoItem: true }),
+    pizza('personal', [{ flavor: 'margherita', portion: 100 }], { promoGroup: 0 }),
+    product('pastas', 'alfredo', { promoGroup: 0 }),
   ];
-  o = await place('duo promo', dineIn(duoItems, { promoType: 'duo' }));
+  o = await place('duo promo', dineIn(duoItems, { promos: ['duo'] }));
   eq('duo total is the flat promo price', o.total, P.duoPromo);
   eq('duo: first item carries the price, second is free', o.items.map((i: any) => i.unitPrice), [P.duoPromo, 0]);
 
   o = await place('duo promo + extra full-price item', dineIn([
     ...duoItems,
     product('drinks', 'soft_drink', { drinkFlavor: 'agua' }),
-  ], { promoType: 'duo' }));
+  ], { promos: ['duo'] }));
   eq('duo + extra total', o.total, P.duoPromo + P.soft_drink);
 
-  await expectReject('duo with only 1 promo item', dineIn([duoItems[0]], { promoType: 'duo' }), 'exactamente 2');
-  await expectReject('duo with 3 promo items', dineIn([...duoItems, product('pastas', 'carbonara', { promoItem: true })], { promoType: 'duo' }), 'exactamente 2');
+  await expectReject('duo with only 1 promo item', dineIn([duoItems[0]], { promos: ['duo'] }), 'exactamente 2');
+  await expectReject('duo with 3 promo items', dineIn([...duoItems, product('pastas', 'carbonara', { promoGroup: 0 })], { promos: ['duo'] }), 'exactamente 2');
   await expectReject('duo with an excluded flavor', dineIn([
-    pizza('personal', [{ flavor: 'campesina', portion: 100 }], { promoItem: true }),
-    product('pastas', 'alfredo', { promoItem: true }),
-  ], { promoType: 'duo' }), 'no está incluido');
+    pizza('personal', [{ flavor: 'campesina', portion: 100 }], { promoGroup: 0 }),
+    product('pastas', 'alfredo', { promoGroup: 0 }),
+  ], { promos: ['duo'] }), 'no está incluido');
   await expectReject('duo with a mitad y mitad pizza', dineIn([
-    pizza('personal', [{ flavor: 'margherita', portion: 50 }, { flavor: 'hawaiian', portion: 50 }], { promoItem: true }),
-    product('pastas', 'alfredo', { promoItem: true }),
-  ], { promoType: 'duo' }), 'mitad y mitad');
+    pizza('personal', [{ flavor: 'margherita', portion: 50 }, { flavor: 'hawaiian', portion: 50 }], { promoGroup: 0 }),
+    product('pastas', 'alfredo', { promoGroup: 0 }),
+  ], { promos: ['duo'] }), 'mitad y mitad');
   await expectReject('duo with a non-personal pizza', dineIn([
-    pizza('large', [{ flavor: 'margherita', portion: 100 }], { promoItem: true }),
-    product('pastas', 'alfredo', { promoItem: true }),
-  ], { promoType: 'duo' }), 'personal');
+    pizza('large', [{ flavor: 'margherita', portion: 100 }], { promoGroup: 0 }),
+    product('pastas', 'alfredo', { promoGroup: 0 }),
+  ], { promos: ['duo'] }), 'personal');
   await expectReject('duo with Mamma Mia lasagna', dineIn([
-    product('lasagnas', 'mamma_mia', { promoItem: true }),
-    product('pastas', 'alfredo', { promoItem: true }),
-  ], { promoType: 'duo' }), 'Mamma Mia');
+    product('lasagnas', 'mamma_mia', { promoGroup: 0 }),
+    product('pastas', 'alfredo', { promoGroup: 0 }),
+  ], { promos: ['duo'] }), 'Mamma Mia');
   await expectReject('duo with Marinera pasta', dineIn([
-    product('pastas', 'seafood', { promoItem: true }),
-    product('pastas', 'alfredo', { promoItem: true }),
-  ], { promoType: 'duo' }), 'Marinera');
+    product('pastas', 'seafood', { promoGroup: 0 }),
+    product('pastas', 'alfredo', { promoGroup: 0 }),
+  ], { promos: ['duo'] }), 'Marinera');
   await expectReject('duo with an ineligible category', dineIn([
-    product('desserts', 'ice_cream', { promoItem: true }),
-    product('pastas', 'alfredo', { promoItem: true }),
-  ], { promoType: 'duo' }));
+    product('desserts', 'ice_cream', { promoGroup: 0 }),
+    product('pastas', 'alfredo', { promoGroup: 0 }),
+  ], { promos: ['duo'] }));
   await expectReject('duo promo item with quantity 2', dineIn([
-    pizza('personal', [{ flavor: 'margherita', portion: 100 }], { promoItem: true, quantity: 2 }),
-    product('pastas', 'alfredo', { promoItem: true }),
-  ], { promoType: 'duo' }), 'cantidad 1');
+    pizza('personal', [{ flavor: 'margherita', portion: 100 }], { promoGroup: 0, quantity: 2 }),
+    product('pastas', 'alfredo', { promoGroup: 0 }),
+  ], { promos: ['duo'] }), 'cantidad 1');
 
   const xlItems = (sodaFlavor: string) => [
-    pizza('xlarge', [{ flavor: 'margherita', portion: 100 }], { promoItem: true }),
-    product('drinks', 'soft_drink_1_5l', { drinkFlavor: sodaFlavor, promoItem: true }),
-    product('appetizers', 'garlic_bread', { promoItem: true }),
+    pizza('xlarge', [{ flavor: 'margherita', portion: 100 }], { promoGroup: 0 }),
+    product('drinks', 'soft_drink_1_5l', { drinkFlavor: sodaFlavor, promoGroup: 0 }),
+    product('appetizers', 'garlic_bread', { promoGroup: 0 }),
   ];
-  o = await place('pizza_xl promo, free soda flavor', dineIn(xlItems('uva'), { promoType: 'pizza_xl' }));
+  o = await place('pizza_xl promo, free soda flavor', dineIn(xlItems('uva'), { promos: ['pizza_xl'] }));
   eq('xl promo total (no surcharge)', o.total, P.xlPromo);
   eq('xl promo item prices', o.items.map((i: any) => i.unitPrice), [P.xlPromo, 0, 0]);
 
-  o = await place('pizza_xl promo, surcharged soda flavor', dineIn(xlItems('coca_cola'), { promoType: 'pizza_xl' }));
+  o = await place('pizza_xl promo, surcharged soda flavor', dineIn(xlItems('coca_cola'), { promos: ['pizza_xl'] }));
   eq('xl promo total (with surcharge)', o.total, P.xlPromo + P.xlSodaSurcharge);
   eq('xl promo surcharge lands on the soda line', o.items.map((i: any) => i.unitPrice), [P.xlPromo, P.xlSodaSurcharge, 0]);
 
   await expectReject('pizza_xl with a non-XL pizza', dineIn([
-    pizza('large', [{ flavor: 'margherita', portion: 100 }], { promoItem: true }),
-    product('drinks', 'soft_drink_1_5l', { drinkFlavor: 'uva', promoItem: true }),
-    product('appetizers', 'garlic_bread', { promoItem: true }),
-  ], { promoType: 'pizza_xl' }), 'pizza XL');
+    pizza('large', [{ flavor: 'margherita', portion: 100 }], { promoGroup: 0 }),
+    product('drinks', 'soft_drink_1_5l', { drinkFlavor: 'uva', promoGroup: 0 }),
+    product('appetizers', 'garlic_bread', { promoGroup: 0 }),
+  ], { promos: ['pizza_xl'] }), 'pizza XL');
   await expectReject('pizza_xl missing the bread', dineIn([
-    pizza('xlarge', [{ flavor: 'margherita', portion: 100 }], { promoItem: true }),
-    product('drinks', 'soft_drink_1_5l', { drinkFlavor: 'uva', promoItem: true }),
-  ], { promoType: 'pizza_xl' }), 'exactamente 3');
-  await expectReject('unknown promoType', dineIn(xlItems('uva'), { promoType: 'combo' }), 'promoType');
+    pizza('xlarge', [{ flavor: 'margherita', portion: 100 }], { promoGroup: 0 }),
+    product('drinks', 'soft_drink_1_5l', { drinkFlavor: 'uva', promoGroup: 0 }),
+  ], { promos: ['pizza_xl'] }), 'exactamente 3');
+  await expectReject('unknown promoType', dineIn(xlItems('uva'), { promos: ['combo'] }), 'promos');
 
   section('E2. Promo pricing is read live from promo_settings');
   await client.put('/api/promos/duo', { price: 40000 });
-  o = await place('duo after an admin price change', dineIn(duoItems, { promoType: 'duo' }));
+  o = await place('duo after an admin price change', dineIn(duoItems, { promos: ['duo'] }));
   eq('duo uses the newly configured price with no restart', o.total, 40000);
   await client.put('/api/promos/duo', { price: P.duoPromo });
 
@@ -295,7 +295,7 @@ async function main() {
   const rNoTags = await t.place(dineIn([
     pizza('personal', [{ flavor: 'margherita', portion: 100 }]),
     product('pastas', 'alfredo'),
-  ], { promoType: 'duo' }));
+  ], { promos: ['duo'] }));
   if (rNoTags.type === 'order_created') {
     warn('promoType with zero promoItem-tagged items',
       `accepted and priced at ${rNoTags.order.total} (order ${rNoTags.order.id}) - expected a rejection, since 'duo' requires exactly 2 tagged items`);
