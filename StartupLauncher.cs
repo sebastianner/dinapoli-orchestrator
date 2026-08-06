@@ -9,7 +9,15 @@ using System.Text;
 // Run at Windows logon. On each run:
 //   1. Fetches origin/main and compares it to the current HEAD.
 //   2. If they differ and the working tree is clean, fast-forward pulls.
-//   3. Always runs `npm run db:migrate` in server/ before any build, on
+//   3. Always runs `npm install` in both server/ and frontend/, on every
+//      single run - not just when a pull touched that side. node_modules
+//      can drift out of sync with package.json for reasons a git diff
+//      can't see (a fresh clone, a manually cleared node_modules, etc.),
+//      and a missing/outdated dependency crashes the server or build. npm
+//      install is a fast no-op when nothing actually changed, so this is
+//      cheap insurance - same reasoning as the unconditional db:migrate
+//      below.
+//   4. Always runs `npm run db:migrate` in server/ before any build, on
 //      every single run - not just when a pull touched server/. The
 //      database can drift out of sync with the code for reasons a git diff
 //      can't see (a restored/reset db file, a manual schema tweak, etc.),
@@ -17,17 +25,17 @@ using System.Text;
 //      ensureColumn/etc. helpers are additive and safe to run repeatedly,
 //      so this is cheap insurance and a no-op on a day with no schema
 //      changes.
-//   4. Rebuilds server/frontend if the pull touched that side, or its
+//   5. Rebuilds server/frontend if the pull touched that side, or its
 //      dist/ was missing.
-//   5. If HEAD and origin/main are the same (or the tree is dirty, or the
-//      pull fails), it just launches whatever is already built - migrate
-//      still runs regardless.
-//   6. Starts the server (npm start) and frontend (npm run preview) fully
+//   6. If HEAD and origin/main are the same (or the tree is dirty, or the
+//      pull fails), it just launches whatever is already built - install
+//      and migrate still run regardless.
+//   7. Starts the server (npm start) and frontend (npm run preview) fully
 //      hidden (no console windows) with stdout/stderr redirected straight to
 //      a log file per service - one file per calendar day, so a restart on
 //      the same day appends rather than overwriting, and old days are easy
 //      to find/prune.
-//   7. Waits for both to accept connections, then opens the frontend in the
+//   8. Waits for both to accept connections, then opens the frontend in the
 //      default browser.
 //
 // Everything the launcher itself does is also appended to startup-log.txt
@@ -150,6 +158,13 @@ class Program
             }
         }
 
+        // Always install dependencies for both sides before migrating or
+        // building, and on every run - not just when a pull touched that
+        // side. See the header comment for why this is safe to run
+        // unconditionally.
+        InstallDependencies(Path.Combine(repoRoot, "server"), "server");
+        InstallDependencies(Path.Combine(repoRoot, "frontend"), "frontend");
+
         // Always migrate before building, and on every run - not just when
         // a pull touched server/ - since the database can drift out of sync
         // with the code for reasons a git diff can't see. See the header
@@ -166,18 +181,23 @@ class Program
         else Log("frontend: no pulled changes and a build already exists - skipping rebuild.");
     }
 
+    static void InstallDependencies(string dir, string label)
+    {
+        Log("Installing dependencies for " + label + "...");
+        int installExit = RunCommand(dir, "npm install");
+        if (installExit != 0)
+        {
+            Log("npm install failed for " + label + " (exit " + installExit + "). Continuing with whatever node_modules already has.");
+        }
+        else
+        {
+            Log(label + " dependencies up to date.");
+        }
+    }
+
     static void RunMigrate()
     {
         string serverDir = Path.Combine(repoRoot, "server");
-
-        // db:migrate runs via tsx off src/, so it needs node_modules present
-        // even if the server hasn't been built yet (e.g. a fresh clone).
-        Log("Installing server dependencies (needed for db:migrate)...");
-        int installExit = RunCommand(serverDir, "npm install");
-        if (installExit != 0)
-        {
-            Log("npm install failed for server (exit " + installExit + "). Attempting migration anyway.");
-        }
 
         Log("Running database migration (npm run db:migrate)...");
         int migrateExit = RunCommand(serverDir, "npm run db:migrate");
@@ -193,13 +213,6 @@ class Program
 
     static void BuildProject(string dir, string label)
     {
-        Log("Installing dependencies for " + label + "...");
-        int installExit = RunCommand(dir, "npm install");
-        if (installExit != 0)
-        {
-            Log("npm install failed for " + label + " (exit " + installExit + "). Attempting build anyway.");
-        }
-
         Log("Building " + label + "...");
         int buildExit = RunCommand(dir, "npm run build");
         if (buildExit != 0)
