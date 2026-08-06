@@ -218,7 +218,7 @@ function OrderDetailPage() {
                 <div className="min-w-0">
                   <p className="flex items-center gap-1.5 text-sm text-text-primary">
                     <span className="truncate">{item.quantity}x {item.description}</span>
-                    {item.promoItem && <PromoBadge />}
+                    {item.promoGroup != null && <PromoBadge />}
                   </p>
                   {item.notes && <p className="text-xs text-text-secondary">{item.notes}</p>}
                 </div>

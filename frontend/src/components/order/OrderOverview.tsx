@@ -1,8 +1,8 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { mutate } from 'swr';
 import classNames from 'classnames';
-import { CreditCard, Receipt, Send, Trash2, UserPlus, Pencil, Percent, X, ShoppingCart, ChevronUp, ChevronDown } from 'lucide-react';
+import { CreditCard, Receipt, Send, Trash2, UserPlus, Pencil, Percent, X, ShoppingCart, ChevronUp, ChevronDown, Sparkles } from 'lucide-react';
 import { useOrderStore, type CartItem, type CustomerDisplayInfo } from '@/store/useOrderStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useToastStore } from '@/store/useToastStore';
@@ -12,10 +12,10 @@ import { addOrderItems, printInvoice, updateOrderCustomer } from '@/lib/api';
 import { orderSocketClient } from '@/lib/orderSocket';
 import { PaymentModal } from '@/components/order/PaymentModal';
 import { CustomerInfoModal } from '@/components/table/CustomerInfoModal';
-import { PromoBadge } from '@/components/common/PromoBadge';
+import { PROMO_LABELS } from '@/lib/promos';
 import { groupOrderItems } from '@/lib/pricing';
 import { useOrderNotificationStore } from '@/store/useOrderNotificationStore';
-import type { Order } from '@/types/api';
+import type { Order, PromoType } from '@/types/api';
 
 type TipMode = 'none' | 'ten' | 'twenty' | 'custom';
 
@@ -39,7 +39,7 @@ export function OrderOverview() {
   const setPendingTip = useOrderStore((s) => s.setPendingTip);
   const setPendingDeliveryFee = useOrderStore((s) => s.setPendingDeliveryFee);
   const setPendingDiscount = useOrderStore((s) => s.setPendingDiscount);
-  const activePromoType = useOrderStore((s) => s.activePromoType);
+  const finalizedPromos = useOrderStore((s) => s.finalizedPromos);
 
   const employee = useSessionStore((s) => s.employee);
   const pushToast = useToastStore((s) => s.push);
@@ -143,7 +143,7 @@ export function OrderOverview() {
         customerId: newOrderInfo.customerId,
         customerAddressId: newOrderInfo.customerAddressId,
         employeeId: employee.id,
-        promoType: activePromoType ?? undefined,
+        promos: finalizedPromos.length > 0 ? finalizedPromos : undefined,
         items: cart.map((item) => item.request),
       });
       upsertActiveOrder(order);
@@ -285,27 +285,66 @@ export function OrderOverview() {
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-3">
-        {groupOrderItems(menu, existingOrder?.items ?? []).map((group) => (
-          <div key={group.key} className="flex items-center justify-between gap-2 border-b border-border py-2 text-sm">
-            <div className="min-w-0">
-              <p className="flex items-center gap-1.5 text-text-primary">
-                <span className="truncate">{group.quantity}x {group.description}</span>
-                {group.promoItem && <PromoBadge />}
-              </p>
-              {group.notes && <p className="truncate text-xs text-text-secondary">{group.notes}</p>}
-            </div>
-            <span className="shrink-0 font-medium text-text-secondary">{formatCOP(group.unitPrice * group.quantity)}</span>
-          </div>
-        ))}
+        {(() => {
+          const committed = bucketByPromoGroup(groupOrderItems(menu, existingOrder?.items ?? []));
+          const drafted = bucketByPromoGroup(groupCartItems(cart));
+          const groupIndexes = [...new Set([...committed.promoGroups.keys(), ...drafted.promoGroups.keys()])].sort((a, b) => a - b);
 
-        {groupCartItems(cart).map((group) => (
-          <CartRow
-            key={group.key}
-            group={group}
-            onRemoveOne={() => removeCartItem(group.clientIds[group.clientIds.length - 1])}
-            onRemoveAll={() => removeCartItems(group.clientIds)}
-          />
-        ))}
+          return (
+            <>
+              {groupIndexes.map((groupIndex) => {
+                const promoMeta = existingOrder?.promos.find((p) => p.group === groupIndex);
+                const type = promoMeta?.type ?? finalizedPromos[groupIndex];
+                if (!type) return null;
+                const committedRows = committed.promoGroups.get(groupIndex) ?? [];
+                const draftedRows = drafted.promoGroups.get(groupIndex) ?? [];
+                const total = promoMeta?.basePrice ?? draftedRows.reduce((sum, r) => sum + r.unitPrice * r.quantity, 0);
+                return (
+                  <PromoDrawer key={`promo-${groupIndex}`} type={type} total={total}>
+                    {committedRows.map((group) => (
+                      <div key={group.key} className="flex items-center justify-between gap-2 py-1.5 text-sm">
+                        <span className="min-w-0 truncate text-text-primary">
+                          {group.quantity}x {group.description}
+                        </span>
+                        <span className="shrink-0 font-medium text-text-secondary">{formatCOP(group.unitPrice * group.quantity)}</span>
+                      </div>
+                    ))}
+                    {draftedRows.map((group) => (
+                      <CartRow
+                        key={group.key}
+                        group={group}
+                        bare
+                        onRemoveOne={() => removeCartItem(group.clientIds[group.clientIds.length - 1])}
+                        onRemoveAll={() => removeCartItems(group.clientIds)}
+                      />
+                    ))}
+                  </PromoDrawer>
+                );
+              })}
+
+              {committed.plain.map((group) => (
+                <div key={group.key} className="flex items-center justify-between gap-2 border-b border-border py-2 text-sm">
+                  <div className="min-w-0">
+                    <p className="truncate text-text-primary">
+                      {group.quantity}x {group.description}
+                    </p>
+                    {group.notes && <p className="truncate text-xs text-text-secondary">{group.notes}</p>}
+                  </div>
+                  <span className="shrink-0 font-medium text-text-secondary">{formatCOP(group.unitPrice * group.quantity)}</span>
+                </div>
+              ))}
+
+              {drafted.plain.map((group) => (
+                <CartRow
+                  key={group.key}
+                  group={group}
+                  onRemoveOne={() => removeCartItem(group.clientIds[group.clientIds.length - 1])}
+                  onRemoveAll={() => removeCartItems(group.clientIds)}
+                />
+              ))}
+            </>
+          );
+        })()}
 
         {!existingOrder && cart.length === 0 && <p className="py-6 text-center text-sm text-text-secondary">Agrega productos del menú</p>}
       </div>
@@ -486,12 +525,12 @@ interface GroupedCartItem {
   label: string;
   unitPrice: number;
   quantity: number;
-  promoItem: boolean;
+  promoGroup: number | null;
   /** Cart entries folded into this row, most-recently-added last - removing the row pops from the end. */
   clientIds: string[];
 }
 
-/** Same idea as groupCommittedItems, but for the not-yet-submitted cart (grouped by label + request payload). */
+/** Same idea as groupOrderItems, but for the not-yet-submitted cart (grouped by label + request payload). */
 function groupCartItems(cart: CartItem[]): GroupedCartItem[] {
   const groups = new Map<string, GroupedCartItem>();
   for (const item of cart) {
@@ -506,7 +545,7 @@ function groupCartItems(cart: CartItem[]): GroupedCartItem[] {
         label: item.label,
         unitPrice: item.unitPrice,
         quantity: item.quantity,
-        promoItem: item.request.promoItem ?? false,
+        promoGroup: item.request.promoGroup ?? null,
         clientIds: [item.clientId],
       });
     }
@@ -514,10 +553,49 @@ function groupCartItems(cart: CartItem[]): GroupedCartItem[] {
   return [...groups.values()];
 }
 
+/** Splits a list of rows into those belonging to a promo (bucketed by group index) and everything else, so each promo's rows can be rendered inside its own PromoDrawer instead of the flat list. */
+function bucketByPromoGroup<T extends { promoGroup: number | null }>(rows: T[]): { promoGroups: Map<number, T[]>; plain: T[] } {
+  const promoGroups = new Map<number, T[]>();
+  const plain: T[] = [];
+  for (const row of rows) {
+    if (row.promoGroup == null) {
+      plain.push(row);
+      continue;
+    }
+    const list = promoGroups.get(row.promoGroup);
+    if (list) list.push(row);
+    else promoGroups.set(row.promoGroup, [row]);
+  }
+  return { promoGroups, plain };
+}
+
+/** Collapsible section grouping one promo instance's items together, labeled with the promo's name and flat price - an order can have several of these at once (one per promo added to it). */
+function PromoDrawer({ type, total, children }: { type: PromoType; total: number; children: ReactNode }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div className="mb-2 overflow-hidden rounded-lg border border-danger/30">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full cursor-pointer items-center justify-between gap-2 bg-danger/10 px-2.5 py-1.5 text-left"
+      >
+        <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-danger">
+          <Sparkles size={12} className="shrink-0" /> {PROMO_LABELS[type]}
+        </span>
+        <span className="flex shrink-0 items-center gap-1 text-xs font-semibold text-danger">
+          {formatCOP(total)}
+          {open ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+        </span>
+      </button>
+      {open && <div className="divide-y divide-border/60 px-2.5">{children}</div>}
+    </div>
+  );
+}
+
 const LONG_PRESS_MS = 600;
 
-/** A grouped, not-yet-submitted cart line. Tap the trash icon to drop one; hold it to drop the whole group. */
-function CartRow({ group, onRemoveOne, onRemoveAll }: { group: GroupedCartItem; onRemoveOne: () => void; onRemoveAll: () => void }) {
+/** A grouped, not-yet-submitted cart line. Tap the trash icon to drop one; hold it to drop the whole group. `bare` drops the row's own bottom border/padding, for use nested inside a PromoDrawer (which already provides those). */
+function CartRow({ group, onRemoveOne, onRemoveAll, bare }: { group: GroupedCartItem; onRemoveOne: () => void; onRemoveAll: () => void; bare?: boolean }) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressFiredRef = useRef(false);
 
@@ -542,14 +620,13 @@ function CartRow({ group, onRemoveOne, onRemoveAll }: { group: GroupedCartItem; 
   };
 
   return (
-    <div className="flex items-center justify-between gap-2 border-b border-border py-2 text-sm">
+    <div className={classNames('flex items-center justify-between gap-2 text-sm', bare ? 'py-1.5' : 'border-b border-border py-2')}>
       <div className="min-w-0">
         <p className="flex items-center gap-1.5 text-text-primary">
           <span className="truncate">
             {group.quantity > 1 ? `${group.quantity}x ` : ''}
             {group.label}
           </span>
-          {group.promoItem && <PromoBadge />}
         </p>
       </div>
       <div className="flex shrink-0 items-center gap-2">

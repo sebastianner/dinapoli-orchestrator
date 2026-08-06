@@ -293,8 +293,13 @@ export interface OrderRequest {
   /** Required for 'delivery' only; must be one of customerId's own addresses. */
   customerAddressId?: number;
   notes?: string;
-  /** Optional. When set, `items` must exactly match that promo's required composition - see resolvePromoItems. */
-  promoType?: PromoType;
+  /**
+   * Optional, one entry per promo instance on this order (an order can carry
+   * several - e.g. a 'duo' and a 'pizza_xl' together). Each items[].promoGroup
+   * is an index into this array; the items tagged with a given index must
+   * exactly match that entry's promo composition - see validatePromoItems.
+   */
+  promos?: PromoType[];
   items: OrderItemRequest[];
 }
 
@@ -319,8 +324,8 @@ export interface PizzaItemRequest {
   flavors: PizzaFlavorSelection[];
   quantity: number;
   notes?: string;
-  /** True for an item that's part of the order's promoType composition (see validatePromoItems/applyPromoPricing) - lets a promo share an order with extra, normally-priced items instead of requiring its own separate order. Ignored when the order has no promoType. */
-  promoItem?: boolean;
+  /** Index into OrderRequest.promos - which promo instance this item is part of, if any (see validatePromoItems/applyPromoPricing). Lets a promo share an order with extra, normally-priced items, and lets several promos share one order. Omitted for a normally-priced item. */
+  promoGroup?: number;
 }
 
 export interface ProductItemRequest {
@@ -336,8 +341,8 @@ export interface ProductItemRequest {
   pizzaFlavor?: string;
   quantity: number;
   notes?: string;
-  /** True for an item that's part of the order's promoType composition (see validatePromoItems/applyPromoPricing) - lets a promo share an order with extra, normally-priced items instead of requiring its own separate order. Ignored when the order has no promoType. */
-  promoItem?: boolean;
+  /** Index into OrderRequest.promos - which promo instance this item is part of, if any (see validatePromoItems/applyPromoPricing). Lets a promo share an order with extra, normally-priced items, and lets several promos share one order. Omitted for a normally-priced item. */
+  promoGroup?: number;
 }
 
 // ============================================================
@@ -395,8 +400,16 @@ export interface Order {
    * hoc name (gross/owed/net all showed up for this exact figure before).
    */
   grandTotal: number;
-  /** Null for the vast majority of orders. Set once at creation, never changed - see PromoType. */
-  promoType: PromoType | null;
+  /**
+   * Empty for the vast majority of orders. One entry per promo instance on
+   * this order (an order can carry several) - set once at creation, never
+   * changed. `basePrice` is that instance's own flat promo price, derived
+   * from its items' unit_price snapshot (same reasoning as the old
+   * printerService.promoBasePrice) so it stays correct even if the
+   * admin-configured price changes later. `group` is the index items[]
+   * .promoGroup points at for items belonging to this instance.
+   */
+  promos: { group: number; type: PromoType; basePrice: number }[];
   notes: string | null;
   createdAt: string; // ISO / SQLite datetime
   completedAt: string | null;
@@ -464,13 +477,14 @@ export interface OrderItem {
   unitPrice: number;
   notes: string | null;
   /**
-   * True when this line is one of the items the order's promo is made of, as
-   * opposed to a normally-priced item sharing the same order. Can't be inferred
-   * from unitPrice (a promo item is priced at the flat promo price, 0, or a
-   * soda surcharge - none of which are distinguishable from a regular price),
-   * so it's recorded at creation. Always false for items added afterwards.
+   * Index into the order's `promos` array - which promo instance this line
+   * is part of, or null for a normally-priced item sharing the same order.
+   * Can't be inferred from unitPrice (a promo item is priced at the flat
+   * promo price, 0, or a soda surcharge - none of which are distinguishable
+   * from a regular price), so it's recorded at creation. Always null for
+   * items added afterwards.
    */
-  promoItem: boolean;
+  promoGroup: number | null;
   /** Null until the queue worker includes this item in a kitchen ticket (original or addendum). */
   printedAt: string | null;
 }

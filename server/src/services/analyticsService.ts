@@ -445,10 +445,27 @@ export function getEmployees(resolved: ResolvedRange): EmployeePerformance[] {
 
 // ---------- Promotions ----------
 
-const getPromoCounts = db.prepare<[string, string], { promo_type: string; order_count: number }>(`
-  SELECT promo_type, COUNT(*) AS order_count
-  FROM orders
-  WHERE status = 'COMPLETED' AND promo_type IS NOT NULL AND date(completed_at, '${BUSINESS_DAY_SQL_OFFSET}') BETWEEN ? AND ?
+// Counts promo INSTANCES, not orders - an order can carry more than one
+// promo (see order_promos), so a single order using 'duo' twice counts as 2
+// here, same as two separate orders would. Two branches: order_promos for
+// every order placed since that table existed, falling back to the legacy
+// orders.promo_type column for orders that predate it (excluded from the
+// first branch via NOT EXISTS, so a given order is never double-counted).
+const getPromoCounts = db.prepare<[string, string, string, string], { promo_type: string; order_count: number }>(`
+  SELECT promo_type, SUM(order_count) AS order_count FROM (
+    SELECT op.promo_type AS promo_type, COUNT(*) AS order_count
+    FROM order_promos op
+    JOIN orders o ON o.id = op.order_id
+    WHERE o.status = 'COMPLETED' AND date(o.completed_at, '${BUSINESS_DAY_SQL_OFFSET}') BETWEEN ? AND ?
+    GROUP BY op.promo_type
+    UNION ALL
+    SELECT o.promo_type AS promo_type, COUNT(*) AS order_count
+    FROM orders o
+    WHERE o.status = 'COMPLETED' AND o.promo_type IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM order_promos op WHERE op.order_id = o.id)
+      AND date(o.completed_at, '${BUSINESS_DAY_SQL_OFFSET}') BETWEEN ? AND ?
+    GROUP BY o.promo_type
+  )
   GROUP BY promo_type
 `);
 
@@ -466,7 +483,7 @@ const getDiscountTotals = db.prepare<
 `);
 
 export function getPromotions(resolved: ResolvedRange): PromoUsageSummary {
-  const promoCounts = getPromoCounts.all(resolved.start, resolved.end).map((r) => ({
+  const promoCounts = getPromoCounts.all(resolved.start, resolved.end, resolved.start, resolved.end).map((r) => ({
     promoType: r.promo_type as 'duo' | 'pizza_xl',
     orderCount: r.order_count,
   }));

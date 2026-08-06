@@ -273,7 +273,11 @@ CREATE TABLE IF NOT EXISTS orders (
   customer_id         INTEGER REFERENCES customers(id),
   customer_address_id INTEGER REFERENCES customer_addresses(id),
   notes               TEXT,
-  -- Nullable - most orders aren't a promo. Set once at creation, never changed.
+  -- Legacy - a single promo type could represent, back when an order could
+  -- only carry one promo. Orders placed since order_promos was introduced
+  -- leave this NULL and record their promo(s) there instead (an order can
+  -- now carry several); kept only so older orders' promo_type is still
+  -- readable. Set once at creation, never changed.
   promo_type          TEXT CHECK (promo_type IS NULL OR promo_type IN ('duo', 'pizza_xl')),
   -- "Delivery #N of the day" as printed on the kitchen comanda. Assigned once,
   -- inside the creating transaction, rather than counted live at print time:
@@ -291,6 +295,22 @@ CREATE TABLE IF NOT EXISTS orders (
   print_attempts      INTEGER NOT NULL DEFAULT 0
 );
 
+
+-- One row per promo instance placed on the order - an order can carry
+-- several at once (e.g. a 'duo' AND a 'pizza_xl' in the same cart), which is
+-- what orders.promo_type (a single nullable value) couldn't represent. New
+-- orders use this table instead; promo_type is kept only for orders placed
+-- before this table existed. `sequence` is this promo's 0-based position
+-- within the order - order_items.promo_group_id points at the specific row
+-- here an item belongs to, and the client tags items with that same index
+-- (see orderService.validatePromoItems/applyPromoPricing).
+CREATE TABLE IF NOT EXISTS order_promos (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id   INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  sequence   INTEGER NOT NULL,
+  promo_type TEXT NOT NULL CHECK (promo_type IN ('duo', 'pizza_xl')),
+  UNIQUE (order_id, sequence)
+);
 
 -- printed_at is NULL until the queue worker includes this item in a kitchen
 -- ticket. Items added to an order that's already ACTIVE (see
@@ -324,6 +344,12 @@ CREATE TABLE IF NOT EXISTS order_items (
   -- Always 0 for items added later via addOrderItems - a promo is fixed at
   -- creation (see orders.promo_type).
   promo_item        INTEGER NOT NULL DEFAULT 0 CHECK (promo_item IN (0, 1)),
+  -- Which of the order's (possibly several) promo instances this item
+  -- belongs to, or NULL for a normally-priced item. References order_promos,
+  -- not orders.promo_type directly, since an order can carry more than one
+  -- promo (see order_promos above). Always NULL for items added later via
+  -- addOrderItems, same as promo_item.
+  promo_group_id    INTEGER REFERENCES order_promos(id),
   printed_at        TEXT
 );
 

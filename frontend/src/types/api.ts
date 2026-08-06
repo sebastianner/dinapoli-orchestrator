@@ -253,8 +253,8 @@ export interface PizzaItemRequest {
   flavors: PizzaFlavorSelection[];
   quantity: number;
   notes?: string;
-  /** True for an item that's part of the order's promoType composition - lets a promo share an order with extra, normally-priced items (see applyPromoPricingPreview/useOrderStore.addPromoItem). */
-  promoItem?: boolean;
+  /** Index into OrderRequest.promos - which promo instance this item is part of, if any (see applyPromoPricingPreview/useOrderStore.addPromoItem). Lets a promo share an order with extra, normally-priced items, and lets several promos share one order. */
+  promoGroup?: number;
 }
 
 export interface ProductItemRequest {
@@ -266,8 +266,8 @@ export interface ProductItemRequest {
   pizzaFlavor?: string;
   quantity: number;
   notes?: string;
-  /** True for an item that's part of the order's promoType composition - lets a promo share an order with extra, normally-priced items (see applyPromoPricingPreview/useOrderStore.addPromoItem). */
-  promoItem?: boolean;
+  /** Index into OrderRequest.promos - which promo instance this item is part of, if any (see applyPromoPricingPreview/useOrderStore.addPromoItem). Lets a promo share an order with extra, normally-priced items, and lets several promos share one order. */
+  promoGroup?: number;
 }
 
 export function isPizzaItem(i: OrderItemRequest): i is PizzaItemRequest {
@@ -296,8 +296,8 @@ export interface OrderRequest {
   /** Required for 'delivery' only; must be one of customerId's own addresses. */
   customerAddressId?: number;
   notes?: string;
-  /** Optional. When set, `items` must exactly match that promo's required composition (server-validated). */
-  promoType?: PromoType;
+  /** Optional, one entry per promo instance on this order (an order can carry several). Each items[].promoGroup is an index into this array; those items must exactly match that entry's promo composition (server-validated). */
+  promos?: PromoType[];
   items: OrderItemRequest[];
 }
 
@@ -324,8 +324,8 @@ export interface OrderItem {
   unitPrice: number;
   notes: string | null;
   printedAt: string | null;
-  /** True when this line is one of the items a promo (duo, pizza_xl) is made of. */
-  promoItem: boolean;
+  /** Index into the order's `promos` array - which promo instance this line is part of, or null for a normally-priced item. */
+  promoGroup: number | null;
 }
 
 export interface OrderPayment {
@@ -374,8 +374,8 @@ export interface Order {
   discount: number;
   /** Integer COP. `total + tip + deliveryFee` - the one canonical name for "everything owed/paid, before discount". */
   grandTotal: number;
-  /** Null for the vast majority of orders. Set once at creation, never changed. */
-  promoType: PromoType | null;
+  /** Empty for the vast majority of orders. One entry per promo instance on this order (an order can carry several) - set once at creation, never changed. `group` is the index items[].promoGroup points at for items belonging to that instance. */
+  promos: { group: number; type: PromoType; basePrice: number }[];
   notes: string | null;
   createdAt: string;
   completedAt: string | null;

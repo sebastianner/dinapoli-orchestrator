@@ -67,8 +67,16 @@ interface OrderState {
 
   /** Set while the user is actively picking items for a promo (see the Promos page). Cleared automatically once the required item count is reached and finalized into `cart`. */
   promoDraft: PromoDraft | null;
-  /** Set once a promo's items have been finalized into `cart` - carried through to the server on submit (see OrderRequest.promoType) so it can validate/flat-price the order. Reset whenever the open order changes, same as pendingTip etc. */
-  activePromoType: PromoType | null;
+  /**
+   * One entry per promo whose items have already been finalized into `cart`
+   * - an order can carry several (e.g. a 'duo' and a 'pizza_xl' together).
+   * Array order matches each promo's group index, which is what the
+   * finalized cart items were tagged with (see addPromoItem) - carried
+   * through to the server on submit as OrderRequest.promos so it can
+   * validate/flat-price each one. Reset whenever the open order changes,
+   * same as pendingTip etc.
+   */
+  finalizedPromos: PromoType[];
 
   startDraft: (input: NewOrderInfo) => void;
   /** Attaches a customer to the in-progress draft (see CustomerInfoModal, invoked from OrderOverview for dine_in). No-op if there's no draft to attach to. */
@@ -109,14 +117,14 @@ export const useOrderStore = create<OrderState>((set) => ({
   pendingDeliveryFee: 0,
   pendingDiscount: 0,
   promoDraft: null,
-  activePromoType: null,
+  finalizedPromos: [],
 
   // Doesn't clear `cart` - a table/delivery/takeaway can be picked *after*
   // items were already added (see ProductCard etc., which no longer require
   // an order context to add to cart), and those items should carry into the
   // draft being started rather than get silently wiped.
   startDraft: (info) =>
-    set({ currentOrderId: null, newOrderInfo: info, pendingTip: 0, pendingDeliveryFee: 0, pendingDiscount: 0, promoDraft: null, activePromoType: null }),
+    set({ currentOrderId: null, newOrderInfo: info, pendingTip: 0, pendingDeliveryFee: 0, pendingDiscount: 0, promoDraft: null, finalizedPromos: [] }),
   setDraftCustomer: (customerId, customerAddressId, display) =>
     set((state) => (state.newOrderInfo ? { newOrderInfo: { ...state.newOrderInfo, customerId, customerAddressId, customerDisplay: display } } : state)),
   openExistingOrder: (orderId) =>
@@ -128,9 +136,9 @@ export const useOrderStore = create<OrderState>((set) => ({
       pendingDeliveryFee: 0,
       pendingDiscount: 0,
       promoDraft: null,
-      activePromoType: null,
+      finalizedPromos: [],
     }),
-  promoteDraftToOrder: (orderId) => set({ currentOrderId: orderId, newOrderInfo: null, cart: [], activePromoType: null }),
+  promoteDraftToOrder: (orderId) => set({ currentOrderId: orderId, newOrderInfo: null, cart: [], finalizedPromos: [] }),
   addCartItem: (item) => set((state) => ({ cart: [...state.cart, item] })),
   removeCartItem: (clientId) => set((state) => ({ cart: state.cart.filter((i) => i.clientId !== clientId) })),
   removeCartItems: (clientIds) =>
@@ -140,7 +148,7 @@ export const useOrderStore = create<OrderState>((set) => ({
     }),
   clearCart: () => set({ cart: [] }),
   clearCurrentOrder: () =>
-    set({ currentOrderId: null, newOrderInfo: null, cart: [], pendingTip: 0, pendingDeliveryFee: 0, pendingDiscount: 0, promoDraft: null, activePromoType: null }),
+    set({ currentOrderId: null, newOrderInfo: null, cart: [], pendingTip: 0, pendingDeliveryFee: 0, pendingDiscount: 0, promoDraft: null, finalizedPromos: [] }),
   setPendingTip: (tip) => set({ pendingTip: tip }),
   setPendingDeliveryFee: (deliveryFee) => set({ pendingDeliveryFee: deliveryFee }),
   setPendingDiscount: (discount) => set({ pendingDiscount: discount }),
@@ -162,8 +170,12 @@ export const useOrderStore = create<OrderState>((set) => ({
       if (items.length < PROMO_ITEM_COUNTS[state.promoDraft.type]) {
         return { promoDraft: { ...state.promoDraft, items } };
       }
-      const priced = applyPromoPricingPreview(state.promoDraft.type, items, settings);
-      return { promoDraft: null, activePromoType: state.promoDraft.type, cart: [...state.cart, ...priced] };
+      // This promo's group index is however many are already finalized -
+      // matches the index the client tags these items with (see
+      // applyPromoPricingPreview) and the position OrderRequest.promos will
+      // submit this promo's type at.
+      const priced = applyPromoPricingPreview(state.promoDraft.type, items, settings, state.finalizedPromos.length);
+      return { promoDraft: null, finalizedPromos: [...state.finalizedPromos, state.promoDraft.type], cart: [...state.cart, ...priced] };
     }),
   cancelPromo: () => set({ promoDraft: null }),
 }));

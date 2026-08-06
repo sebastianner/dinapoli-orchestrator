@@ -90,10 +90,12 @@ export function freeBreadRequest(): OrderItemRequest {
 /**
  * Applies the promo's flat pricing (from the current, admin-editable
  * PromoSettings) to a completed set of draft items, for cart display only -
- * also tags each item `promoItem: true` (mirrors orderService's
+ * also tags each item `promoGroup: groupIndex` (mirrors orderService's
  * validatePromoItems/applyPromoPricing), which is what lets these items keep
- * being treated as the promo once merged into the shared cart alongside any
- * other, normally-priced items added afterward.
+ * being treated as this promo instance once merged into the shared cart
+ * alongside any other, normally-priced items or other promos added
+ * afterward (see useOrderStore.finalizedPromos - `groupIndex` is that
+ * array's length at the moment this promo is finalized).
  * 'duo': the first item carries the full price, the second is free.
  * 'pizza_xl': the pizza carries the full price, the bread is free, and the
  * soda is free unless a surcharge option (Coca-Cola/Quatro/Premio) was chosen.
@@ -101,13 +103,14 @@ export function freeBreadRequest(): OrderItemRequest {
 export function applyPromoPricingPreview<T extends { request: OrderItemRequest; unitPrice: number }>(
   promoType: PromoType,
   items: T[],
-  settings: PromoSettings
+  settings: PromoSettings,
+  groupIndex: number
 ): T[] {
   if (promoType === 'duo') {
-    return items.map((item, i) => ({ ...item, request: { ...item.request, promoItem: true }, unitPrice: i === 0 ? settings.price : 0 }));
+    return items.map((item, i) => ({ ...item, request: { ...item.request, promoGroup: groupIndex }, unitPrice: i === 0 ? settings.price : 0 }));
   }
   return items.map((item) => {
-    const request = { ...item.request, promoItem: true };
+    const request = { ...item.request, promoGroup: groupIndex };
     if (item.request.type === 'pizza') return { ...item, request, unitPrice: settings.price };
     if (item.request.type === 'product' && item.request.category === 'drinks') {
       const surcharge = item.request.drinkFlavor && XL_SODA_SURCHARGE_FLAVORS.has(item.request.drinkFlavor) ? settings.sodaSurcharge : 0;

@@ -180,9 +180,18 @@ export interface OrderItemRow {
   quantity: number;
   unit_price: number;
   notes: string | null;
-  /** 1 when this row is part of the order's promo rather than a normally-priced extra (see schema.sql). */
+  /** 1 when this row is part of one of the order's promos rather than a normally-priced extra (see schema.sql). */
   promo_item: 0 | 1;
+  /** Which order_promos row this item belongs to, or null for a normally-priced item. */
+  promo_group_id: number | null;
   printed_at: string | null;
+}
+
+export interface OrderPromoRow {
+  id: number;
+  order_id: number;
+  sequence: number;
+  promo_type: 'duo' | 'pizza_xl';
 }
 
 export type PrintJobKind = 'kitchen_ticket' | 'bill';

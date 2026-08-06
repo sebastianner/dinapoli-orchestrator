@@ -121,6 +121,10 @@ function migrate(): void {
     "promo_item",
     "INTEGER NOT NULL DEFAULT 0 CHECK (promo_item IN (0, 1))",
   );
+  // Which of the order's (possibly several) order_promos rows this item
+  // belongs to - see schema.sql's order_promos table. Existing rows stay
+  // NULL, same reasoning as promo_item above: not backfillable.
+  ensureColumn("order_items", "promo_group_id", "INTEGER REFERENCES order_promos(id)");
   // Snapshot of "delivery #N of the day" (see schema.sql). Existing rows stay
   // NULL and keep using the live count.
   ensureColumn("orders", "delivery_day_number", "INTEGER");

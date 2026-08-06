@@ -14,6 +14,7 @@ import type {
   Order,
   OrderItem,
   PaymentMethod,
+  PromoType,
 } from "../types/dinapoly-types.js";
 import type { PrintJobKind, PrintJobRow } from "../types/db.js";
 
@@ -577,7 +578,7 @@ const PAYMENT_METHOD_ES: Record<PaymentMethod, string> = {
   transfer: "Transferencia",
   rappi: "Rappi",
 };
-const PROMO_LABEL_ES: Record<NonNullable<Order["promoType"]>, string> = {
+const PROMO_LABEL_ES: Record<PromoType, string> = {
   duo: "PROMO DUO",
   pizza_xl: "PROMO PIZZA XL",
 };
@@ -587,38 +588,14 @@ export function describeOrderType(orderType: Order["orderType"]): string {
 }
 
 /**
- * The flat promo price actually charged for THIS order, derived from its own
- * item snapshot rather than the currently-configured price (which may have
- * changed since - see promoSettingsService), so a reprinted/historical ticket
- * always matches what was actually charged at the time.
- *
- * Scoped to `promoItem` rows specifically. It used to scan every item, which
- * printed the wrong figure the moment a promo shared an order with a
- * normally-priced extra: `duo` took the highest price on the order (an extra
- * XL pizza would be reported as the duo's price), and `pizza_xl` took the
- * first pizza on the order (an extra pizza added to the cart before the promo
- * would win). Both are real orders the frontend lets staff build.
- *
- * Falls back to the old whole-order scan for orders placed before promo_item
- * existed, where every row reads as `false`.
+ * One label per promo instance on the order (an order can carry several -
+ * see Order.promos), e.g. "PROMO DUO ($37.000)". basePrice is already
+ * derived server-side (orderService.buildOrderPromos) from that instance's
+ * own item snapshot rather than the currently-configured price, so a
+ * reprinted/historical ticket always matches what was actually charged.
  */
-function promoBasePrice(order: Order): number {
-  const promoItems = order.items.filter((item) => item.promoItem);
-  const scope = promoItems.length > 0 ? promoItems : order.items;
-
-  if (order.promoType === "duo") {
-    // One of the two carries the full price, the other is 0.
-    return Math.max(...scope.map((item) => item.unitPrice));
-  }
-  // pizza_xl: the pizza carries the base price; the soda's own unitPrice is
-  // just its surcharge (0 or the configured extra), not part of this label.
-  const pizzaItem = scope.find((item) => item.pizzaRef != null);
-  return pizzaItem?.unitPrice ?? 0;
-}
-
-export function describePromoType(order: Order): string {
-  if (!order.promoType) return "";
-  return `${PROMO_LABEL_ES[order.promoType]} (${formatMoney(promoBasePrice(order))})`;
+export function describePromos(order: Order): string[] {
+  return order.promos.map((p) => `${PROMO_LABEL_ES[p.type]} (${formatMoney(p.basePrice)})`);
 }
 
 export function describePaymentMethod(method: PaymentMethod): string {
@@ -809,7 +786,7 @@ export function renderKitchenTicket(order: Order): string {
       ? `${describeOrderType(order.orderType)} #${deliveryOrderNumberOfDay(order)}`
       : describeOrderType(order.orderType);
   lines.push(boldText(orderTypeLine));
-  if (order.promoType) lines.push(centerText(describePromoType(order), width));
+  for (const line of describePromos(order)) lines.push(centerText(line, width));
   if (order.tableNumber) lines.push(boldText(`Mesa: ${order.tableNumber}`));
   if (order.customerName) pushLabeled("Cliente", order.customerName);
   if (order.phone) pushLabeled("Tel", order.phone);
@@ -1206,19 +1183,55 @@ export async function reprintJob(
 }
 
 /**
+ * Splices a payment section into an already-rendered kitchen ticket, right
+ * before its closing "====" separator - for the delivery counter copy
+ * printed at order close (see printDeliveryComandaCopy), once payment is
+ * known: the order's total and, broken out per method, how much was
+ * collected via each (gross minus that split's own discount - the same
+ * "what was actually collected" figure the bill's own payment lines show,
+ * see billingService). Set off with its own "----" divider, same as the
+ * order-notes section above it, so it reads as a distinct block rather than
+ * more ticket lines. A plain-text splice on the printed copy rather than a
+ * renderKitchenTicket param: the saved print_jobs row must stay
+ * payment-agnostic (the kitchen's copy prints well before any payment
+ * exists), so this only touches the text actually sent to the printer here,
+ * never what's persisted.
+ */
+function appendPaymentSummary(content: string, payments: Order["payments"]): string {
+  if (payments.length === 0) return content;
+
+  const collected = payments.map((p) => p.grossAmount - p.discount);
+  const total = collected.reduce((sum, amount) => sum + amount, 0);
+
+  const width = TICKET_TEXT_WIDTH;
+  const section = [
+    "-".repeat(width),
+    `Total: ${formatMoney(total)}`,
+    ...payments.map((p, i) => `${describePaymentMethod(p.method)}: ${formatMoney(collected[i])}`),
+  ].flatMap((line) => wordWrap(line, width));
+
+  const lines = content.split("\n");
+  const closingIndex = lines.length - 1; // the "====" separator renderKitchenTicket always ends on
+  lines.splice(closingIndex, 0, ...section);
+  return lines.join("\n");
+}
+
+/**
  * Delivery orders leave the building with the driver, unlike dine-in/
  * takeaway where the kitchen ticket already printed at intake stays with the
  * kitchen - a copy needs to go out with the order itself. Called from
  * completeOrder alongside the bill, and printed on counter_printer (not
  * kitchen_printer like the original comanda) since this copy travels with
- * the order/bill, not back to the kitchen line.
+ * the order/bill, not back to the kitchen line. `payments` is already known
+ * by the time this runs (completeOrder inserts them before printing), so the
+ * driver's copy can show how the order was actually paid.
  */
-export async function printDeliveryComandaCopy(orderId: number): Promise<void> {
+export async function printDeliveryComandaCopy(orderId: number, payments: Order["payments"]): Promise<void> {
   const row = getPrintJob.get(orderId, "kitchen_ticket");
   if (!row) {
     throw new NotFoundError(
       `no hay un 'kitchen_ticket' guardado para la orden ${orderId}`,
     );
   }
-  await printText(orderId, "kitchen_ticket", row.content, COUNTER_PRINTER_QUEUE, 1);
+  await printText(orderId, "kitchen_ticket", appendPaymentSummary(row.content, payments), COUNTER_PRINTER_QUEUE, 1);
 }

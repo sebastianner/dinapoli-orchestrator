@@ -30,6 +30,7 @@ import type {
   CategoryRow,
   OrderItemRow,
   OrderPaymentRow,
+  OrderPromoRow,
   OrderRow,
   PizzaFlavorRow,
   PizzaGroupRow,
@@ -74,7 +75,6 @@ interface InsertOrderParams {
   customerId: number | null;
   customerAddressId: number | null;
   notes: string | null;
-  promoType: PromoType | null;
   total: number;
 }
 
@@ -90,24 +90,33 @@ interface InsertOrderItemParams {
   quantity: number;
   unitPrice: number;
   notes: string | null;
-  /** 1 for the items the promo is made of, 0 for normally-priced items sharing the order. */
+  /** 1 for the items one of the order's promos is made of, 0 for normally-priced items sharing the order. */
   promoItem: 0 | 1;
+  /** FK into order_promos - which promo instance this item belongs to, or null. */
+  promoGroupId: number | null;
 }
 
+// promo_type is intentionally left NULL here - new orders record their
+// promo(s) in order_promos instead (see insertOrderPromo below), which can
+// hold more than the single value this legacy column could. It's only ever
+// read back for orders that predate that table.
 const insertOrder = db.prepare<InsertOrderParams>(
-  `INSERT INTO orders (order_type, employee_id, table_number, customer_id, customer_address_id, notes, promo_type, total)
-   VALUES (@orderType, @employeeId, @tableNumber, @customerId, @customerAddressId, @notes, @promoType, @total)`
+  `INSERT INTO orders (order_type, employee_id, table_number, customer_id, customer_address_id, notes, total)
+   VALUES (@orderType, @employeeId, @tableNumber, @customerId, @customerAddressId, @notes, @total)`
 );
 const insertOrderItem = db.prepare<InsertOrderItemParams>(
   `INSERT INTO order_items
      (order_id, item_type, product_id, product_size_id, drink_flavor_id,
-      pizza_group_id, pizza_size_id, pizza_flavor_id, quantity, unit_price, notes, promo_item)
+      pizza_group_id, pizza_size_id, pizza_flavor_id, quantity, unit_price, notes, promo_item, promo_group_id)
    VALUES
      (@orderId, @itemType, @productId, @productSizeId, @drinkFlavorId,
-      @pizzaGroupId, @pizzaSizeId, @pizzaFlavorId, @quantity, @unitPrice, @notes, @promoItem)`
+      @pizzaGroupId, @pizzaSizeId, @pizzaFlavorId, @quantity, @unitPrice, @notes, @promoItem, @promoGroupId)`
 );
 const insertOrderItemFlavor = db.prepare<[number, number, number]>(
   'INSERT INTO order_item_flavors (order_item_id, flavor_id, portion) VALUES (?, ?, ?)'
+);
+const insertOrderPromo = db.prepare<[number, number, PromoType]>(
+  'INSERT INTO order_promos (order_id, sequence, promo_type) VALUES (?, ?, ?)'
 );
 
 // "Delivery #N of the day", assigned once inside the creating transaction (see
@@ -145,8 +154,8 @@ interface ResolvedItem {
   unitPrice: number;
   notes: string | null;
   flavorPortions: { flavorId: number; portion: number }[];
-  /** Set by applyPromoPricing for the items the promo is made of; persisted so the ticket doesn't have to guess later. */
-  promoItem: 0 | 1;
+  /** Copied from the request item's promoGroup by resolveItems; persisted so the ticket doesn't have to guess later. */
+  promoGroup: number | null;
 }
 
 function resolvePizzaItem(item: PizzaItemRequest, index: number): ResolvedItem {
@@ -227,7 +236,7 @@ function resolvePizzaItem(item: PizzaItemRequest, index: number): ResolvedItem {
     unitPrice,
     notes: item.notes ?? null,
     flavorPortions: flavors.map((f) => ({ flavorId: f.id, portion: f.portion })),
-    promoItem: 0,
+    promoGroup: null,
   };
 }
 
@@ -294,7 +303,7 @@ function resolveProductItem(item: ProductItemRequest, index: number): ResolvedIt
     unitPrice,
     notes: item.notes ?? null,
     flavorPortions: [],
-    promoItem: 0,
+    promoGroup: null,
   };
 }
 
@@ -340,8 +349,15 @@ function validateOrderRequest(input: unknown): OrderRequest {
     throw new ValidationError('items debe ser un arreglo no vacío');
   }
 
-  if (orderRequest.promoType != null && !PROMO_TYPES.has(orderRequest.promoType)) {
-    throw new ValidationError(`promoType debe ser uno de ${[...PROMO_TYPES].join(', ')}`);
+  if (orderRequest.promos != null) {
+    if (!Array.isArray(orderRequest.promos)) {
+      throw new ValidationError('promos debe ser un arreglo');
+    }
+    for (const [index, promoType] of orderRequest.promos.entries()) {
+      if (!PROMO_TYPES.has(promoType)) {
+        throw new ValidationError(`promos[${index}] debe ser uno de ${[...PROMO_TYPES].join(', ')}`);
+      }
+    }
   }
 
   return orderRequest;
@@ -349,9 +365,19 @@ function validateOrderRequest(input: unknown): OrderRequest {
 
 function resolveItems(items: OrderItemRequest[]): ResolvedItem[] {
   return items.map((item, index) => {
-    if (item?.type === 'pizza') return resolvePizzaItem(item, index);
-    if (item?.type === 'product') return resolveProductItem(item, index);
-    throw new ValidationError(`items[${index}]: type debe ser 'pizza' o 'product'`);
+    const resolved =
+      item?.type === 'pizza'
+        ? resolvePizzaItem(item, index)
+        : item?.type === 'product'
+          ? resolveProductItem(item, index)
+          : (() => {
+              throw new ValidationError(`items[${index}]: type debe ser 'pizza' o 'product'`);
+            })();
+    // Not set inside resolvePizzaItem/resolveProductItem themselves - both
+    // just resolve menu pricing, agnostic of promos. Carried over here so
+    // applyPromoPricing can find each item by its group afterward.
+    resolved.promoGroup = item.promoGroup ?? null;
+    return resolved;
   });
 }
 
@@ -366,58 +392,79 @@ const DUO_EXCLUDED_FLAVORS = new Set(['campesina', 'madrilena', 'atarraya', 'tri
 const XL_SODA_SURCHARGE_FLAVORS = new Set(['coca_cola', 'quatro', 'premio']);
 
 /**
- * Validates that the items tagged `promoItem: true` are exactly the required
- * composition for `promoType` - untagged items are extra, normally-priced
+ * Validates that the items tagged with each promo's group index are exactly
+ * that promo's required composition - an order can carry several promos at
+ * once (see OrderRequest.promos), each identified by its index into that
+ * array; items not tagged with any group index are extra, normally-priced
  * items sharing the order (see applyPromoPricing) and aren't checked here.
  * Checked against the raw client-submitted keys (not resolveItems' DB ids,
  * which don't carry the string keys needed for the flavor/product exclusions
  * below). Throws ValidationError on any violation; returns nothing on success.
  */
-function validatePromoItems(promoType: PromoType, items: OrderItemRequest[]): void {
-  const promoItems = items.filter((item) => item.promoItem === true);
+function validatePromoItems(promos: PromoType[], items: OrderItemRequest[]): void {
+  for (const [index, item] of items.entries()) {
+    if (item.promoGroup != null && (!Number.isInteger(item.promoGroup) || item.promoGroup < 0 || item.promoGroup >= promos.length)) {
+      throw new ValidationError(`items[${index}]: promoGroup ${item.promoGroup} no corresponde a ninguna promoción de la orden`);
+    }
+  }
+
+  promos.forEach((promoType, groupIndex) => {
+    validatePromoGroup(
+      promoType,
+      groupIndex,
+      items.filter((item) => item.promoGroup === groupIndex)
+    );
+  });
+}
+
+function validatePromoGroup(promoType: PromoType, groupIndex: number, promoItems: OrderItemRequest[]): void {
+  // Only named in the error text when there's more than one promo on the
+  // order, so a single-promo order's messages read exactly as they used to.
+  const label = promoType === 'duo' ? "la promoción 'duo'" : "la promoción 'pizza_xl'";
+  const numbered = `${label} (#${groupIndex})`;
 
   for (const [index, item] of promoItems.entries()) {
     if (item.quantity !== 1) {
-      throw new ValidationError(`items de la promoción[${index}]: deben tener cantidad 1`);
+      throw new ValidationError(`items de ${numbered}[${index}]: deben tener cantidad 1`);
     }
   }
 
   if (promoType === 'duo') {
     if (promoItems.length !== 2) {
-      throw new ValidationError(`la promoción 'duo' requiere exactamente 2 ítems marcados como parte de la promoción, se recibieron ${promoItems.length}`);
+      throw new ValidationError(`${numbered} requiere exactamente 2 ítems marcados como parte de la promoción, se recibieron ${promoItems.length}`);
     }
     promoItems.forEach((item, index) => {
       if (item.type === 'pizza') {
         if (item.size !== 'personal') {
-          throw new ValidationError(`items de la promoción[${index}]: la promoción 'duo' solo permite pizzas tamaño personal`);
+          throw new ValidationError(`items de ${numbered}[${index}]: la promoción 'duo' solo permite pizzas tamaño personal`);
         }
         if (item.flavors.length !== 1 || item.flavors[0].portion !== 100) {
-          throw new ValidationError(`items de la promoción[${index}]: las pizzas de la promoción 'duo' no pueden ser mitad y mitad - solo un sabor`);
+          throw new ValidationError(`items de ${numbered}[${index}]: las pizzas de la promoción 'duo' no pueden ser mitad y mitad - solo un sabor`);
         }
         if (DUO_EXCLUDED_FLAVORS.has(item.flavors[0].flavor)) {
-          throw new ValidationError(`items de la promoción[${index}]: el sabor '${item.flavors[0].flavor}' no está incluido en la promoción 'duo'`);
+          throw new ValidationError(`items de ${numbered}[${index}]: el sabor '${item.flavors[0].flavor}' no está incluido en la promoción 'duo'`);
         }
         return;
       }
       if (item.type === 'product' && item.category === 'lasagnas') {
         if (item.product === 'mamma_mia') {
-          throw new ValidationError(`items de la promoción[${index}]: la lasaña Mamma Mia no está incluida en la promoción 'duo'`);
+          throw new ValidationError(`items de ${numbered}[${index}]: la lasaña Mamma Mia no está incluida en la promoción 'duo'`);
         }
         return;
       }
       if (item.type === 'product' && item.category === 'pastas') {
         if (item.product === 'seafood') {
-          throw new ValidationError(`items de la promoción[${index}]: la pasta Marinera no está incluida en la promoción 'duo'`);
+          throw new ValidationError(`items de ${numbered}[${index}]: la pasta Marinera no está incluida en la promoción 'duo'`);
         }
         return;
       }
       if (item.type === 'product' && item.category === 'gratinados') {
         if (item.pizzaFlavor && DUO_EXCLUDED_FLAVORS.has(item.pizzaFlavor)) {
-          throw new ValidationError(`items de la promoción[${index}]: el sabor de gratinado '${item.pizzaFlavor}' no está incluido en la promoción 'duo'`);
+          throw new ValidationError(`items de ${numbered}[${index}]: el sabor de gratinado '${item.pizzaFlavor}' no está incluido en la promoción 'duo'`);
         }
         return;
       }
-      throw new ValidationError(`items de la promoción[${index}]: la promoción 'duo' solo permite una pizza personal, lasaña, pasta o gratinado`);
+      throw new ValidationError(`items de ${numbered}[${index}]: la promoción 'duo' solo permite una pizza personal, lasaña, pasta o gratinado`);
     });
     return;
   }
@@ -425,79 +472,76 @@ function validatePromoItems(promoType: PromoType, items: OrderItemRequest[]): vo
   // pizza_xl
   if (promoItems.length !== 3) {
     throw new ValidationError(
-      `la promoción 'pizza_xl' requiere exactamente 3 ítems marcados como parte de la promoción (pizza XL, gaseosa 1.5L, panes al gratín), se recibieron ${promoItems.length}`
+      `${numbered} requiere exactamente 3 ítems marcados como parte de la promoción (pizza XL, gaseosa 1.5L, panes al gratín), se recibieron ${promoItems.length}`
     );
   }
   const pizza = promoItems.find((i) => i.type === 'pizza');
   if (!pizza || pizza.type !== 'pizza' || pizza.size !== 'xlarge') {
-    throw new ValidationError(`la promoción 'pizza_xl' requiere una pizza XL`);
+    throw new ValidationError(`${numbered} requiere una pizza XL`);
   }
   const soda = promoItems.find((i) => i.type === 'product' && i.category === 'drinks' && i.product === 'soft_drink_1_5l');
   if (!soda) {
-    throw new ValidationError(`la promoción 'pizza_xl' requiere una Gaseosa 1.5L`);
+    throw new ValidationError(`${numbered} requiere una Gaseosa 1.5L`);
   }
   const bread = promoItems.find((i) => i.type === 'product' && i.category === 'appetizers' && i.product === 'garlic_bread');
   if (!bread) {
-    throw new ValidationError(`la promoción 'pizza_xl' requiere una orden de Panes al Gratín`);
+    throw new ValidationError(`${numbered} requiere una orden de Panes al Gratín`);
   }
 }
 
 /**
- * Overrides resolveItems' normal menu pricing with the promo's flat price,
- * for whichever items are tagged `promoItem: true` only - the primary item
- * (the pizza, or the first promo item for 'duo') carries the full
- * admin-configured price (see promoSettingsService), the rest of the promo's
- * items are free, matching how the promo is marketed ("gratis gaseosa y
+ * Overrides resolveItems' normal menu pricing with each promo's flat price,
+ * for whichever items are tagged with that promo's group index only - the
+ * primary item (the pizza, or the first promo item for 'duo') carries the
+ * full admin-configured price (see promoSettingsService), the rest of that
+ * promo's items are free, matching how it's marketed ("gratis gaseosa y
  * panes al gratín"). Untagged items keep whatever resolveItems already
- * priced them at (regular menu pricing) - this is what lets a promo share an
- * order with extra, full-price items instead of requiring its own separate
- * order. The XL promo's soda is the one exception among promo items:
- * choosing Coca-Cola, Quatro, or Premio adds a flat surcharge on top. Prices
- * are read live (not cached), so an admin's price change applies starting
- * with the very next order - already-placed orders keep whatever was
- * snapshotted into their unit_price at the time (see
- * printerService.describePromoType for the matching reasoning on the
- * kitchen ticket label). Mutates `resolvedItems` in place; returns the
- * order's total (promo items + any extra items, already-priced by
- * resolveItems).
+ * priced them at (regular menu pricing) - this is what lets any number of
+ * promos share an order with each other and with extra, full-price items
+ * instead of each requiring its own separate order. The XL promo's soda is
+ * the one exception among promo items: choosing Coca-Cola, Quatro, or Premio
+ * adds a flat surcharge on top. Prices are read live (not cached), so an
+ * admin's price change applies starting with the very next order -
+ * already-placed orders keep whatever was snapshotted into their unit_price
+ * at the time. Mutates `resolvedItems` in place; returns the order's total
+ * (every promo's total + any extra items, already-priced by resolveItems).
  */
-function applyPromoPricing(promoType: PromoType, items: OrderItemRequest[], resolvedItems: ResolvedItem[]): number {
-  const settings = getPromoSettings(promoType);
+function applyPromoPricing(promos: PromoType[], items: OrderItemRequest[], resolvedItems: ResolvedItem[]): number {
+  // Extra items (not part of any promo) keep resolveItems' regular pricing untouched.
+  let total = resolvedItems.reduce((sum, resolved, index) => (items[index].promoGroup != null ? sum : sum + resolved.unitPrice * resolved.quantity), 0);
 
-  // Extra items (not part of the promo) keep resolveItems' regular pricing untouched.
-  let total = resolvedItems.reduce((sum, resolved, index) => (items[index].promoItem ? sum : sum + resolved.unitPrice * resolved.quantity), 0);
+  promos.forEach((promoType, groupIndex) => {
+    const settings = getPromoSettings(promoType);
+    const promoIndexes = items.reduce<number[]>((acc, item, index) => {
+      if (item.promoGroup === groupIndex) acc.push(index);
+      return acc;
+    }, []);
 
-  const promoIndexes = items.reduce<number[]>((acc, item, index) => {
-    if (item.promoItem) acc.push(index);
-    return acc;
-  }, []);
-  // Recorded on the row itself so the kitchen ticket can name the promo's real
-  // price later instead of inferring it from prices (see printerService
-  // .promoBasePrice) - a promo item and a normally-priced extra item are
-  // indistinguishable by price alone.
-  for (const index of promoIndexes) resolvedItems[index].promoItem = 1;
-
-  if (promoType === 'duo') {
-    resolvedItems[promoIndexes[0]].unitPrice = settings.price;
-    resolvedItems[promoIndexes[1]].unitPrice = 0;
-    return total + settings.price;
-  }
-
-  // pizza_xl
-  let promoTotal = settings.price;
-  for (const index of promoIndexes) {
-    const item = items[index];
-    if (item.type === 'pizza') {
-      resolvedItems[index].unitPrice = settings.price;
-    } else if (item.type === 'product' && item.category === 'drinks') {
-      const surcharge = item.drinkFlavor && XL_SODA_SURCHARGE_FLAVORS.has(item.drinkFlavor) ? settings.sodaSurcharge : 0;
-      resolvedItems[index].unitPrice = surcharge;
-      promoTotal += surcharge;
-    } else {
-      resolvedItems[index].unitPrice = 0;
+    if (promoType === 'duo') {
+      resolvedItems[promoIndexes[0]].unitPrice = settings.price;
+      resolvedItems[promoIndexes[1]].unitPrice = 0;
+      total += settings.price;
+      return;
     }
-  }
-  return total + promoTotal;
+
+    // pizza_xl
+    let promoTotal = settings.price;
+    for (const index of promoIndexes) {
+      const item = items[index];
+      if (item.type === 'pizza') {
+        resolvedItems[index].unitPrice = settings.price;
+      } else if (item.type === 'product' && item.category === 'drinks') {
+        const surcharge = item.drinkFlavor && XL_SODA_SURCHARGE_FLAVORS.has(item.drinkFlavor) ? settings.sodaSurcharge : 0;
+        resolvedItems[index].unitPrice = surcharge;
+        promoTotal += surcharge;
+      } else {
+        resolvedItems[index].unitPrice = 0;
+      }
+    }
+    total += promoTotal;
+  });
+
+  return total;
 }
 
 /**
@@ -536,11 +580,12 @@ export function createOrder(input: unknown): Order {
   }
 
   const resolvedItems = resolveItems(orderRequest.items);
+  const promos = orderRequest.promos ?? [];
 
   let total: number;
-  if (orderRequest.promoType) {
-    validatePromoItems(orderRequest.promoType, orderRequest.items);
-    total = applyPromoPricing(orderRequest.promoType, orderRequest.items, resolvedItems);
+  if (promos.length > 0) {
+    validatePromoItems(promos, orderRequest.items);
+    total = applyPromoPricing(promos, orderRequest.items, resolvedItems);
   } else {
     total = resolvedItems.reduce((sum, it) => sum + it.unitPrice * it.quantity, 0);
   }
@@ -553,12 +598,20 @@ export function createOrder(input: unknown): Order {
       customerId: orderRequest.customerId ?? null,
       customerAddressId: orderRequest.orderType === 'delivery' ? (orderRequest.customerAddressId as number) : null,
       notes: orderRequest.notes ?? null,
-      promoType: orderRequest.promoType ?? null,
       total,
     });
     const newOrderId = Number(result.lastInsertRowid);
 
+    // Inserted before the items below so each item's promoGroup can be
+    // resolved to the specific order_promos row it belongs to.
+    const groupIndexToPromoId = new Map<number, number>();
+    promos.forEach((promoType, sequence) => {
+      const promoResult = insertOrderPromo.run(newOrderId, sequence, promoType);
+      groupIndexToPromoId.set(sequence, Number(promoResult.lastInsertRowid));
+    });
+
     for (const item of resolvedItems) {
+      const promoGroupId = item.promoGroup != null ? (groupIndexToPromoId.get(item.promoGroup) ?? null) : null;
       const itemResult = insertOrderItem.run({
         orderId: newOrderId,
         itemType: item.itemType,
@@ -571,7 +624,8 @@ export function createOrder(input: unknown): Order {
         quantity: item.quantity,
         unitPrice: item.unitPrice,
         notes: item.notes,
-        promoItem: item.promoItem,
+        promoItem: promoGroupId != null ? 1 : 0,
+        promoGroupId,
       });
       const orderItemId = Number(itemResult.lastInsertRowid);
       for (const fp of item.flavorPortions) {
@@ -654,6 +708,7 @@ function formatDeliveryAddress(row: OrderJoinRow): string | null {
   return parts.join(', ');
 }
 const getOrderItemRows = db.prepare<[number], OrderItemRow>('SELECT * FROM order_items WHERE order_id = ? ORDER BY id');
+const getOrderPromoRows = db.prepare<[number], OrderPromoRow>('SELECT * FROM order_promos WHERE order_id = ? ORDER BY sequence');
 const getOrderPaymentRows = db.prepare<[number], OrderPaymentRow>('SELECT * FROM order_payments WHERE order_id = ? ORDER BY id');
 // Tip/delivery fee/discount only ever exist as the per-method breakdown in
 // order_payments, written once at completion - so they're 0 for any order
@@ -677,14 +732,20 @@ const getPizzaGroupById = db.prepare<[number], PizzaGroupRow>('SELECT * FROM piz
 const getPizzaSizeById = db.prepare<[number], PizzaSizeRow>('SELECT * FROM pizza_sizes WHERE id = ?');
 const getPizzaFlavorById = db.prepare<[number], PizzaFlavorRow>('SELECT * FROM pizza_flavors WHERE id = ?');
 
-function rowToOrderItem(row: OrderItemRow): OrderItem {
+function rowToOrderItem(row: OrderItemRow, promoIdToSequence: Map<number, number>): OrderItem {
+  // A new-style row (promo_group_id set) resolves straight to its
+  // order_promos sequence. A legacy row predates that column entirely -
+  // group 0 whenever the old promo_item flag is set, matching the single
+  // synthetic promos[0] entry getOrderById builds for those orders below.
+  const promoGroup =
+    row.promo_group_id != null ? (promoIdToSequence.get(row.promo_group_id) ?? null) : row.promo_item === 1 ? 0 : null;
   const base = {
     id: row.id,
     orderId: row.order_id,
     quantity: row.quantity,
     unitPrice: row.unit_price,
     notes: row.notes,
-    promoItem: row.promo_item === 1,
+    promoGroup,
     printedAt: row.printed_at,
   };
 
@@ -731,11 +792,53 @@ function rowToOrderPayment(row: OrderPaymentRow): OrderPayment {
   };
 }
 
+/**
+ * The flat promo price actually charged for one promo instance, derived from
+ * its own item snapshot rather than the currently-configured price (which
+ * may have changed since - see promoSettingsService), so a reprinted/
+ * historical ticket always matches what was actually charged at the time.
+ * 'duo': one of the two items carries the full price, the other is 0, so the
+ * max is that price. 'pizza_xl': the pizza's own unitPrice specifically -
+ * deliberately excludes the soda's unitPrice, which is just its surcharge
+ * (0 or the configured extra), not part of this label.
+ */
+function promoGroupBasePrice(promoType: PromoType, groupItems: OrderItem[]): number {
+  if (promoType === 'duo') {
+    return Math.max(...groupItems.map((i) => i.unitPrice));
+  }
+  return groupItems.find((i) => i.pizzaRef != null)?.unitPrice ?? 0;
+}
+
+/**
+ * Builds the order's `promos` array. Prefers order_promos (every order
+ * placed since it was introduced); falls back to a single synthetic entry
+ * from the legacy promo_type column for orders that predate it, whose items
+ * were already mapped to group 0 by rowToOrderItem above.
+ */
+function buildOrderPromos(orderPromoRows: OrderPromoRow[], legacyPromoType: string | null, items: OrderItem[]): Order['promos'] {
+  if (orderPromoRows.length > 0) {
+    return orderPromoRows.map((r) => ({
+      group: r.sequence,
+      type: r.promo_type,
+      basePrice: promoGroupBasePrice(
+        r.promo_type,
+        items.filter((i) => i.promoGroup === r.sequence)
+      ),
+    }));
+  }
+  if (!legacyPromoType) return [];
+  const legacyItems = items.filter((i) => i.promoGroup === 0);
+  const scope = legacyItems.length > 0 ? legacyItems : items;
+  return [{ group: 0, type: legacyPromoType as PromoType, basePrice: promoGroupBasePrice(legacyPromoType as PromoType, scope) }];
+}
+
 export function getOrderById(id: number): Order {
   const row = getOrderRow.get(id);
   if (!row) throw new NotFoundError(`orden ${id} no encontrada`);
 
-  const items = getOrderItemRows.all(id).map(rowToOrderItem);
+  const orderPromoRows = getOrderPromoRows.all(id);
+  const promoIdToSequence = new Map(orderPromoRows.map((r) => [r.id, r.sequence]));
+  const items = getOrderItemRows.all(id).map((r) => rowToOrderItem(r, promoIdToSequence));
   const payments = getOrderPaymentRows.all(id).map(rowToOrderPayment);
   const totals = getOrderPaymentTotals.get(id)!;
 
@@ -756,7 +859,7 @@ export function getOrderById(id: number): Order {
     deliveryFee: totals.delivery_fee,
     discount: totals.discount,
     grandTotal: row.total + totals.tip + totals.delivery_fee,
-    promoType: row.promo_type as PromoType | null,
+    promos: buildOrderPromos(orderPromoRows, row.promo_type, items),
     notes: row.notes,
     createdAt: row.created_at,
     completedAt: row.completed_at,
@@ -911,7 +1014,9 @@ export function addOrderItems(id: number, items: unknown): Order {
         quantity: item.quantity,
         unitPrice: item.unitPrice,
         notes: item.notes,
-        promoItem: item.promoItem,
+        // Always unpromo'd - a promo is fixed at creation (see orders.promo_type's comment).
+        promoItem: 0,
+        promoGroupId: null,
       });
       const orderItemId = Number(itemResult.lastInsertRowid);
       for (const fp of item.flavorPortions) {
@@ -1126,7 +1231,7 @@ export async function completeOrder(id: number, { payments }: { payments?: unkno
   // fast document feel like it "took too long" to come out.
   if (order.orderType === 'delivery') {
     try {
-      await printDeliveryComandaCopy(id);
+      await printDeliveryComandaCopy(id, orderForPayment.payments);
     } catch (err) {
       console.error(`[billing] failed to print delivery comanda copy for order ${id}:`, (err as Error).message);
     }

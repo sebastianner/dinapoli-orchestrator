@@ -8,22 +8,26 @@ using System.Text;
 //
 // Run at Windows logon. On each run:
 //   1. Fetches origin/main and compares it to the current HEAD.
-//   2. If they differ and the working tree is clean, fast-forward pulls and
-//      rebuilds both server and frontend. If the server was rebuilt (pulled
-//      changes touched server/, or its dist/ was missing), also runs
-//      `npm run db:migrate` in server/ so any new schema (added columns etc.)
-//      is applied before the server starts against it - migrate.ts's
-//      ensureColumn/etc. helpers are additive and safe to run against an
-//      already-current database, so this is a no-op on a day with no schema
+//   2. If they differ and the working tree is clean, fast-forward pulls.
+//   3. Always runs `npm run db:migrate` in server/ before any build, on
+//      every single run - not just when a pull touched server/. The
+//      database can drift out of sync with the code for reasons a git diff
+//      can't see (a restored/reset db file, a manual schema tweak, etc.),
+//      and a missing column crashes the server at startup. migrate.ts's
+//      ensureColumn/etc. helpers are additive and safe to run repeatedly,
+//      so this is cheap insurance and a no-op on a day with no schema
 //      changes.
-//   3. If they're the same (or the tree is dirty, or the pull/build fails),
-//      it just launches whatever is already built.
-//   4. Starts the server (npm start) and frontend (npm run preview) fully
+//   4. Rebuilds server/frontend if the pull touched that side, or its
+//      dist/ was missing.
+//   5. If HEAD and origin/main are the same (or the tree is dirty, or the
+//      pull fails), it just launches whatever is already built - migrate
+//      still runs regardless.
+//   6. Starts the server (npm start) and frontend (npm run preview) fully
 //      hidden (no console windows) with stdout/stderr redirected straight to
 //      a log file per service - one file per calendar day, so a restart on
 //      the same day appends rather than overwriting, and old days are easy
 //      to find/prune.
-//   5. Waits for both to accept connections, then opens the frontend in the
+//   7. Waits for both to accept connections, then opens the frontend in the
 //      default browser.
 //
 // Everything the launcher itself does is also appended to startup-log.txt
@@ -101,16 +105,14 @@ class Program
 
         bool upToDate = localSha.Length > 0 && localSha == remoteSha;
 
-        if (upToDate && serverBuilt && frontendBuilt)
-        {
-            Log("No changes detected (HEAD == origin/main) and builds already exist. Skipping pull/build.");
-            return;
-        }
-
         bool serverChanged = false;
         bool frontendChanged = false;
 
-        if (!upToDate)
+        if (upToDate)
+        {
+            Log("No changes detected (HEAD == origin/main).");
+        }
+        else
         {
             Log("Changes detected: local=" + localSha + " remote=" + remoteSha);
 
@@ -138,29 +140,58 @@ class Program
                 if (pullExit != 0)
                 {
                     Log("git pull failed (exit " + pullExit + "). Will run with whatever is already built.");
-                    return;
+                    serverChanged = false;
+                    frontendChanged = false;
                 }
-                Log("Pull succeeded (server changed=" + serverChanged + ", frontend changed=" + frontendChanged + ").");
+                else
+                {
+                    Log("Pull succeeded (server changed=" + serverChanged + ", frontend changed=" + frontendChanged + ").");
+                }
             }
         }
-        else
-        {
-            Log("Repo already up to date, but missing a build (server=" + serverBuilt + ", frontend=" + frontendBuilt + ").");
-        }
+
+        // Always migrate before building, and on every run - not just when
+        // a pull touched server/ - since the database can drift out of sync
+        // with the code for reasons a git diff can't see. See the header
+        // comment for why this is safe to run unconditionally.
+        RunMigrate();
 
         bool buildServer = serverChanged || !serverBuilt;
         bool buildFrontend = frontendChanged || !frontendBuilt;
 
-        // Only the server has a database to migrate - frontend has no
-        // equivalent script, so it's passed null and BuildProject skips that step.
-        if (buildServer) BuildProject(Path.Combine(repoRoot, "server"), "server", "npm run db:migrate");
+        if (buildServer) BuildProject(Path.Combine(repoRoot, "server"), "server");
         else Log("server: no pulled changes and a build already exists - skipping rebuild.");
 
-        if (buildFrontend) BuildProject(Path.Combine(repoRoot, "frontend"), "frontend", null);
+        if (buildFrontend) BuildProject(Path.Combine(repoRoot, "frontend"), "frontend");
         else Log("frontend: no pulled changes and a build already exists - skipping rebuild.");
     }
 
-    static void BuildProject(string dir, string label, string migrateCommand)
+    static void RunMigrate()
+    {
+        string serverDir = Path.Combine(repoRoot, "server");
+
+        // db:migrate runs via tsx off src/, so it needs node_modules present
+        // even if the server hasn't been built yet (e.g. a fresh clone).
+        Log("Installing server dependencies (needed for db:migrate)...");
+        int installExit = RunCommand(serverDir, "npm install");
+        if (installExit != 0)
+        {
+            Log("npm install failed for server (exit " + installExit + "). Attempting migration anyway.");
+        }
+
+        Log("Running database migration (npm run db:migrate)...");
+        int migrateExit = RunCommand(serverDir, "npm run db:migrate");
+        if (migrateExit != 0)
+        {
+            Log("Database migration failed (exit " + migrateExit + "). The server may fail to start or run against an outdated schema.");
+        }
+        else
+        {
+            Log("Database migration succeeded.");
+        }
+    }
+
+    static void BuildProject(string dir, string label)
     {
         Log("Installing dependencies for " + label + "...");
         int installExit = RunCommand(dir, "npm install");
@@ -178,25 +209,6 @@ class Program
         else
         {
             Log(label + " build succeeded.");
-        }
-
-        if (migrateCommand != null)
-        {
-            // Run regardless of whether the build above succeeded: migrate.ts
-            // runs straight off src/ via tsx, not the compiled dist/ output, so
-            // a build failure (e.g. a tsc type error) doesn't block it - and an
-            // out-of-date schema is exactly the kind of thing that would make
-            // the server fail to start, so it's worth attempting even then.
-            Log("Running database migration for " + label + " (" + migrateCommand + ")...");
-            int migrateExit = RunCommand(dir, migrateCommand);
-            if (migrateExit != 0)
-            {
-                Log("Database migration failed for " + label + " (exit " + migrateExit + "). The server may fail to start or run against an outdated schema.");
-            }
-            else
-            {
-                Log(label + " database migration succeeded.");
-            }
         }
     }
 

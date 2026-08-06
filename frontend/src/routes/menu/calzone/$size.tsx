@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import classNames from 'classnames';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { MessageSquarePlus, Plus } from 'lucide-react';
-import { useMenu } from '@/lib/queries';
+import { MessageSquarePlus, Plus, Search } from 'lucide-react';
+import { useMenu, usePizzaFlavorSearch } from '@/lib/queries';
+import { useDebouncedValue } from '@/lib/useDebouncedValue';
 import { allPizzaFlavors, getPizzaCategory, getProductCategory, pizzaFlavorExtraCost, productUnitPrice } from '@/lib/pricing';
 import { formatCOP } from '@/lib/format';
 import { useOrderStore } from '@/store/useOrderStore';
@@ -21,9 +22,17 @@ function CalzoneFlavorPage() {
   const [flavorId, setFlavorId] = useState('');
   const [showComment, setShowComment] = useState(false);
   const [notes, setNotes] = useState('');
+  const [flavorQuery, setFlavorQuery] = useState('');
+  const debouncedFlavorQuery = useDebouncedValue(flavorQuery, 250);
+  const isSearchingFlavors = debouncedFlavorQuery.trim() !== '';
 
   const addCartItem = useOrderStore((s) => s.addCartItem);
   const pushToast = useToastStore((s) => s.push);
+  const { data: flavorSearchResults = [], isLoading: isFlavorSearchLoading } = usePizzaFlavorSearch(debouncedFlavorQuery);
+  // Search results identify a match by flavor id alone - availability etc.
+  // still comes from the already-loaded menu (see `flavors` below), this
+  // just narrows which tiles show (mirrors menu/pizzas/$size.tsx).
+  const matchedFlavorIds = useMemo(() => new Set(flavorSearchResults.map((f) => f.id)), [flavorSearchResults]);
 
   if (isLoading || !menu) return <p className="text-sm text-text-secondary">Cargando...</p>;
 
@@ -34,6 +43,7 @@ function CalzoneFlavorPage() {
   if (!category || !product || !size || !pizzas) return <p className="text-sm text-text-secondary">No encontrado.</p>;
 
   const flavors = allPizzaFlavors(pizzas);
+  const visibleFlavors = isSearchingFlavors ? flavors.filter((f) => matchedFlavorIds.has(f.id)) : flavors;
   // A product that takes a pizza flavor pays that flavor's surcharge in full
   // (see orderService.resolveProductItem) - usually 0, but quoting the base
   // price alone would understate the bill the moment one isn't.
@@ -73,33 +83,52 @@ function CalzoneFlavorPage() {
         Sabor para {product.name} {size.name}
       </h1>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-        {flavors.map((flavor) => (
-          <button
-            key={flavor.id}
-            type="button"
-            disabled={!flavor.isAvailable}
-            title={!flavor.isAvailable ? 'Agotado' : undefined}
-            onClick={() => setFlavorId(flavor.id)}
-            className={classNames(
-              'relative rounded-xl border-2 p-3 text-left transition-colors duration-fast',
-              !flavor.isAvailable
-                ? 'cursor-not-allowed border-border bg-surface opacity-40'
-                : flavorId === flavor.id
-                  ? 'cursor-pointer border-brand-500 bg-brand-500/10'
-                  : 'cursor-pointer border-border bg-surface hover:border-brand-300',
-            )}
-          >
-            {!flavor.isAvailable && (
-              <span className="absolute right-2 top-2 rounded-full bg-danger-bg px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-danger">
-                Agotado
-              </span>
-            )}
-            <p className="text-sm font-semibold text-text-primary">{flavor.name}</p>
-            <p className="mt-0.5 text-xs text-text-secondary">{flavor.description}</p>
-          </button>
-        ))}
+      <div className="relative mb-4 max-w-md">
+        <span className="pointer-events-none absolute left-3 flex items-center text-text-secondary" style={{ top: 0, bottom: 0 }}>
+          <Search size={17} />
+        </span>
+        <input
+          type="text"
+          value={flavorQuery}
+          onChange={(e) => setFlavorQuery(e.target.value)}
+          placeholder="Buscar sabor..."
+          className="w-full rounded-xl border border-border bg-surface py-2.5 pl-10 pr-3 text-sm text-text-primary outline-none focus:border-brand-400"
+        />
       </div>
+
+      {isSearchingFlavors && isFlavorSearchLoading ? (
+        <p className="text-sm text-text-secondary">Buscando...</p>
+      ) : isSearchingFlavors && visibleFlavors.length === 0 ? (
+        <p className="text-sm text-text-secondary">Ningún sabor coincide con "{debouncedFlavorQuery.trim()}".</p>
+      ) : (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+          {visibleFlavors.map((flavor) => (
+            <button
+              key={flavor.id}
+              type="button"
+              disabled={!flavor.isAvailable}
+              title={!flavor.isAvailable ? 'Agotado' : undefined}
+              onClick={() => setFlavorId(flavor.id)}
+              className={classNames(
+                'relative rounded-xl border-2 p-3 text-left transition-colors duration-fast',
+                !flavor.isAvailable
+                  ? 'cursor-not-allowed border-border bg-surface opacity-40'
+                  : flavorId === flavor.id
+                    ? 'cursor-pointer border-brand-500 bg-brand-500/10'
+                    : 'cursor-pointer border-border bg-surface hover:border-brand-300',
+              )}
+            >
+              {!flavor.isAvailable && (
+                <span className="absolute right-2 top-2 rounded-full bg-danger-bg px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-danger">
+                  Agotado
+                </span>
+              )}
+              <p className="text-sm font-semibold text-text-primary">{flavor.name}</p>
+              <p className="mt-0.5 text-xs text-text-secondary">{flavor.description}</p>
+            </button>
+          ))}
+        </div>
+      )}
 
       {showComment && (
         <textarea
