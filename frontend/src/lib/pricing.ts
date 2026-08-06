@@ -176,7 +176,13 @@ export function describeOrderItem(menu: Menu | undefined, item: OrderItem): stri
   const ref = item.menuItemRef;
   if (!ref) return 'Producto';
   const product = menu ? getProduct(menu, ref.category, ref.product) : undefined;
-  const bits = [product?.name ?? ref.product];
+  // Category name leads, mirroring the kitchen ticket's own "Categoría -
+  // Producto..." format (see server printerService.describeItem) -
+  // product.name alone reads fine for some categories (Bebidas' "Gaseosa")
+  // but is just a flavor name for others (Pastas'/Lasañas'/Entradas'
+  // products).
+  const categoryName = menu ? (getProductCategory(menu, ref.category)?.name ?? ref.category) : ref.category;
+  const bits = [categoryName, product?.name ?? ref.product];
   if (ref.size) bits.push(product?.sizes?.find((s) => s.id === ref.size)?.name ?? ref.size);
   if (ref.drinkFlavor) bits.push(product?.drinkFlavors?.find((f) => f.id === ref.drinkFlavor)?.name ?? ref.drinkFlavor);
   if (ref.pizzaFlavor) bits.push(flavorName(ref.pizzaFlavor));

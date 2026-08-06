@@ -3,10 +3,10 @@ import classNames from 'classnames';
 import { MessageSquarePlus, Plus } from 'lucide-react';
 import type { PizzaFlavor, Product, ProductCategoryId } from '@/types/api';
 import { formatCOP } from '@/lib/format';
-import { productUnitPrice } from '@/lib/pricing';
+import { getProductCategory, productUnitPrice } from '@/lib/pricing';
 import { useOrderStore } from '@/store/useOrderStore';
 import { useToastStore } from '@/store/useToastStore';
-import { usePromoSettings } from '@/lib/queries';
+import { useMenu, usePromoSettings } from '@/lib/queries';
 import { promoProgressText } from '@/lib/promos';
 import { categoryIcon } from '@/lib/menuIcons';
 import { randomUUID } from '@/lib/uuid';
@@ -32,6 +32,13 @@ export function ProductCard({ categoryId, product, pizzaFlavors, excludedFlavorI
   const addPromoItem = useOrderStore((s) => s.addPromoItem);
   const pushToast = useToastStore((s) => s.push);
   const { data: promoSettings = [] } = usePromoSettings();
+  const { data: menu } = useMenu();
+  // Mirrors the kitchen ticket's own "Categoría - Producto..." format (see
+  // server printerService.describeItem) - product.name alone reads fine for
+  // some categories (Bebidas' "Gaseosa") but is just a flavor name for
+  // others (Pastas'/Lasañas'/Entradas' products), so the category prefix is
+  // what actually identifies the item at a glance in the cart.
+  const categoryName = menu ? (getProductCategory(menu, categoryId)?.name ?? categoryId) : categoryId;
 
   // Gratinados et al. take a pizza flavor whose surcharge the server adds in
   // full (see orderService.resolveProductItem), so it belongs in the quoted
@@ -66,7 +73,7 @@ export function ProductCard({ categoryId, product, pizzaFlavors, excludedFlavorI
     // and the request on product.pizzaFlavor instead of using it unconditionally,
     // which was tacking "- Napolitana" onto every product including drinks.
     const flavor = product.pizzaFlavor ? availableFlavors.find((f) => f.id === flavorId) : undefined;
-    const labelParts = [product.name, drinkFlavor?.name, flavor?.name].filter(Boolean);
+    const labelParts = [categoryName, product.name, drinkFlavor?.name, flavor?.name].filter(Boolean);
 
     const item = {
       clientId: randomUUID(),
