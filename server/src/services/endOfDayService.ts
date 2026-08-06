@@ -1,7 +1,7 @@
 import db from '../db/index.js';
 import { NotFoundError, ConflictError } from '../utils/errors.js';
 import { currentBusinessDateBogota, BUSINESS_DAY_SQL_OFFSET } from '../utils/date.js';
-import { printPlainText, formatMoney, centerText, toAsciiText, RECEIPT_WIDTH } from './printerService.js';
+import { printPlainText, formatMoney, centerText, toAsciiText, RECEIPT_WIDTH, formatTimeCO } from './printerService.js';
 import type { ClosingReport } from '../types/dinapoly-types.js';
 import type { ClosingReportRow } from '../types/db.js';
 
@@ -156,9 +156,18 @@ function renderClosingReceipt(date: string, sales: SalesAggregate, totalExpenses
   const width = RECEIPT_WIDTH;
   const lines: string[] = [];
 
+  // `date` is the business day the report covers (e.g. a report closed just
+  // after midnight can still cover the day before) - not the same thing as
+  // when the report was actually generated, which staff also want on the
+  // page (e.g. two closings on the same business day, or closing late).
+  // Computed once here and baked into the saved content - a reprint
+  // (reprintClosingReport) resends that same content unchanged, so it keeps
+  // showing the original generation time, not the moment it was reprinted.
+  const generatedAt = formatTimeCO(new Date().toISOString());
+
   lines.push(centerText('DINAPOLI PIZZA', width));
   lines.push(centerText('CIERRE DEL DIA', width));
-  lines.push(`Fecha: ${date}`);
+  lines.push(`Fecha: ${date}, ${generatedAt}`);
   lines.push(`Ordenes completadas: ${sales.orderCount}`);
   lines.push(`Articulos vendidos: ${sales.itemsSold}`);
   lines.push(`Clientes atendidos: ${sales.customersServed}`);
