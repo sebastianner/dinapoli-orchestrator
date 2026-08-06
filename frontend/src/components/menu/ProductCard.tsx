@@ -73,7 +73,11 @@ export function ProductCard({ categoryId, product, pizzaFlavors, excludedFlavorI
     // and the request on product.pizzaFlavor instead of using it unconditionally,
     // which was tacking "- Napolitana" onto every product including drinks.
     const flavor = product.pizzaFlavor ? availableFlavors.find((f) => f.id === flavorId) : undefined;
-    const labelParts = [categoryName, product.name, drinkFlavor?.name, flavor?.name].filter(Boolean);
+    // A pizza-flavor product's own name (e.g. "Gratinado") is just a
+    // placeholder for "whichever flavor you pick" - it has no identity
+    // beyond the category, so it'd otherwise duplicate categoryName right
+    // next to it ("Gratinados - Gratinado - Napolitana").
+    const labelParts = [categoryName, product.pizzaFlavor ? undefined : product.name, drinkFlavor?.name, flavor?.name].filter(Boolean);
 
     const item = {
       clientId: randomUUID(),

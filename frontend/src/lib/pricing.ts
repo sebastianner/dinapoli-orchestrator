@@ -182,7 +182,11 @@ export function describeOrderItem(menu: Menu | undefined, item: OrderItem): stri
   // but is just a flavor name for others (Pastas'/Lasañas'/Entradas'
   // products).
   const categoryName = menu ? (getProductCategory(menu, ref.category)?.name ?? ref.category) : ref.category;
-  const bits = [categoryName, product?.name ?? ref.product];
+  // A pizza-flavor product's own name (e.g. "Gratinado", "Pantalón") is just
+  // a placeholder for "whichever flavor you pick" - it has no identity
+  // beyond the category, so it'd otherwise duplicate categoryName right next
+  // to it ("Gratinados - Gratinado - Napolitana").
+  const bits = ref.pizzaFlavor ? [categoryName] : [categoryName, product?.name ?? ref.product];
   if (ref.size) bits.push(product?.sizes?.find((s) => s.id === ref.size)?.name ?? ref.size);
   if (ref.drinkFlavor) bits.push(product?.drinkFlavors?.find((f) => f.id === ref.drinkFlavor)?.name ?? ref.drinkFlavor);
   if (ref.pizzaFlavor) bits.push(flavorName(ref.pizzaFlavor));
