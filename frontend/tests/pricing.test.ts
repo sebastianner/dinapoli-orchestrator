@@ -184,11 +184,11 @@ export function run(standalone = true) {
       { request: { type: 'pizza', size: 'personal', flavors: [{ flavor: 'margherita', portion: 100 }], quantity: 1 }, unitPrice: 22000 },
       { request: { type: 'product', category: 'pastas', product: 'alfredo', quantity: 1 }, unitPrice: 27000 },
     ] as any[];
-    const priced = applyPromoPricingPreview('duo', items, promoSettings.duo);
+    const priced = applyPromoPricingPreview('duo', items, promoSettings.duo, 0);
     eq('cart preview totals the promo price', priced.reduce((s, i) => s + i.unitPrice, 0), 37000);
     eq('the first item carries the whole price', priced.map((i) => i.unitPrice), [37000, 0]);
-    check('every item is tagged promoItem so the server prices it as a promo',
-      priced.every((i) => i.request.promoItem === true), JSON.stringify(priced.map((i) => i.request.promoItem)));
+    check('every item is tagged with its promo group so the server prices it as a promo',
+      priced.every((i) => (i.request as any).promoGroup === 0), JSON.stringify(priced.map((i) => (i.request as any).promoGroup)));
     eq('duo needs 2 items', PROMO_ITEM_COUNTS.duo, 2);
   }
 
@@ -200,11 +200,11 @@ export function run(standalone = true) {
       { request: { type: 'product', category: 'appetizers', product: 'garlic_bread', quantity: 1 }, unitPrice: 10000 },
     ] as any[]);
 
-    const free = applyPromoPricingPreview('pizza_xl', build('uva'), promoSettings.pizza_xl);
+    const free = applyPromoPricingPreview('pizza_xl', build('uva'), promoSettings.pizza_xl, 0);
     eq('a free soda flavor keeps the promo at its flat price', free.reduce((s, i) => s + i.unitPrice, 0), 86000);
     eq('bread and soda are both zeroed', free.map((i) => i.unitPrice), [86000, 0, 0]);
 
-    const surcharged = applyPromoPricingPreview('pizza_xl', build('coca_cola'), promoSettings.pizza_xl);
+    const surcharged = applyPromoPricingPreview('pizza_xl', build('coca_cola'), promoSettings.pizza_xl, 0);
     eq('a surcharged soda flavor adds exactly the surcharge', surcharged.reduce((s, i) => s + i.unitPrice, 0), 88000);
     eq('the surcharge lands on the soda line', surcharged.map((i) => i.unitPrice), [86000, 2000, 0]);
     eq('pizza_xl needs 3 items', PROMO_ITEM_COUNTS.pizza_xl, 3);

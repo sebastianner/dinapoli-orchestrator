@@ -7,7 +7,7 @@
  * the orders it claims to summarize.
  */
 import fs from 'node:fs';
-import { Client, check, eq, section, summary, results } from './lib.js';
+import { Client, Terminal, check, eq, section, summary, results, waitForStatus, sleep, pizza, product } from './lib.js';
 
 const client = new Client();
 const OUT = process.env.AUDIT_OUT ?? '.';
@@ -90,9 +90,12 @@ async function main() {
 
     let orderSales = 0;
     for (const p of o.payments) {
-      // Sales = what the business earned: the gross charge minus the tip (not
-      // revenue) and minus the discount (never collected). Delivery fee stays in.
-      const sales = p.grossAmount - p.tipAmount - p.discount;
+      // Sales = what the business earned: the gross charge minus the discount
+      // (never collected). Cash tips are handed straight to staff and never
+      // touch the register, so they're stripped out same as before; tips paid
+      // by card/transfer/rappi pass through the register/bank, so they stay
+      // IN as income. Delivery fee always stays in.
+      const sales = p.method === 'cash' ? p.grossAmount - p.tipAmount - p.discount : p.grossAmount - p.discount;
       orderSales += sales;
       if (p.method === 'cash') { book.cashSales += sales; book.cashTips += p.tipAmount; }
       else if (p.method === 'card') book.cardSales += sales;
@@ -120,9 +123,12 @@ async function main() {
     book.deliverySales + book.dineInTakeawaySales === book.totalSales);
   check('order-type counts add up to the order count',
     book.deliveryOrderCount + book.dineInOrderCount + book.takeawayOrderCount === book.orderCount);
-  check('total charged = sales + tips + discounts',
-    book.grossCharged === book.totalSales + book.tips + book.discounts,
-    `${book.grossCharged} vs ${book.totalSales + book.tips + book.discounts}`);
+  // Only cash tips sit outside totalSales now - card/transfer/rappi tips are
+  // already folded into their method's sales figure (see the per-payment
+  // formula above), so they're not added again here.
+  check('total charged = sales + cash tips + discounts',
+    book.grossCharged === book.totalSales + book.cashTips + book.discounts,
+    `${book.grossCharged} vs ${book.totalSales + book.cashTips + book.discounts}`);
 
   section('B. Closing the day');
   const cashFlowBefore = (await client.get('/api/cash-flow/current')).body;
@@ -148,6 +154,14 @@ async function main() {
   eq('report totalExpenses', report.totalExpenses, cashFlowBefore.expenses);
   eq('report cashInRegister snapshot', report.cashInRegister, cashFlowBefore.cashInRegister);
 
+  const liveExpenses = (await client.get(`/api/cash-flow/${cashFlowBefore.id}/expenses`)).body;
+  eq('report expensesDetail count matches the live cash_expenses rows', report.expensesDetail.length, liveExpenses.length);
+  eq('report expensesDetail sums to totalExpenses',
+    report.expensesDetail.reduce((s: number, e: any) => s + e.amount, 0), report.totalExpenses);
+  check('every live expense is itemized on the report with its justification',
+    liveExpenses.every((le: any) => report.expensesDetail.some((rd: any) => rd.amount === le.amount && rd.justification === le.justification)),
+    JSON.stringify({ liveExpenses, expensesDetail: report.expensesDetail }).slice(0, 400));
+
   section('C. The printed receipt agrees with the stored snapshot');
   const content: string = report.content;
   fs.writeFileSync(`${OUT}/closing-receipt.txt`, content);
@@ -158,7 +172,12 @@ async function main() {
   eq('receipt Ventas en Rappi', receiptValue(content, 'Ventas en Rappi'), report.rappiSales);
   eq('receipt Propinas', receiptValue(content, 'Propinas'), report.tips);
   eq('receipt Descuentos', receiptValue(content, 'Descuentos'), report.discounts);
-  eq('receipt Gastos del dia', receiptValue(content, 'Gastos del dia'), report.totalExpenses);
+  eq('receipt Total gastos', receiptValue(content, 'Total gastos'), report.totalExpenses);
+  for (const expense of report.expensesDetail as { justification: string; amount: number }[]) {
+    check(`receipt itemizes expense "${expense.justification}"`,
+      receiptValue(content, expense.justification) === expense.amount,
+      `expected ${expense.amount}, got ${receiptValue(content, expense.justification)}`);
+  }
   eq('receipt Domicilio (sales by type)', receiptValue(content, 'Domicilio'), report.deliverySales);
   eq('receipt Mesa / Para llevar', receiptValue(content, 'Mesa / Para llevar'), report.dineInTakeawaySales);
   check('no receipt line overflows the 48-column paper',
@@ -171,14 +190,16 @@ async function main() {
   section('D. Does the drawer reconcile?');
   // Confirmed with the client: cash tips are pulled from the register and
   // handed to staff immediately, never left in the float overnight. So
-  // "Efectivo final en caja" (base + cashSales, tips excluded) IS the whole
-  // answer, not an approximation of it - there's no separate "plus tips" term
-  // to reconcile. This run deliberately includes real cash tips (logged
-  // below) so the assertion isn't vacuously true from having none.
+  // cashSales (tips already excluded) IS the whole cash-income answer. The
+  // printed "Efectivo final en caja" deliberately excludes the base de caja
+  // (cashInRegister) - it reads as "cash income and passives for the day",
+  // not "what should physically be in the drawer" (that's the live Caja
+  // page's job). This run deliberately includes real cash tips (logged
+  // below) so the exclusion assertion isn't vacuously true from having none.
   console.log(`  this run included ${book.cashTips.toLocaleString()} COP in cash tips, correctly excluded from the drawer figure`);
   const expectedDrawer = receiptValue(content, 'Efectivo final en caja');
-  const printedFormula = cashFlowBefore.cashInRegister + report.cashSales;
-  eq('"Efectivo final en caja" = base + cash sales, with no tip adjustment needed', expectedDrawer, printedFormula);
+  const printedFormula = report.cashSales - report.totalExpenses;
+  eq('"Efectivo final en caja" = cash sales - expenses, base de caja excluded', expectedDrawer, printedFormula);
 
   section('E. Closing guards');
   const reports = await client.get('/api/end-of-day');
@@ -207,9 +228,87 @@ async function main() {
 
   const products = (await client.get('/api/analytics/products?range=today')).body;
   const productRevenue = products.categories.reduce((s: number, c: any) => s + c.revenue, 0);
-  // Item revenue is pre-discount and excludes delivery fees, so it should equal
-  // sales + discounts - delivery fees.
-  eq('product-revenue rollup reconciles with sales', productRevenue, book.totalSales + book.discounts - book.deliveryFees);
+  // Item revenue is pre-discount and excludes delivery fees AND non-cash tips
+  // (both of which are folded into totalSales now - see aggregateSales), so
+  // it should equal sales + discounts - delivery fees - non-cash tips.
+  const nonCashTips = book.tips - book.cashTips;
+  eq('product-revenue rollup reconciles with sales', productRevenue, book.totalSales + book.discounts - book.deliveryFees - nonCashTips);
+
+  section('F2. Flavor analytics (regression coverage for the "Pizza mitad y mitad" fix)');
+  {
+    const findFlavor = (list: any[], name: string) => list.find((f: any) => f.flavor === name)?.quantity ?? 0;
+    const snapshot = async () => ({
+      all: (await client.get('/api/analytics/flavors?range=today')).body.flavors,
+      pizzas: (await client.get('/api/analytics/flavors?range=today&category=pizzas')).body.flavors,
+      gratinados: (await client.get('/api/analytics/flavors?range=today&category=gratinados')).body.flavors,
+      calzones: (await client.get('/api/analytics/flavors?range=today&category=calzones')).body.flavors,
+    });
+
+    // "today" already carries flavor activity from every earlier suite in this
+    // run, so this asserts on the DELTA this section itself adds, not on an
+    // absolute total - the only way to make the check exact against a shared,
+    // cumulative business day rather than an isolated dataset.
+    const before = await snapshot();
+
+    const term2 = new Terminal('flavor-audit');
+    await term2.connect();
+    const emp2 = (await client.get('/api/employees/active')).body[0].id;
+    const dineIn2 = (items: any[]) => ({ orderType: 'dine_in', employeeId: emp2, tableNumber: 6, items });
+
+    const placeAndSettle = async (items: any[]) => {
+      const r = await term2.place(dineIn2(items));
+      if (r.type !== 'order_created') throw new Error(`rejected: ${r.message}`);
+      const active = await waitForStatus(client, r.order!.id, 'ACTIVE');
+      const paid = await client.post(`/api/orders/${active.id}/complete`, { payments: [{ method: 'cash', grossAmount: active.total }] });
+      if (paid.status !== 200) throw new Error(`settle failed: ${JSON.stringify(paid.body)}`);
+      return paid.body;
+    };
+
+    // A whole-Margarita pizza, a 50/50 Margarita/Pepperoni split, a Pepperoni
+    // gratinado, and a Margarita calzone - four different flavor shapes (see
+    // analyticsService.getFlavors' doc comment) feeding known, hand-computable
+    // deltas.
+    await placeAndSettle([pizza('small', [{ flavor: 'margherita', portion: 100 }])]);
+    await placeAndSettle([pizza('medium', [{ flavor: 'margherita', portion: 50 }, { flavor: 'pepperoni', portion: 50 }])]);
+    await placeAndSettle([product('gratinados', 'gratin', { pizzaFlavor: 'pepperoni' })]);
+    await placeAndSettle([product('calzones', 'calzone', { size: 'small', pizzaFlavor: 'margherita' })]);
+    term2.close();
+    await sleep(200);
+
+    const after = await snapshot();
+    const approxEq = (name: string, actual: number, expected: number) =>
+      check(name, Math.abs(actual - expected) < 0.01, `expected delta ~${expected}, got ${actual}`);
+
+    approxEq('global Margarita quantity grew by 2.5 (1 whole pizza + 0.5 split + 1 calzone)',
+      findFlavor(after.all, 'Margarita') - findFlavor(before.all, 'Margarita'), 2.5);
+    approxEq('global Pepperoni quantity grew by 1.5 (0.5 split + 1 gratinado)',
+      findFlavor(after.all, 'Pepperoni') - findFlavor(before.all, 'Pepperoni'), 1.5);
+
+    approxEq('pizzas-only Margarita quantity grew by 1.5 (1 + 0.5)',
+      findFlavor(after.pizzas, 'Margarita') - findFlavor(before.pizzas, 'Margarita'), 1.5);
+    approxEq('pizzas-only Pepperoni quantity grew by 0.5',
+      findFlavor(after.pizzas, 'Pepperoni') - findFlavor(before.pizzas, 'Pepperoni'), 0.5);
+
+    approxEq('gratinados-only Pepperoni quantity grew by 1',
+      findFlavor(after.gratinados, 'Pepperoni') - findFlavor(before.gratinados, 'Pepperoni'), 1);
+    eq('gratinados-only Margarita quantity is unchanged (none ordered as a gratinado)',
+      findFlavor(after.gratinados, 'Margarita'), findFlavor(before.gratinados, 'Margarita'));
+
+    approxEq('calzones-only Margarita quantity grew by 1',
+      findFlavor(after.calzones, 'Margarita') - findFlavor(before.calzones, 'Margarita'), 1);
+
+    const invalidCategory = await client.get('/api/analytics/flavors?range=today&category=pastas');
+    check('an unsupported flavor category is rejected', invalidCategory.status === 400, JSON.stringify(invalidCategory.body));
+
+    const productsAfter = (await client.get('/api/analytics/products?range=today')).body;
+    check('no product row still uses the old "mitad y mitad" bucket name',
+      !productsAfter.products.some((p: any) => p.name.toLowerCase().includes('mitad')),
+      JSON.stringify(productsAfter.products.map((p: any) => p.name)));
+    const pizzaRows = productsAfter.products.filter((p: any) => p.category === 'Pizzas');
+    check('pizza rows are named "Pizza <size>" with no flavor baked into the name',
+      pizzaRows.length > 0 && pizzaRows.every((p: any) => /^Pizza /.test(p.name) && !p.name.includes('Margarita') && !p.name.includes('Pepperoni')),
+      JSON.stringify(pizzaRows.map((p: any) => p.name)));
+  }
 
   section('G. Blocking a close while an order is open');
   const emp = (await client.get('/api/employees/active')).body[1];

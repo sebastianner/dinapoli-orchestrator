@@ -94,9 +94,13 @@ Fixed during the audit, and asserted here so they can't come back:
   dropped. Section F covers the race that change introduced: an item added while
   its own order's ticket is printing must not be stamped printed without
   appearing on paper.
-- **The drawer figure excludes cash tips - confirmed intentional, not a defect**
-  (`test-accounting.ts`, section D). Cash tips are pulled from the register and
-  handed to staff immediately rather than staying in the float overnight, so
-  `base + cashSales` (tips excluded) is the whole answer, not an approximation
-  needing a "plus tips" adjustment. The suite runs with real cash tips present
-  and asserts the printed figure matches that formula exactly.
+- **The drawer figure excludes cash tips and the base de caja - confirmed
+  intentional, not a defect** (`test-accounting.ts`, section D). Cash tips are
+  pulled from the register and handed to staff immediately rather than
+  staying in the float overnight, so they're excluded from cashSales. Card,
+  transfer, and Rappi tips pass through the register/bank instead, so they
+  count as income and stay in their method's sales figure. "Efectivo final en
+  caja" is `cashSales - totalExpenses` - deliberately excluding the base de
+  caja, so it reads as the day's cash income and passives rather than what
+  should physically be in the drawer. The suite runs with real cash tips
+  present and asserts the printed figure matches that formula exactly.

@@ -411,19 +411,26 @@ export interface CashRegisterSettings {
 
 // ---------- End of day ----------
 
+export interface ClosingReportExpenseDetail {
+  amount: number;
+  justification: string;
+  createdAt: string;
+}
+
 export interface ClosingReport {
   id: number;
   date: string;
   orderCount: number;
   deliverySales: number;
   dineInTakeawaySales: number;
-  /** COP. Net of discounts already (real cash collected via this method) and tips (see tips below). */
+  /** COP. Discounts subtracted; cash tips excluded, card/transfer/rappi tips included as income (see tips below). */
   cashSales: number;
   cardSales: number;
   transferSales: number;
   rappiSales: number;
-  /** COP. Net of discounts already, tips excluded (see tips below) - the real money sold. */
+  /** COP. The real income sold - discounts subtracted, cash tips excluded, card/transfer/rappi tips included. */
   totalSales: number;
+  /** COP. Total tips across all payment methods (informational only - card/transfer/rappi tips are already folded into totalSales via their method's sales figure; cash tips are not part of totalSales at all). */
   tips: number;
   discounts: number;
   /** Total quantity of items across every completed order that day (a pizza with quantity 2 counts as 2). */
@@ -434,7 +441,9 @@ export interface ClosingReport {
   dineInOrderCount: number;
   takeawayOrderCount: number;
   totalExpenses: number;
-  /** COP. Snapshot of that day's cash_flow.cash_in_register at closing time - add cashSales for "Efectivo final en caja", the expected final cash count. */
+  /** Itemized cash_expenses rows for this business day, frozen at closing time. */
+  expensesDetail: ClosingReportExpenseDetail[];
+  /** COP. Snapshot of that day's cash_flow.cash_in_register at closing time - kept only as a historical record, NOT part of "Efectivo final en caja" (see cashSales below). */
   cashInRegister: number;
   /** The exact plain-text thermal-receipt content generated at closing time - what a reprint re-sends verbatim. */
   content: string;
@@ -444,13 +453,13 @@ export interface ClosingReport {
 // ---------- Analytics (/dashboard/analytics, analyticsService on the server) ----------
 // Every figure below is computed live over a date range, never read from
 // ClosingReport - see server/src/services/analyticsService.ts. Sales figures
-// are net of tips and discounts (unlike ClosingReport's stale "tips excluded"
-// wording above, which predates that fix - see cashSales/totalSales here).
+// use the same formula as ClosingReport.totalSales above: discounts always
+// subtracted, cash tips excluded, card/transfer/rappi tips included as income.
 
 export type AnalyticsRange = 'today' | 'week' | 'month' | 'custom';
 
 export interface SalesSummary {
-  /** COP. Net of tips and discounts - the real money sold in the selected range. */
+  /** COP. Same formula as ClosingReport.totalSales - the real income for the selected range. */
   totalSales: number;
   /** Percent change vs. the immediately preceding period of equal length. null when the prior period had zero sales (no baseline to compare against). */
   totalSalesGrowthPct: number | null;
@@ -471,20 +480,20 @@ export interface SalesTrendPoint {
   date: string;
   /** Human-readable label for the same bucket, e.g. '14:00' or 'lun 21'. */
   bucketLabel: string;
-  /** COP. Net of tips and discounts, same formula as SalesSummary.totalSales. */
+  /** COP. Same formula as SalesSummary.totalSales. */
   totalSales: number;
   orderCount: number;
 }
 
 export interface PaymentMethodBreakdown {
   method: PaymentMethod;
-  /** COP. Net of tips and discounts. */
+  /** COP. Same formula as SalesSummary.totalSales - for 'card'/'transfer'/'rappi' this already includes their tips as income. */
   sales: number;
 }
 
 export interface OrderTypeBreakdown {
   orderType: OrderType;
-  /** COP. Net of tips and discounts. */
+  /** COP. Same formula as SalesSummary.totalSales. */
   sales: number;
   orderCount: number;
 }
@@ -505,7 +514,7 @@ export interface HeatmapCell {
 }
 
 export interface ProductRanking {
-  /** Product name, or for pizzas "{flavor} {size}" (single-flavor) / "Pizza mitad y mitad {size}" (split across >1 flavor - not fractionally attributed per flavor). */
+  /** "{category} - {product}" (plus " - {size}" when sized), or for pizzas just "Pizza {size}" - flavor is deliberately not part of this name at all (see FlavorRanking below instead), so single-flavor and split/mitad-y-mitad pizzas of the same size share one row. */
   name: string;
   category: string;
   quantity: number;
@@ -527,12 +536,28 @@ export interface ProductsAnalytics {
   categories: CategoryRevenue[];
 }
 
+/** The three categories whose items carry a pizza flavor - the only ones useAnalyticsFlavors/getFlavors can filter to. */
+export type FlavorAnalyticsCategory = 'pizzas' | 'gratinados' | 'calzones';
+
+export interface FlavorRanking {
+  flavor: string;
+  /** Fractional for pizza flavors (portion-weighted - a 50/50 split pizza contributes 0.5 to each flavor). Always whole for gratinados/calzones. */
+  quantity: number;
+  /** COP. Same portion-weighting as quantity. */
+  revenue: number;
+}
+
+export interface FlavorAnalytics {
+  /** Sorted by revenue descending. Combines every category unless filtered to one. */
+  flavors: FlavorRanking[];
+}
+
 export interface CustomerSpend {
   id: number;
   name: string;
   phone: string | null;
   orderCount: number;
-  /** COP. Net of tips and discounts. */
+  /** COP. Same formula as SalesSummary.totalSales. */
   spend: number;
 }
 
@@ -552,7 +577,7 @@ export interface EmployeePerformance {
   name: string;
   isActive: boolean;
   orderCount: number;
-  /** COP. Net of tips and discounts. */
+  /** COP. Same formula as SalesSummary.totalSales. */
   sales: number;
 }
 

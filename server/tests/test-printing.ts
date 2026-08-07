@@ -88,6 +88,74 @@ async function main() {
   check('it lists only the new item', t2.includes('Helado') || t2.includes('Ice'), t2);
   check('it does NOT re-list the original pizza', !t2.includes('Pizza'), t2);
 
+  section('B2. Removing an item from an open order');
+  {
+    // A regular item removed after its kitchen ticket already printed: the
+    // paper's already out there, so this should print a "don't prepare it"
+    // notice instead of just vanishing, plus shrink the order total and the
+    // saved snapshot. Uses garlic_bread (not ice_cream, which section C below
+    // still expects to find in a reprint) so this test's own item doesn't
+    // interfere with that later assertion.
+    const beforeAdd = (await client.get(`/api/orders/${o1.id}`)).body;
+    await client.post(`/api/orders/${o1.id}/items`, { items: [product('appetizers', 'garlic_bread', { quantity: 1 })] });
+    await waitForStatus(client, o1.id, 'ACTIVE');
+    await sleep(600);
+    const withExtra = (await client.get(`/api/orders/${o1.id}`)).body;
+    const addedItem = withExtra.items.find((i: any) => !beforeAdd.items.some((b: any) => b.id === i.id));
+    check('the new item is on the order', !!addedItem, JSON.stringify(withExtra.items.map((i: any) => i.id)));
+    check('the new item already printed (addendum went out)', addedItem?.printedAt != null);
+
+    m = currentMarker();
+    const del1 = await client.del(`/api/orders/${o1.id}/items/${addedItem.id}`);
+    check('removing a printed item succeeds', del1.status === 200, JSON.stringify(del1.body).slice(0, 200));
+    eq("order.total drops by exactly the removed item's price", del1.body.total, withExtra.total - addedItem.unitPrice * addedItem.quantity);
+    check('the item is gone from the order', !del1.body.items.some((i: any) => i.id === addedItem.id));
+
+    await sleep(400);
+    const removalJobs = jobsSince(m);
+    eq('exactly one removal notice printed', removalJobs.length, 1);
+    if (removalJobs.length === 1) {
+      eq('it goes to the kitchen printer', removalJobs[0].queue, 'kitchen_printer');
+      check('it is labelled as a removed item', removalJobs[0].text.includes('ITEM ELIMINADO'), removalJobs[0].text.slice(0, 200));
+      check('it tells the kitchen not to prepare it', removalJobs[0].text.includes('NO PREPARAR'));
+    }
+
+    m = currentMarker();
+    const reprintAfterRemoval = await client.post(`/api/orders/${o1.id}/reprint`, { kind: 'kitchen_ticket' });
+    check('the kitchen-ticket snapshot still reprints fine after a removal', reprintAfterRemoval.status === 200);
+    await sleep(400);
+    const reprintText = jobsSince(m)[0]?.text ?? '';
+    check('the reprinted snapshot no longer contains the removed item', !reprintText.includes('Panes al Gratin'), reprintText);
+
+    // Guardrail: a promo item can't be individually removed (the promo's
+    // price is fixed for the whole group, so pulling one item out would
+    // leave a stale flat price on record for an incomplete combo).
+    const promoOrder = await place(dineIn([
+      pizza('personal', [{ flavor: 'margherita', portion: 100 }], { promoGroup: 0 }),
+      product('pastas', 'alfredo', { promoGroup: 0 }),
+    ], { promos: ['duo'] }));
+    const promoItem = promoOrder.items.find((i: any) => i.promoGroup != null);
+    const promoGuard = await client.del(`/api/orders/${promoOrder.id}/items/${promoItem.id}`);
+    check('deleting a promo item is rejected', promoGuard.status === 400, JSON.stringify(promoGuard.body));
+
+    // Guardrail: nothing can be removed from a COMPLETED order (it would
+    // desync the order from its already-recorded payment).
+    const settled = await client.post(`/api/orders/${promoOrder.id}/complete`, { payments: [{ method: 'cash', grossAmount: promoOrder.total }] });
+    check('order settles for the completed-order guard test', settled.status === 200, JSON.stringify(settled.body).slice(0, 200));
+    const completedGuard = await client.del(`/api/orders/${promoOrder.id}/items/${settled.body.items[0].id}`);
+    check('deleting from a COMPLETED order is rejected', completedGuard.status === 409, JSON.stringify(completedGuard.body));
+
+    // Guardrail: an order's last item can't be removed either - that's
+    // canceling the order, not editing it, and deleteOrder (admin-only) is
+    // the endpoint for that.
+    const singleItemOrder = await place(dineIn([product('appetizers', 'garlic_bread', { quantity: 1 })]));
+    eq('the fresh order has exactly one item', singleItemOrder.items.length, 1);
+    const lastItemGuard = await client.del(`/api/orders/${singleItemOrder.id}/items/${singleItemOrder.items[0].id}`);
+    check('deleting an order\'s only item is rejected', lastItemGuard.status === 409, JSON.stringify(lastItemGuard.body));
+    const stillThere = (await client.get(`/api/orders/${singleItemOrder.id}`)).body;
+    eq('the item is still on the order after the rejected delete', stillThere.items.length, 1);
+  }
+
   section('C. The saved snapshot grows to the full order');
   m = currentMarker();
   const rp = await client.post(`/api/orders/${o1.id}/reprint`, { kind: 'kitchen_ticket' });

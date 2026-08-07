@@ -10,6 +10,9 @@ import type {
   ProductsAnalytics,
   ProductRanking,
   CategoryRevenue,
+  FlavorAnalytics,
+  FlavorRanking,
+  FlavorAnalyticsCategory,
   CustomersAnalytics,
   EmployeePerformance,
   PromoUsageSummary,
@@ -67,6 +70,14 @@ function growthPct(current: number, previous: number): number | null {
   return ((current - previous) / previous) * 100;
 }
 
+// Cash tips are handed straight to staff and never touch the register, so
+// they stay excluded from sales figures. Tips paid by card, transfer, or
+// Rappi pass through the register/bank, so they count as income and stay IN
+// the net - only cash's net still strips the tip out. Mirrors
+// endOfDayService.aggregateSales's identical per-method rule, so analytics
+// and the closing report always agree on what counts as sales.
+const NET_SALES_SQL = `(op.gross_amount - op.discount - CASE WHEN op.method = 'cash' THEN op.tip_amount ELSE 0 END)`;
+
 // ---------- Summary ----------
 
 interface PeriodTotals {
@@ -85,7 +96,7 @@ const getOrderPaymentTotals = db.prepare<
 >(`
   SELECT
     COUNT(DISTINCT o.id) AS order_count,
-    COALESCE(SUM(op.gross_amount - op.tip_amount - op.discount), 0) AS total_sales,
+    COALESCE(SUM(${NET_SALES_SQL}), 0) AS total_sales,
     COUNT(DISTINCT o.customer_id) AS customers_served
   FROM orders o
   LEFT JOIN order_payments op ON op.order_id = o.id
@@ -135,7 +146,7 @@ const getHourlyTrend = db.prepare<[string], { bucket: string; order_count: numbe
   SELECT
     strftime('%H', o.completed_at, '-5 hours') AS bucket,
     COUNT(DISTINCT o.id) AS order_count,
-    COALESCE(SUM(op.gross_amount - op.tip_amount - op.discount), 0) AS total_sales
+    COALESCE(SUM(${NET_SALES_SQL}), 0) AS total_sales
   FROM orders o
   LEFT JOIN order_payments op ON op.order_id = o.id
   WHERE o.status = 'COMPLETED' AND date(o.completed_at, '${BUSINESS_DAY_SQL_OFFSET}') = ?
@@ -159,7 +170,7 @@ const getDailyTrend = db.prepare<[string, string], { bucket: string; order_count
   SELECT
     date(o.completed_at, '${BUSINESS_DAY_SQL_OFFSET}') AS bucket,
     COUNT(DISTINCT o.id) AS order_count,
-    COALESCE(SUM(op.gross_amount - op.tip_amount - op.discount), 0) AS total_sales
+    COALESCE(SUM(${NET_SALES_SQL}), 0) AS total_sales
   FROM orders o
   LEFT JOIN order_payments op ON op.order_id = o.id
   WHERE o.status = 'COMPLETED' AND date(o.completed_at, '${BUSINESS_DAY_SQL_OFFSET}') BETWEEN ? AND ?
@@ -209,7 +220,7 @@ export function getSalesTrend(resolved: ResolvedRange): SalesTrendPoint[] {
 // ---------- Breakdown (payment methods + order types) ----------
 
 const getPaymentMethodBreakdown = db.prepare<[string, string], { method: string; sales: number | null }>(`
-  SELECT op.method AS method, COALESCE(SUM(op.gross_amount - op.tip_amount - op.discount), 0) AS sales
+  SELECT op.method AS method, COALESCE(SUM(${NET_SALES_SQL}), 0) AS sales
   FROM order_payments op
   JOIN orders o ON o.id = op.order_id
   WHERE o.status = 'COMPLETED' AND date(o.completed_at, '${BUSINESS_DAY_SQL_OFFSET}') BETWEEN ? AND ?
@@ -221,7 +232,7 @@ const getOrderTypeBreakdown = db.prepare<
   { order_type: string; order_count: number; sales: number | null }
 >(`
   SELECT o.order_type AS order_type, COUNT(DISTINCT o.id) AS order_count,
-         COALESCE(SUM(op.gross_amount - op.tip_amount - op.discount), 0) AS sales
+         COALESCE(SUM(${NET_SALES_SQL}), 0) AS sales
   FROM orders o
   LEFT JOIN order_payments op ON op.order_id = o.id
   WHERE o.status = 'COMPLETED' AND date(o.completed_at, '${BUSINESS_DAY_SQL_OFFSET}') BETWEEN ? AND ?
@@ -295,48 +306,36 @@ export function getHeatmap(resolved: ResolvedRange): HeatmapCell[] {
 // ---------- Products ----------
 
 // Pizzas aren't in `products` (modeled separately via pizza_groups/sizes/
-// flavors, order_items.item_type = 'pizza') so they need their own branches.
-// A pizza's order_item_flavors row count tells single-flavor from split
-// (mitad y mitad) apart - see ProductRanking's doc comment for why split
-// pizzas are bucketed by size only rather than fractionally attributed.
+// flavors, order_items.item_type = 'pizza') so they need their own branch.
+// Flavor is deliberately NOT part of this ranking at all (single-flavor and
+// split/mitad-y-mitad pizzas of the same size land in the same "Pizza
+// {size}" row) - flavor-level detail (including gratinados'/calzones' own
+// single flavor) lives in getFlavors below instead, so this stays a pure
+// category(+size)-level view. Regular products are grouped by
+// (product, size) rather than product alone, so a multi-size product (e.g.
+// Pantalón/calzone) gets one row per size, same granularity as pizza.
 const getProductRankingRows = db.prepare<
-  [string, string, string, string, string, string],
+  [string, string, string, string],
   { name: string; category: string; quantity: number; revenue: number }
 >(`
-  WITH pizza_flavor_counts AS (
-    SELECT order_item_id, COUNT(*) AS flavor_count
-    FROM order_item_flavors
-    GROUP BY order_item_id
-  )
-  SELECT p.name AS name, cat.name AS category,
-         SUM(oi.quantity) AS quantity, SUM(oi.quantity * oi.unit_price) AS revenue
+  SELECT
+    (cat.name || ' - ' || p.name || CASE WHEN ps.name IS NOT NULL THEN ' - ' || ps.name ELSE '' END) AS name,
+    cat.name AS category,
+    SUM(oi.quantity) AS quantity, SUM(oi.quantity * oi.unit_price) AS revenue
   FROM order_items oi
   JOIN orders o ON o.id = oi.order_id
   JOIN products p ON p.id = oi.product_id
   JOIN categories cat ON cat.id = p.category_id
+  LEFT JOIN product_sizes ps ON ps.id = oi.product_size_id
   WHERE oi.item_type = 'product' AND o.status = 'COMPLETED' AND date(o.completed_at, '${BUSINESS_DAY_SQL_OFFSET}') BETWEEN ? AND ?
-  GROUP BY p.id
+  GROUP BY p.id, oi.product_size_id
 
   UNION ALL
 
-  SELECT (pf.name || ' ' || ps.name) AS name, 'Pizzas' AS category,
+  SELECT ('Pizza ' || ps.name) AS name, 'Pizzas' AS category,
          SUM(oi.quantity) AS quantity, SUM(oi.quantity * oi.unit_price) AS revenue
   FROM order_items oi
   JOIN orders o ON o.id = oi.order_id
-  JOIN pizza_flavor_counts pfc ON pfc.order_item_id = oi.id AND pfc.flavor_count = 1
-  JOIN order_item_flavors oif ON oif.order_item_id = oi.id
-  JOIN pizza_flavors pf ON pf.id = oif.flavor_id
-  JOIN pizza_sizes ps ON ps.id = oi.pizza_size_id
-  WHERE oi.item_type = 'pizza' AND o.status = 'COMPLETED' AND date(o.completed_at, '${BUSINESS_DAY_SQL_OFFSET}') BETWEEN ? AND ?
-  GROUP BY pf.id, ps.id
-
-  UNION ALL
-
-  SELECT ('Pizza mitad y mitad ' || ps.name) AS name, 'Pizzas' AS category,
-         SUM(oi.quantity) AS quantity, SUM(oi.quantity * oi.unit_price) AS revenue
-  FROM order_items oi
-  JOIN orders o ON o.id = oi.order_id
-  JOIN pizza_flavor_counts pfc ON pfc.order_item_id = oi.id AND pfc.flavor_count > 1
   JOIN pizza_sizes ps ON ps.id = oi.pizza_size_id
   WHERE oi.item_type = 'pizza' AND o.status = 'COMPLETED' AND date(o.completed_at, '${BUSINESS_DAY_SQL_OFFSET}') BETWEEN ? AND ?
   GROUP BY ps.id
@@ -345,7 +344,7 @@ const getProductRankingRows = db.prepare<
 /** All sold products/pizzas, sorted by revenue descending. Menu-sized (dozens of rows), so top/bottom-N by either quantity or revenue is just a client-side slice/re-sort - no separate queries per metric. */
 export function getProducts(resolved: ResolvedRange): ProductsAnalytics {
   const { start, end } = resolved;
-  const rows = getProductRankingRows.all(start, end, start, end, start, end);
+  const rows = getProductRankingRows.all(start, end, start, end);
 
   const products: ProductRanking[] = rows
     .map((r) => ({ name: r.name, category: r.category, quantity: r.quantity, revenue: r.revenue }))
@@ -365,6 +364,75 @@ export function getProducts(resolved: ResolvedRange): ProductsAnalytics {
   return { products, categories };
 }
 
+// ---------- Flavors ----------
+
+// Portion-weighted: a pizza split 50/50 between two flavors contributes half
+// its quantity/revenue to each, rather than the old getProducts behavior of
+// bucketing every split pizza as one opaque "mitad y mitad" row. SQLite's
+// integer division would truncate oif.portion/100 to 0, hence the .0.
+const getPizzaFlavorRows = db.prepare<[string, string], { name: string; quantity: number; revenue: number }>(`
+  SELECT pf.name AS name,
+         SUM(oi.quantity * oif.portion / 100.0) AS quantity,
+         SUM(oi.quantity * oi.unit_price * oif.portion / 100.0) AS revenue
+  FROM order_items oi
+  JOIN orders o ON o.id = oi.order_id
+  JOIN order_item_flavors oif ON oif.order_item_id = oi.id
+  JOIN pizza_flavors pf ON pf.id = oif.flavor_id
+  WHERE oi.item_type = 'pizza' AND o.status = 'COMPLETED' AND date(o.completed_at, '${BUSINESS_DAY_SQL_OFFSET}') BETWEEN ? AND ?
+  GROUP BY pf.id
+`);
+
+// Gratinados and calzones (Pantalón) each take exactly one pizza flavor via
+// order_items.pizza_flavor_id directly - no order_item_flavors/portion
+// involved, so no fractional weighting needed here.
+const getProductFlavorRows = db.prepare<[string, string], { name: string; category: string; quantity: number; revenue: number }>(`
+  SELECT pf.name AS name, cat.key AS category,
+         SUM(oi.quantity) AS quantity, SUM(oi.quantity * oi.unit_price) AS revenue
+  FROM order_items oi
+  JOIN orders o ON o.id = oi.order_id
+  JOIN pizza_flavors pf ON pf.id = oi.pizza_flavor_id
+  JOIN products p ON p.id = oi.product_id
+  JOIN categories cat ON cat.id = p.category_id
+  WHERE oi.item_type = 'product' AND oi.pizza_flavor_id IS NOT NULL
+    AND o.status = 'COMPLETED' AND date(o.completed_at, '${BUSINESS_DAY_SQL_OFFSET}') BETWEEN ? AND ?
+  GROUP BY pf.id, cat.id
+`);
+
+/**
+ * Most-sold flavors, globally or within one flavor-carrying category
+ * (pizzas/gratinados/calzones - see FlavorAnalyticsCategory). Unfiltered,
+ * the same flavor name sold across several categories (e.g. "Napolitana" as
+ * both a pizza and a gratinado) is combined into one total, since the point
+ * is "how popular is this flavor", not "how popular is this flavor within
+ * this specific category" unless the caller asked for that.
+ */
+export function getFlavors(resolved: ResolvedRange, category?: FlavorAnalyticsCategory): FlavorAnalytics {
+  const { start, end } = resolved;
+  const totals = new Map<string, { quantity: number; revenue: number }>();
+  const add = (name: string, quantity: number, revenue: number) => {
+    const existing = totals.get(name) ?? { quantity: 0, revenue: 0 };
+    existing.quantity += quantity;
+    existing.revenue += revenue;
+    totals.set(name, existing);
+  };
+
+  if (!category || category === 'pizzas') {
+    for (const r of getPizzaFlavorRows.all(start, end)) add(r.name, r.quantity, r.revenue);
+  }
+  if (!category || category === 'gratinados' || category === 'calzones') {
+    for (const r of getProductFlavorRows.all(start, end)) {
+      if (category && r.category !== category) continue;
+      add(r.name, r.quantity, r.revenue);
+    }
+  }
+
+  const flavors: FlavorRanking[] = Array.from(totals.entries())
+    .map(([flavor, t]) => ({ flavor, quantity: Math.round(t.quantity * 100) / 100, revenue: Math.round(t.revenue) }))
+    .sort((a, b) => b.revenue - a.revenue);
+
+  return { flavors };
+}
+
 // ---------- Customers ----------
 
 const TOP_CUSTOMERS_LIMIT = 15;
@@ -375,7 +443,7 @@ const getTopCustomersRows = db.prepare<
 >(`
   SELECT c.id AS id, c.name AS name, c.phone AS phone,
          COUNT(DISTINCT o.id) AS order_count,
-         COALESCE(SUM(op.gross_amount - op.tip_amount - op.discount), 0) AS spend
+         COALESCE(SUM(${NET_SALES_SQL}), 0) AS spend
   FROM orders o
   JOIN customers c ON c.id = o.customer_id
   LEFT JOIN order_payments op ON op.order_id = o.id
@@ -423,7 +491,7 @@ const getEmployeePerformanceRows = db.prepare<
 >(`
   SELECT e.id AS id, e.name AS name, e.is_active AS is_active,
          COUNT(DISTINCT o.id) AS order_count,
-         COALESCE(SUM(op.gross_amount - op.tip_amount - op.discount), 0) AS sales
+         COALESCE(SUM(${NET_SALES_SQL}), 0) AS sales
   FROM orders o
   JOIN employees e ON e.id = o.employee_id
   LEFT JOIN order_payments op ON op.order_id = o.id

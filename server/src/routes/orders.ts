@@ -5,6 +5,7 @@ import {
   completeOrder,
   reprintOrderDocument,
   addOrderItems,
+  removeOrderItem,
   deleteOrder,
   updateOrderTable,
   updateOrderCustomer,
@@ -56,6 +57,16 @@ router.post('/:id/items', (req, res, next) => {
   try {
     const order = addOrderItems(parseOrderId(req.params.id), req.body?.items);
     notifyPrintQueue();
+    res.json(order);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/:id/items/:itemId', async (req, res, next) => {
+  try {
+    const itemId = parseOrderId(req.params.itemId);
+    const order = await removeOrderItem(parseOrderId(req.params.id), itemId);
     res.json(order);
   } catch (err) {
     next(err);

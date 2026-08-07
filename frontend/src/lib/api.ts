@@ -10,6 +10,8 @@ import type {
   EmployeePerformance,
   HeatmapCell,
   ProductsAnalytics,
+  FlavorAnalytics,
+  FlavorAnalyticsCategory,
   PromoUsageSummary,
   SalesBreakdown,
   SalesSummary,
@@ -289,6 +291,8 @@ export const fetchOrdersPage = async (filter: FetchOrdersFilter, page: number, p
 };
 export const fetchOrder = (id: number) => get<Order>(`/orders/${id}`);
 export const addOrderItems = (id: number, items: unknown[]) => post<Order>(`/orders/${id}/items`, { items });
+/** Removes a single item from an order that isn't COMPLETED yet - a customer changing their mind before the check. See orderService.removeOrderItem. */
+export const removeOrderItem = (id: number, itemId: number) => del<Order>(`/orders/${id}/items/${itemId}`);
 export const completeOrder = (id: number, payments?: PaymentSplitRequest[]) => post<Order>(`/orders/${id}/complete`, { payments });
 /** Public, no auth required. Replaces a COMPLETED order's payment split wholesale - same total-coverage validation as completeOrder, just correcting the record after the fact instead of setting it for the first time. */
 export const updateOrderPayments = (id: number, payments: PaymentSplitRequest[]) => put<Order>(`/orders/${id}/payments`, { payments });
@@ -349,6 +353,10 @@ export const fetchAnalyticsHeatmap = (range: AnalyticsRange, from?: string, to?:
   get<HeatmapCell[]>(`/analytics/heatmap?${rangeQuery(range, from, to)}`);
 export const fetchAnalyticsProducts = (range: AnalyticsRange, from?: string, to?: string) =>
   get<ProductsAnalytics>(`/analytics/products?${rangeQuery(range, from, to)}`);
+export const fetchAnalyticsFlavors = (range: AnalyticsRange, category?: FlavorAnalyticsCategory, from?: string, to?: string) => {
+  const query = rangeQuery(range, from, to);
+  return get<FlavorAnalytics>(`/analytics/flavors?${query}${category ? `&category=${category}` : ''}`);
+};
 export const fetchAnalyticsCustomers = (range: AnalyticsRange, from?: string, to?: string) =>
   get<CustomersAnalytics>(`/analytics/customers?${rangeQuery(range, from, to)}`);
 export const fetchAnalyticsEmployees = (range: AnalyticsRange, from?: string, to?: string) =>

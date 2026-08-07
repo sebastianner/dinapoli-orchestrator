@@ -106,6 +106,11 @@ function migrate(): void {
   // matching order_payments.method CHECK, which needs a table rebuild instead
   // of a plain ensureColumn since SQLite can't ALTER a CHECK in place.
   ensureColumn("closing_reports", "rappi_sales", "INTEGER NOT NULL DEFAULT 0");
+  // Itemized cash_expenses rows for the closed date, frozen as JSON at
+  // closing time - same snapshot reasoning as cash_in_register/total_expenses
+  // above (old reports predate cash_expenses' per-item detail entirely, so
+  // this can't be backfilled; they just show an empty list).
+  ensureColumn("closing_reports", "expenses_detail", "TEXT NOT NULL DEFAULT '[]'");
   ensureColumn(
     "orders",
     "promo_type",

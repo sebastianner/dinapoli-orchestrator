@@ -295,8 +295,8 @@ function ReportDetail({
         />
         <StatCard
           label="Efectivo final en caja"
-          value={formatCOP(report.cashInRegister + report.cashSales)}
-          tooltip="Base de caja del día + ventas en efectivo del día. Es el efectivo que debería haber físicamente en la caja al cierre."
+          value={formatCOP(report.cashSales - report.totalExpenses)}
+          tooltip="Ventas en efectivo del día menos los gastos del día. No incluye la base de caja - es el ingreso y los pasivos del día, no lo que debería haber físicamente en la caja (eso se ve en la página de Caja)."
         />
         <StatCard label="Ventas en tarjeta" value={formatCOP(report.cardSales)} />
         <StatCard label="Ventas en transferencia" value={formatCOP(report.transferSales)} />
@@ -306,6 +306,20 @@ function ReportDetail({
         <StatCard label="Descuentos" value={formatCOP(report.discounts)} tone="danger" />
         <StatCard label="Gastos totales" value={formatCOP(report.totalExpenses)} tone="danger" />
       </div>
+
+      {report.expensesDetail.length > 0 && (
+        <div className="mb-6 rounded-2xl border border-border bg-surface p-4">
+          <h2 className="mb-3 font-semibold text-text-primary">Gastos del día</h2>
+          <ul className="flex flex-col divide-y divide-border">
+            {report.expensesDetail.map((expense, i) => (
+              <li key={i} className="flex items-center justify-between gap-3 py-2 text-sm">
+                <span className="flex-1 text-text-primary">{expense.justification}</span>
+                <span className="font-medium text-danger">{formatCOP(expense.amount)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <HourlyBars orders={orders} />
     </>

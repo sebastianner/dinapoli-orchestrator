@@ -487,6 +487,7 @@ CREATE TABLE IF NOT EXISTS closing_reports (
   takeaway_order_count   INTEGER NOT NULL DEFAULT 0,
   total_expenses         INTEGER NOT NULL,
   cash_in_register       INTEGER NOT NULL DEFAULT 0,
+  expenses_detail        TEXT NOT NULL DEFAULT '[]',
   content                TEXT NOT NULL,
   created_at             TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );

@@ -2,7 +2,7 @@ import db from '../db/index.js';
 import { NotFoundError, ConflictError } from '../utils/errors.js';
 import { currentBusinessDateBogota, BUSINESS_DAY_SQL_OFFSET } from '../utils/date.js';
 import { printPlainText, formatMoney, centerText, toAsciiText, RECEIPT_WIDTH, formatTimeCO } from './printerService.js';
-import type { ClosingReport } from '../types/dinapoly-types.js';
+import type { ClosingReport, ClosingReportExpenseDetail } from '../types/dinapoly-types.js';
 import type { ClosingReportRow } from '../types/db.js';
 
 function rowToClosingReport(row: ClosingReportRow): ClosingReport {
@@ -20,6 +20,7 @@ function rowToClosingReport(row: ClosingReportRow): ClosingReport {
     tips: row.tips,
     discounts: row.discounts,
     totalExpenses: row.total_expenses,
+    expensesDetail: JSON.parse(row.expenses_detail) as ClosingReportExpenseDetail[],
     itemsSold: row.items_sold,
     customersServed: row.customers_served,
     deliveryOrderCount: row.delivery_order_count,
@@ -112,7 +113,12 @@ export function aggregateSales(date: string): SalesAggregate {
 
     let salesAmount = 0;
     for (const p of getPaymentsForOrder.all(row.id)) {
-      const net = p.gross_amount - p.tip_amount - p.discount;
+      // Cash tips are handed straight to staff and never touch the
+      // register, so they stay excluded from income (same as before). Tips
+      // paid by card, transfer, or Rappi pass through the register/bank, so
+      // they now count as income and stay IN the method's net instead of
+      // being subtracted out - only cash's net still strips the tip.
+      const net = p.method === 'cash' ? p.gross_amount - p.tip_amount - p.discount : p.gross_amount - p.discount;
       addMethodSales(p.method, net);
       salesAmount += net;
       agg.tips += p.tip_amount;
@@ -137,6 +143,21 @@ function expensesForDate(date: string): number {
   return getExpensesForDate.get(date)?.total ?? 0;
 }
 
+// Itemized version of expensesForDate above - one row per cash_expenses entry
+// recorded against this business day's cash_flow period, for printing/showing
+// the breakdown (reason + amount) rather than just the aggregate total.
+const getCashExpenseDetailsForDate = db.prepare<[string], { amount: number; justification: string; created_at: string }>(
+  `SELECT ce.amount AS amount, ce.justification AS justification, ce.created_at AS created_at
+   FROM cash_expenses ce
+   JOIN cash_flow cf ON cf.id = ce.cash_flow_id
+   WHERE cf.date = ?
+   ORDER BY ce.id`
+);
+
+function expenseDetailsForDate(date: string): ClosingReportExpenseDetail[] {
+  return getCashExpenseDetailsForDate.all(date).map((r) => ({ amount: r.amount, justification: r.justification, createdAt: r.created_at }));
+}
+
 const getCashInRegisterForDate = db.prepare<[string], { cash_in_register: number }>(
   'SELECT cash_in_register FROM cash_flow WHERE date = ?'
 );
@@ -152,7 +173,7 @@ function moneyRow(label: string, amount: number, width: number): string {
   return `${label}${' '.repeat(padding)}${value}`;
 }
 
-function renderClosingReceipt(date: string, sales: SalesAggregate, totalExpenses: number, cashInRegister: number): string {
+function renderClosingReceipt(date: string, sales: SalesAggregate, totalExpenses: number, expensesDetail: ClosingReportExpenseDetail[]): string {
   const width = RECEIPT_WIDTH;
   const lines: string[] = [];
 
@@ -182,8 +203,10 @@ function renderClosingReceipt(date: string, sales: SalesAggregate, totalExpenses
   lines.push(moneyRow('Mesa / Para llevar', sales.dineInTakeawaySales, width));
   lines.push('-'.repeat(width));
   lines.push(centerText('VENTAS POR METODO DE PAGO', width));
-  // Net of tips and discounts already (see aggregateSales) - the real money
-  // collected via each method, same figures shown as "Ventas en X" in the UI.
+  // Discounts always subtracted; tips only for cash (handed straight to
+  // staff, never touch the register). Card/transfer/Rappi tips pass through
+  // the register/bank, so they stay IN these figures as income - see
+  // aggregateSales. Same figures shown as "Ventas en X" in the UI.
   lines.push(moneyRow('Ventas en efectivo', sales.cashSales, width));
   lines.push(moneyRow('Ventas en tarjeta', sales.cardSales, width));
   lines.push(moneyRow('Ventas en transferencia', sales.transferSales, width));
@@ -192,23 +215,36 @@ function renderClosingReceipt(date: string, sales: SalesAggregate, totalExpenses
   lines.push(moneyRow('TOTAL VENTAS', sales.totalSales, width));
   lines.push(moneyRow('Propinas', sales.tips, width));
   lines.push(moneyRow('Descuentos', sales.discounts, width));
-  lines.push(moneyRow('Gastos del dia', totalExpenses, width));
   lines.push('-'.repeat(width));
-  // Base de caja del dia + ventas en efectivo - lo que deberia haber en la
-  // caja al cierre (ver cashFlowService.getCurrentCashFlow).
-  lines.push(moneyRow('Efectivo final en caja', cashInRegister + sales.cashSales, width));
+  lines.push(centerText('GASTOS DEL DIA', width));
+  if (expensesDetail.length === 0) {
+    lines.push('Sin gastos registrados');
+  } else {
+    for (const expense of expensesDetail) {
+      lines.push(moneyRow(expense.justification, expense.amount, width));
+    }
+  }
+  lines.push(moneyRow('Total gastos', totalExpenses, width));
+  lines.push('-'.repeat(width));
+  // Deliberately excludes the base de caja (cash_flow.cash_in_register) -
+  // this is meant to read as "cash income and passives for the day", not
+  // "what should be physically in the drawer" (that figure - base + cash
+  // sales - is what the live Caja page shows instead). Ventas en efectivo
+  // already has cash tips stripped out, so subtracting today's expenses is
+  // the only adjustment needed here.
+  lines.push(moneyRow('Efectivo final en caja', sales.cashSales - totalExpenses, width));
   lines.push('='.repeat(width));
 
   return toAsciiText(lines.join('\n'));
 }
 
 const insertClosingReport = db.prepare<
-  [string, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, string]
+  [string, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, string, string]
 >(
   `INSERT INTO closing_reports
      (date, order_count, delivery_sales, dine_in_takeaway_sales, cash_sales, card_sales, transfer_sales, rappi_sales, total_sales, tips, discounts,
-      items_sold, customers_served, delivery_order_count, dine_in_order_count, takeaway_order_count, total_expenses, cash_in_register, content)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      items_sold, customers_served, delivery_order_count, dine_in_order_count, takeaway_order_count, total_expenses, cash_in_register, expenses_detail, content)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 );
 const getClosingReportRow = db.prepare<[number], ClosingReportRow>('SELECT * FROM closing_reports WHERE id = ?');
 const listClosingReportRows = db.prepare<[], ClosingReportRow>('SELECT * FROM closing_reports ORDER BY id DESC');
@@ -230,8 +266,9 @@ const getOpenOrders = db.prepare<[], { id: number; business_day: string }>(
 /**
  * Generates today's (Bogota business day) End-of-Day closing report: gathers
  * every COMPLETED order for the day, categorizes sales by order type and
- * payment method (tips excluded, delivery fees included), pulls the day's
- * total expenses from cash_flow, persists the snapshot, and prints it. Always
+ * payment method (cash tips excluded, card/transfer/Rappi tips included as
+ * income, delivery fees included), pulls the day's itemized expenses from
+ * cash_expenses, persists the snapshot, and prints it. Always
  * an explicit staff action - see cash_flow's schema comment for why the daily
  * register rotation itself is automatic while this is not. Any employee can
  * call this (see routes/endOfDay.ts) as long as every one of today's orders
@@ -258,8 +295,9 @@ export async function closeDay(): Promise<ClosingReport> {
 
   const sales = aggregateSales(date);
   const totalExpenses = expensesForDate(date);
+  const expensesDetail = expenseDetailsForDate(date);
   const cashInRegister = cashInRegisterForDate(date);
-  const content = renderClosingReceipt(date, sales, totalExpenses, cashInRegister);
+  const content = renderClosingReceipt(date, sales, totalExpenses, expensesDetail);
 
   const { lastInsertRowid } = insertClosingReport.run(
     date,
@@ -280,6 +318,7 @@ export async function closeDay(): Promise<ClosingReport> {
     sales.takeawayOrderCount,
     totalExpenses,
     cashInRegister,
+    JSON.stringify(expensesDetail),
     content
   );
 

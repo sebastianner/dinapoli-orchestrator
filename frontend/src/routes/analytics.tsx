@@ -10,6 +10,7 @@ import {
   useAnalyticsBreakdown,
   useAnalyticsHeatmap,
   useAnalyticsProducts,
+  useAnalyticsFlavors,
   useAnalyticsCustomers,
   useAnalyticsEmployees,
   useAnalyticsPromotions,
@@ -21,7 +22,7 @@ import { RankedBarList } from '@/components/analytics/RankedBarList';
 import { DonutChart } from '@/components/analytics/DonutChart';
 import { BusyHeatmap } from '@/components/analytics/BusyHeatmap';
 import { RangeSwitcher } from '@/components/analytics/RangeSwitcher';
-import type { AnalyticsRange } from '@/types/api';
+import type { AnalyticsRange, FlavorAnalyticsCategory } from '@/types/api';
 
 export const Route = createFileRoute('/analytics')({
   beforeLoad: () => {
@@ -55,6 +56,13 @@ const PAYMENT_COLORS: Record<string, string> = {
 
 // Visually distinct (not just brand-shade steps, which read as one flat
 // color once 3+ categories share the ring) - reuses existing semantic tokens.
+const FLAVOR_CATEGORY_LABELS: Record<'all' | FlavorAnalyticsCategory, string> = {
+  all: 'Todas las categorías',
+  pizzas: 'Pizzas',
+  gratinados: 'Gratinados',
+  calzones: 'Pantalón',
+};
+
 const CATEGORY_COLORS = [
   'var(--color-brand-500)',
   'var(--color-success)',
@@ -279,6 +287,49 @@ function ProductosTab({ range, from, to }: TabProps) {
           }))}
         />
       </div>
+      <FlavorsSection range={range} from={from} to={to} />
+    </div>
+  );
+}
+
+/** Most-sold flavors, with a category filter (pizzas/gratinados/calzones/all) on top of the tab's own time-window filter - see analyticsService.getFlavors. Separate from the products ranking above: pizzas there are collapsed to category+size only, with flavor detail living exclusively here instead. */
+function FlavorsSection({ range, from, to }: TabProps) {
+  const [category, setCategory] = useState<FlavorAnalyticsCategory | undefined>(undefined);
+  const { data, isLoading } = useAnalyticsFlavors(range, category, from, to);
+
+  const byRevenue = data ? [...data.flavors].sort((a, b) => b.revenue - a.revenue).slice(0, 8) : [];
+  const byQuantity = data ? [...data.flavors].sort((a, b) => b.quantity - a.quantity).slice(0, 8) : [];
+
+  return (
+    <div className="rounded-2xl border border-border bg-surface p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-text-secondary">Sabores más vendidos</h3>
+        <select
+          value={category ?? 'all'}
+          onChange={(e) => setCategory(e.target.value === 'all' ? undefined : (e.target.value as FlavorAnalyticsCategory))}
+          className="rounded-lg border border-border bg-surface px-2 py-1 text-xs text-text-primary outline-none focus:border-brand-400"
+        >
+          {(['all', 'pizzas', 'gratinados', 'calzones'] as const).map((c) => (
+            <option key={c} value={c}>
+              {FLAVOR_CATEGORY_LABELS[c]}
+            </option>
+          ))}
+        </select>
+      </div>
+      {isLoading || !data ? (
+        <p className="text-sm text-text-secondary">Cargando...</p>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <RankedBarList
+            title="Por ingreso"
+            items={byRevenue.map((f) => ({ label: f.flavor, value: f.revenue, displayValue: formatCOP(f.revenue) }))}
+          />
+          <RankedBarList
+            title="Por cantidad"
+            items={byQuantity.map((f) => ({ label: f.flavor, value: f.quantity, displayValue: f.quantity % 1 === 0 ? String(f.quantity) : f.quantity.toFixed(2) }))}
+          />
+        </div>
+      )}
     </div>
   );
 }

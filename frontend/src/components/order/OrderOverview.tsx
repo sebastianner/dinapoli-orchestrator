@@ -8,9 +8,10 @@ import { useSessionStore } from '@/store/useSessionStore';
 import { useToastStore } from '@/store/useToastStore';
 import { useMenu, useOrder } from '@/lib/queries';
 import { formatCOP } from '@/lib/format';
-import { addOrderItems, printInvoice, updateOrderCustomer } from '@/lib/api';
+import { addOrderItems, printInvoice, removeOrderItem, updateOrderCustomer } from '@/lib/api';
 import { orderSocketClient } from '@/lib/orderSocket';
 import { PaymentModal } from '@/components/order/PaymentModal';
+import { RemoveOrderItemModal } from '@/components/order/RemoveOrderItemModal';
 import { CustomerInfoModal } from '@/components/table/CustomerInfoModal';
 import { PROMO_LABELS } from '@/lib/promos';
 import { groupOrderItems } from '@/lib/pricing';
@@ -58,6 +59,8 @@ export function OrderOverview() {
   const [discountOpen, setDiscountOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [printingInvoice, setPrintingInvoice] = useState(false);
+  const [removingItemIds, setRemovingItemIds] = useState<Set<number>>(new Set());
+  const [itemToRemove, setItemToRemove] = useState<{ itemId: number; description: string } | null>(null);
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [customerModalOpen, setCustomerModalOpen] = useState(false);
   // Desktop keeps this docked open (see the `md:` classes below) - this only
@@ -173,6 +176,30 @@ export function OrderOverview() {
       pushToast(err instanceof Error ? err.message : 'No se pudieron agregar los productos', 'error');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  /**
+   * Removes one already-submitted item (the last order_items row folded into
+   * its displayed group - see GroupedOrderItem.itemIds) from the current
+   * order. Only shown/callable while the order isn't COMPLETED yet. Left to
+   * throw on failure rather than toasting here - RemoveOrderItemModal (its
+   * only caller, gating this behind a confirmation) shows the error inline
+   * and keeps itself open, same as DeleteOrderModal/DeleteProductModal.
+   */
+  const handleRemoveOrderItem = async (itemId: number) => {
+    if (!existingOrder) return;
+    setRemovingItemIds((prev) => new Set(prev).add(itemId));
+    try {
+      const updated = await removeOrderItem(existingOrder.id, itemId);
+      upsertActiveOrder(updated);
+      await mutate(`/orders/${existingOrder.id}`, updated, { revalidate: false });
+    } finally {
+      setRemovingItemIds((prev) => {
+        const next = new Set(prev);
+        next.delete(itemId);
+        return next;
+      });
     }
   };
 
@@ -322,17 +349,38 @@ export function OrderOverview() {
                 );
               })}
 
-              {committed.plain.map((group) => (
-                <div key={group.key} className="flex items-center justify-between gap-2 border-b border-border py-2 text-sm">
-                  <div className="min-w-0">
-                    <p className="truncate text-text-primary">
-                      {group.quantity}x {group.description}
-                    </p>
-                    {group.notes && <p className="truncate text-xs text-text-secondary">{group.notes}</p>}
+              {committed.plain.map((group) => {
+                const lastItemId = group.itemIds[group.itemIds.length - 1];
+                const removing = removingItemIds.has(lastItemId);
+                // An order always needs at least one item - removing its last
+                // one is canceling the order, not editing it (that's the
+                // admin-only delete-order flow, not this button). Mirrors the
+                // server-side guard in orderService.removeOrderItem.
+                const isLastItem = (existingOrder?.items.length ?? 0) <= 1;
+                return (
+                  <div key={group.key} className="flex items-center justify-between gap-2 border-b border-border py-2 text-sm">
+                    <div className="min-w-0">
+                      <p className="truncate text-text-primary">
+                        {group.quantity}x {group.description}
+                      </p>
+                      {group.notes && <p className="truncate text-xs text-text-secondary">{group.notes}</p>}
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <span className="font-medium text-text-secondary">{formatCOP(group.unitPrice * group.quantity)}</span>
+                      <button
+                        type="button"
+                        onClick={() => setItemToRemove({ itemId: lastItemId, description: group.description })}
+                        disabled={removing || isLastItem}
+                        aria-label="Eliminar producto"
+                        title={isLastItem ? 'La orden necesita al menos un producto - elimina la orden completa en su lugar' : undefined}
+                        className="cursor-pointer text-text-secondary hover:text-danger disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
                   </div>
-                  <span className="shrink-0 font-medium text-text-secondary">{formatCOP(group.unitPrice * group.quantity)}</span>
-                </div>
-              ))}
+                );
+              })}
 
               {drafted.plain.map((group) => (
                 <CartRow
@@ -464,7 +512,7 @@ export function OrderOverview() {
             disabled={cart.length === 0 || submitting}
             className="mt-1 flex cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-brand-400 py-2 text-sm font-semibold text-brand-600 transition-colors duration-fast hover:bg-brand-500/10 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <Send size={15} /> Agregar productos
+            <Send size={15} /> Agregar o eliminar productos
           </button>
         ) : (
           <button
@@ -508,6 +556,12 @@ export function OrderOverview() {
       {orderType && (
         <CustomerInfoModal open={customerModalOpen} orderType={orderType} onClose={() => setCustomerModalOpen(false)} onSubmit={handleCustomerSubmit} />
       )}
+
+      <RemoveOrderItemModal
+        item={itemToRemove}
+        onClose={() => setItemToRemove(null)}
+        onConfirm={() => handleRemoveOrderItem(itemToRemove!.itemId)}
+      />
       </aside>
     </>
   );

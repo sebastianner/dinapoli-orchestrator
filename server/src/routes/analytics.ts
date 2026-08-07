@@ -6,17 +6,19 @@ import {
   getBreakdown,
   getHeatmap,
   getProducts,
+  getFlavors,
   getCustomers,
   getEmployees,
   getPromotions,
 } from '../services/analyticsService.js';
 import { ValidationError } from '../utils/errors.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
-import type { AnalyticsRange } from '../types/dinapoly-types.js';
+import type { AnalyticsRange, FlavorAnalyticsCategory } from '../types/dinapoly-types.js';
 
 const router = Router();
 
 const VALID_RANGES: AnalyticsRange[] = ['today', 'week', 'month', 'custom'];
+const VALID_FLAVOR_CATEGORIES: FlavorAnalyticsCategory[] = ['pizzas', 'gratinados', 'calzones'];
 
 function parseRange(req: Request) {
   const range = req.query.range;
@@ -50,6 +52,14 @@ router.get('/heatmap', (req, res) => {
 
 router.get('/products', (req, res) => {
   res.json(getProducts(parseRange(req)));
+});
+
+router.get('/flavors', (req, res) => {
+  const categoryParam = req.query.category;
+  if (categoryParam !== undefined && (typeof categoryParam !== 'string' || !VALID_FLAVOR_CATEGORIES.includes(categoryParam as FlavorAnalyticsCategory))) {
+    throw new ValidationError(`categoría inválida '${String(categoryParam)}' - se esperaba uno de ${VALID_FLAVOR_CATEGORIES.join(', ')}`);
+  }
+  res.json(getFlavors(parseRange(req), categoryParam as FlavorAnalyticsCategory | undefined));
 });
 
 router.get('/customers', (req, res) => {

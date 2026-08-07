@@ -4,7 +4,15 @@ import { markTableBusy, refreshTableStatus, tableExists } from './tableService.j
 import { processPayment } from './paymentService.js';
 import type { PaymentSplit, Payment } from './paymentService.js';
 import { printBill, renderBillHtml } from './billingService.js';
-import { reprintJob, printDeliveryComandaCopy, hasSavedBill, updateSavedBill, printBillHtml, deletePrintJob } from './printerService.js';
+import {
+  reprintJob,
+  printDeliveryComandaCopy,
+  hasSavedBill,
+  updateSavedBill,
+  printBillHtml,
+  deletePrintJob,
+  printKitchenTicketRemoval,
+} from './printerService.js';
 import { getEmployeeById } from './employeeService.js';
 import { getCustomerById } from './customerService.js';
 import { getPromoSettings } from './promoSettingsService.js';
@@ -1036,6 +1044,74 @@ export function addOrderItems(id: number, items: unknown): Order {
   })();
 
   broadcastOrderUpdate(id);
+  return getOrderById(id);
+}
+
+const deleteOrderItemStmt = db.prepare<[number, number]>('DELETE FROM order_items WHERE id = ? AND order_id = ?');
+
+/**
+ * Removes a single item from an order that hasn't been completed yet (a
+ * customer changing their mind before the check). Same status guard as
+ * addOrderItems - deleting from a COMPLETED order would desync it from its
+ * already-recorded payments. Recomputes orders.total by subtracting the
+ * item's own quantity*unitPrice (mirrors addToOrderTotal's addition), and
+ * invalidates any saved bill preview exactly like adding an item does, since
+ * the table no longer matches what was last shown/printed.
+ *
+ * If the item's kitchen ticket already printed (printedAt set - the kitchen
+ * has paper with it on already), a short cancellation notice prints instead
+ * of silently vanishing it - see printKitchenTicketRemoval. An item that
+ * hasn't printed yet just disappears; the kitchen never saw it, so there's
+ * nothing to un-tell them, and the queue worker will print exactly the
+ * remaining items on its next pass.
+ */
+export async function removeOrderItem(id: number, itemId: number): Promise<Order> {
+  const order = getOrderById(id);
+  if (!ADDABLE_ITEM_STATUSES.has(order.status)) {
+    throw new ConflictError(
+      `la orden ${id} no puede eliminar ítems desde el estado ${order.status} (debe ser PENDING, PRINTING o ACTIVE)`
+    );
+  }
+  // An order always has at least one item - removing its last one isn't
+  // "editing the order", it's canceling it, which is deleteOrder's job (and
+  // is admin-gated, unlike this endpoint). Checked on item count, not total
+  // quantity: a single row with quantity 3 is still the order's only item.
+  if (order.items.length <= 1) {
+    throw new ConflictError(
+      `la orden ${id} solo tiene ${order.items.length} ítem - no se puede quedar sin productos; usa eliminar la orden completa en su lugar`
+    );
+  }
+  const item = order.items.find((i) => i.id === itemId);
+  if (!item) {
+    throw new NotFoundError(`el ítem ${itemId} no existe en la orden ${id}`);
+  }
+  // A promo's price is fixed for its whole group at creation time (see
+  // orders.promo_type's comment) - pulling one item out from under it would
+  // leave the promo's flat price on record for a now-incomplete combo, with
+  // no way to recompute what it should charge instead. Removing a promo
+  // item means canceling the promo entirely, which isn't this endpoint.
+  if (item.promoGroup != null) {
+    throw new ValidationError(`el ítem ${itemId} es parte de una promoción y no se puede eliminar individualmente`);
+  }
+  const wasPrinted = item.printedAt != null;
+  const removedTotal = item.unitPrice * item.quantity;
+
+  db.transaction(() => {
+    deleteOrderItemStmt.run(itemId, id);
+    addToOrderTotal.run(-removedTotal, id);
+    deletePrintJob(id, 'bill');
+  })();
+
+  broadcastOrderUpdate(id);
+
+  if (wasPrinted) {
+    try {
+      await printKitchenTicketRemoval(getOrderById(id), item);
+    } catch (err) {
+      console.error(`[kitchen] failed to print removal notice for order ${id} item ${itemId}:`, (err as Error).message);
+    }
+  }
+
   return getOrderById(id);
 }
 

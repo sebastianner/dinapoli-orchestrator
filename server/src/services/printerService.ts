@@ -876,6 +876,56 @@ export async function printKitchenTicketAddendum(
   savePrintJob(order.id, "kitchen_ticket", renderKitchenTicket(order));
 }
 
+/**
+ * A short "cancel this item" notice for an item removed from an order that
+ * had already printed (see orderService.removeOrderItem) - paper that's
+ * already on the kitchen line can't be un-printed, so this tells staff to
+ * stop preparing/discard it instead. Not needed (and never called) for an
+ * item removed before its ticket ever went out - deleting the row is enough
+ * there, since the kitchen never saw it in the first place.
+ */
+export function renderKitchenTicketRemoval(
+  order: Order,
+  removedItem: OrderItem,
+): string {
+  const width = TICKET_TEXT_WIDTH;
+  const lines: string[] = [];
+  const pushLabeled = (label: string, value: string) =>
+    lines.push(...wordWrap(`${label}: ${value}`, width));
+
+  lines.push(centerText("DINAPOLI PIZZA", width));
+  lines.push(centerText("ITEM ELIMINADO", width));
+  lines.push(`Orden #${order.id}`);
+  lines.push(boldText(describeOrderType(order.orderType)));
+  if (order.tableNumber) lines.push(boldText(`Mesa: ${order.tableNumber}`));
+  if (order.customerName) pushLabeled("Cliente", order.customerName);
+  lines.push("-".repeat(width));
+  for (const item of groupItemsForTicket([removedItem])) {
+    const [firstLine, ...restLines] = describeItemTicketLines(item, width - 3);
+    lines.push(`${item.quantity}x ${firstLine}`);
+    for (const line of restLines) lines.push(`   ${line}`);
+  }
+  lines.push("-".repeat(width));
+  lines.push(boldText("NO PREPARAR"));
+  lines.push("=".repeat(width));
+  return toAsciiText(lines.join("\n"));
+}
+
+export async function printKitchenTicketRemoval(
+  order: Order,
+  removedItem: OrderItem,
+): Promise<void> {
+  const text = renderKitchenTicketRemoval(order, removedItem);
+  await writeToDevice(buildTextPayload(text, KITCHEN_TICKET_ADDENDUM_COPIES), KITCHEN_PRINTER_QUEUE);
+  console.log(
+    `[printer:thermal-80mm] printed kitchen ticket removal notice for order ${order.id} (item ${removedItem.id})`,
+  );
+  // Same reasoning as printKitchenTicketAddendum's trailing save: the saved
+  // 'kitchen_ticket' snapshot must shrink to match, since a later reprint or
+  // delivery counter-printer copy sends that saved copy, not this notice.
+  savePrintJob(order.id, "kitchen_ticket", renderKitchenTicket(order));
+}
+
 // ---------------------------------------------------------------------------
 // HTML -> rasterized image printing (bill)
 // ---------------------------------------------------------------------------

@@ -200,6 +200,8 @@ export interface GroupedOrderItem {
   unitPrice: number;
   quantity: number;
   promoGroup: number | null;
+  /** The underlying order_items rows folded into this display row, in the order they were added - each is its own DELETE /orders/:id/items/:itemId target (a row's own `quantity` may be >1, so removing one id can drop the displayed quantity by more than 1). */
+  itemIds: number[];
 }
 
 /** Collapses repeated additions of the same item (same ref + notes + price + promo group) into one row with a summed quantity. */
@@ -210,6 +212,7 @@ export function groupOrderItems(menu: Menu | undefined, items: OrderItem[]): Gro
     const existing = groups.get(key);
     if (existing) {
       existing.quantity += item.quantity;
+      existing.itemIds.push(item.id);
     } else {
       groups.set(key, {
         key,
@@ -218,6 +221,7 @@ export function groupOrderItems(menu: Menu | undefined, items: OrderItem[]): Gro
         unitPrice: item.unitPrice,
         quantity: item.quantity,
         promoGroup: item.promoGroup,
+        itemIds: [item.id],
       });
     }
   }

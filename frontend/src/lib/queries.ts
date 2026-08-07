@@ -5,6 +5,7 @@ import {
   fetchAnalyticsBreakdown,
   fetchAnalyticsCustomers,
   fetchAnalyticsEmployees,
+  fetchAnalyticsFlavors,
   fetchAnalyticsHeatmap,
   fetchAnalyticsProducts,
   fetchAnalyticsPromotions,
@@ -34,7 +35,7 @@ import {
   suggestBuildingNames,
   type FetchOrdersFilter,
 } from '@/lib/api';
-import type { AnalyticsRange } from '@/types/api';
+import type { AnalyticsRange, FlavorAnalyticsCategory } from '@/types/api';
 
 // Rarely-changing data: cached with SWR instead of re-fetched on every mount.
 // Active orders are handled separately (see useOrderStore) since they change
@@ -184,6 +185,11 @@ export function useAnalyticsHeatmap(range: AnalyticsRange, from?: string, to?: s
 
 export function useAnalyticsProducts(range: AnalyticsRange, from?: string, to?: string) {
   return useSWR(analyticsKey('products', range, from, to), () => fetchAnalyticsProducts(range, from, to));
+}
+
+export function useAnalyticsFlavors(range: AnalyticsRange, category?: FlavorAnalyticsCategory, from?: string, to?: string) {
+  const key = `${analyticsKey('flavors', range, from, to)}&category=${category ?? 'all'}`;
+  return useSWR(key, () => fetchAnalyticsFlavors(range, category, from, to));
 }
 
 export function useAnalyticsCustomers(range: AnalyticsRange, from?: string, to?: string) {

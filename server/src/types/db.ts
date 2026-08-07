@@ -251,6 +251,8 @@ export interface ClosingReportRow {
   takeaway_order_count: number;
   total_expenses: number;
   cash_in_register: number;
+  /** JSON-encoded ClosingReportExpenseDetail[]. */
+  expenses_detail: string;
   content: string;
   created_at: string;
 }
