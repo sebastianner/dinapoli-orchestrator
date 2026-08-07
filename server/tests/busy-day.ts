@@ -279,7 +279,7 @@ async function main() {
   await Promise.all(toGrow.map(async (p) => {
     const extra = [randomProduct()];
     const before = (await client.get(`/api/orders/${p.id}`)).body;
-    const r = await client.post(`/api/orders/${p.id}/items`, { items: extra });
+    const r = await client.patch(`/api/orders/${p.id}/items`, { addItems: extra });
     if (r.status !== 200) { growFailures++; return; }
     const addedExpected = expectedProductPrice(extra[0].category, extra[0].product) * extra[0].quantity;
     if (r.body.total !== before.total + addedExpected) {

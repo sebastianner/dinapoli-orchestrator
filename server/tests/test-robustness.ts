@@ -48,7 +48,7 @@ async function main() {
   for (let round = 0; round < 5; round++) {
     const o = await place(dineIn([pizza('small', [{ flavor: 'margherita', portion: 100 }])])); // 34000
     const [addRes, payRes] = await Promise.all([
-      admin.post(`/api/orders/${o.id}/items`, { items: [product('drinks', 'soft_drink', { drinkFlavor: 'agua' })] }), // +5000
+      admin.patch(`/api/orders/${o.id}/items`, { addItems: [product('drinks', 'soft_drink', { drinkFlavor: 'agua' })] }), // +5000
       staff.post(`/api/orders/${o.id}/complete`, { payments: [{ method: 'cash', grossAmount: 34000 }] }),
     ]);
     const after = (await admin.get(`/api/orders/${o.id}`)).body;
@@ -109,7 +109,7 @@ async function main() {
   const openMoney: Case[] = [
     { name: 'GET /api/orders (whole order book incl. payments)', run: (c) => c.get('/api/orders') },
     { name: 'GET /api/orders/:id', run: (c) => c.get(`/api/orders/${target.id}`) },
-    { name: 'POST /api/orders/:id/items', run: (c) => c.post(`/api/orders/${target.id}/items`, { items: [product('appetizers', 'garlic_bread')] }) },
+    { name: 'PATCH /api/orders/:id/items', run: (c) => c.patch(`/api/orders/${target.id}/items`, { addItems: [product('appetizers', 'garlic_bread')] }) },
     { name: 'POST /api/orders/:id/reprint', run: (c) => c.post(`/api/orders/${target.id}/reprint`, { kind: 'kitchen_ticket' }) },
     { name: 'GET /api/cash-flow/current', run: (c) => c.get('/api/cash-flow/current') },
     { name: 'POST /api/cash-flow/expenses', run: (c) => c.post('/api/cash-flow/expenses', { amount: 1000, justification: 'auditoria' }) },
@@ -151,7 +151,7 @@ async function main() {
   section('G. Malformed input handling');
   const junk = [
     ['POST /api/orders/:id/complete with a string body', await anon.post(`/api/orders/${target.id}/complete`, { payments: 'todo' })],
-    ['POST /api/orders/:id/items with null', await anon.post(`/api/orders/${target.id}/items`, { items: null })],
+    ['PATCH /api/orders/:id/items with null', await anon.patch(`/api/orders/${target.id}/items`, { addItems: null })],
     ['GET /api/orders?date=garbage', await anon.get('/api/orders?date=nope')],
     ['GET /api/orders?pageSize=99999', await anon.get('/api/orders?pageSize=99999')],
     ['GET /api/orders/:id with a non-numeric id', await anon.get('/api/orders/abc')],

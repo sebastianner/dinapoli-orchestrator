@@ -8,13 +8,13 @@ import { useSessionStore } from '@/store/useSessionStore';
 import { useToastStore } from '@/store/useToastStore';
 import { useMenu, useOrder } from '@/lib/queries';
 import { formatCOP } from '@/lib/format';
-import { addOrderItems, printInvoice, removeOrderItem, updateOrderCustomer } from '@/lib/api';
+import { editOrderItems, printInvoice, updateOrderCustomer } from '@/lib/api';
 import { orderSocketClient } from '@/lib/orderSocket';
 import { PaymentModal } from '@/components/order/PaymentModal';
 import { RemoveOrderItemModal } from '@/components/order/RemoveOrderItemModal';
 import { CustomerInfoModal } from '@/components/table/CustomerInfoModal';
 import { PROMO_LABELS } from '@/lib/promos';
-import { groupOrderItems } from '@/lib/pricing';
+import { groupOrderItems, type GroupedOrderItem } from '@/lib/pricing';
 import { useOrderNotificationStore } from '@/store/useOrderNotificationStore';
 import type { Order, PromoType } from '@/types/api';
 
@@ -59,8 +59,13 @@ export function OrderOverview() {
   const [discountOpen, setDiscountOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [printingInvoice, setPrintingInvoice] = useState(false);
-  const [removingItemIds, setRemovingItemIds] = useState<Set<number>>(new Set());
-  const [itemToRemove, setItemToRemove] = useState<{ itemId: number; description: string } | null>(null);
+  // Items staged for removal from an already-submitted order - purely local
+  // until "Agregar o eliminar productos" is confirmed (see performEdit), same
+  // staging idea as `cart` for additions. Tapping a trash icon hides the item
+  // from the list instantly (no round trip); the actual removal only fires on
+  // confirm, in the same editOrderItems call as any staged additions.
+  const [pendingRemovalIds, setPendingRemovalIds] = useState<number[]>([]);
+  const [confirmRemovalOpen, setConfirmRemovalOpen] = useState(false);
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [customerModalOpen, setCustomerModalOpen] = useState(false);
   // Desktop keeps this docked open (see the `md:` classes below) - this only
@@ -74,6 +79,25 @@ export function OrderOverview() {
 
   const shouldShow = currentOrderId != null || cart.length > 0;
   if (!shouldShow) return null;
+
+  // Items staged for removal (pendingRemovalIds) are excluded before
+  // grouping, not after - that's what makes a trash tap take the row out of
+  // the list instantly, the same way an emptied cart group disappears,
+  // without waiting on a round trip. groupOrderItems re-derives quantity
+  // from whatever raw rows remain, so this is correct even when one row's
+  // own `quantity` is >1 (see GroupedOrderItem.itemIds' doc comment).
+  const visibleItems = (existingOrder?.items ?? []).filter((item) => !pendingRemovalIds.includes(item.id));
+  const committed = bucketByPromoGroup(groupOrderItems(menu, visibleItems));
+  const drafted = bucketByPromoGroup(groupCartItems(cart));
+  const promoGroupIndexes = [...new Set([...committed.promoGroups.keys(), ...drafted.promoGroups.keys()])].sort((a, b) => a - b);
+  // Grouped (not one row per raw id) purely for a cleaner confirmation list -
+  // "2x Coca-Cola" instead of two separate lines.
+  const pendingRemovalGroups = existingOrder
+    ? groupOrderItems(
+        menu,
+        existingOrder.items.filter((item) => pendingRemovalIds.includes(item.id))
+      )
+    : [];
 
   const orderType = existingOrder?.orderType ?? newOrderInfo?.orderType;
   const isDelivery = orderType === 'delivery';
@@ -160,46 +184,48 @@ export function OrderOverview() {
     }
   };
 
-  const handleAddToExistingOrder = async () => {
-    if (!existingOrder || cart.length === 0) return;
+  /**
+   * Sends whichever of the two edits are actually staged - added cart items,
+   * removed items, or both - as one combined request (see
+   * orderService.editOrderItems; a mixed edit prints as one kitchen ticket,
+   * not two). Left to throw on failure rather than toasting here - callers
+   * decide how to surface it (handleSendClick toasts directly for the
+   * no-confirmation pure-addition path; RemoveOrderItemModal shows it inline
+   * and stays open instead, same as DeleteOrderModal/DeleteProductModal).
+   */
+  const performEdit = async () => {
+    if (!existingOrder) return;
+    const updated = await editOrderItems(
+      existingOrder.id,
+      cart.length > 0 ? cart.map((item) => item.request) : undefined,
+      pendingRemovalIds.length > 0 ? pendingRemovalIds : undefined,
+    );
+    upsertActiveOrder(updated);
+    await mutate(`/orders/${existingOrder.id}`, updated, { revalidate: false });
+    setPendingRemovalIds([]);
+    clearCart();
+  };
+
+  /**
+   * "Agregar o eliminar productos" - if anything is staged for removal, that
+   * needs a confirmation first (RemoveOrderItemModal, which reviews the whole
+   * batch and calls performEdit itself on confirm). A pure addition (nothing
+   * staged for removal) skips the modal entirely and sends right away, same
+   * low-friction behavior this button always had before removal existed.
+   */
+  const handleSendClick = async () => {
+    if (pendingRemovalIds.length > 0) {
+      setConfirmRemovalOpen(true);
+      return;
+    }
     setSubmitting(true);
     try {
-      const updated = await addOrderItems(
-        existingOrder.id,
-        cart.map((item) => item.request),
-      );
-      upsertActiveOrder(updated);
-      await mutate(`/orders/${existingOrder.id}`, updated, { revalidate: false });
-      clearCart();
+      await performEdit();
       pushToast('Productos agregados a la orden');
     } catch (err) {
       pushToast(err instanceof Error ? err.message : 'No se pudieron agregar los productos', 'error');
     } finally {
       setSubmitting(false);
-    }
-  };
-
-  /**
-   * Removes one already-submitted item (the last order_items row folded into
-   * its displayed group - see GroupedOrderItem.itemIds) from the current
-   * order. Only shown/callable while the order isn't COMPLETED yet. Left to
-   * throw on failure rather than toasting here - RemoveOrderItemModal (its
-   * only caller, gating this behind a confirmation) shows the error inline
-   * and keeps itself open, same as DeleteOrderModal/DeleteProductModal.
-   */
-  const handleRemoveOrderItem = async (itemId: number) => {
-    if (!existingOrder) return;
-    setRemovingItemIds((prev) => new Set(prev).add(itemId));
-    try {
-      const updated = await removeOrderItem(existingOrder.id, itemId);
-      upsertActiveOrder(updated);
-      await mutate(`/orders/${existingOrder.id}`, updated, { revalidate: false });
-    } finally {
-      setRemovingItemIds((prev) => {
-        const next = new Set(prev);
-        next.delete(itemId);
-        return next;
-      });
     }
   };
 
@@ -312,14 +338,8 @@ export function OrderOverview() {
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-3">
-        {(() => {
-          const committed = bucketByPromoGroup(groupOrderItems(menu, existingOrder?.items ?? []));
-          const drafted = bucketByPromoGroup(groupCartItems(cart));
-          const groupIndexes = [...new Set([...committed.promoGroups.keys(), ...drafted.promoGroups.keys()])].sort((a, b) => a - b);
-
-          return (
-            <>
-              {groupIndexes.map((groupIndex) => {
+        <>
+              {promoGroupIndexes.map((groupIndex) => {
                 const promoMeta = existingOrder?.promos.find((p) => p.group === groupIndex);
                 const type = promoMeta?.type ?? finalizedPromos[groupIndex];
                 if (!type) return null;
@@ -350,35 +370,22 @@ export function OrderOverview() {
               })}
 
               {committed.plain.map((group) => {
-                const lastItemId = group.itemIds[group.itemIds.length - 1];
-                const removing = removingItemIds.has(lastItemId);
                 // An order always needs at least one item - removing its last
                 // one is canceling the order, not editing it (that's the
                 // admin-only delete-order flow, not this button). Mirrors the
-                // server-side guard in orderService.removeOrderItem.
-                const isLastItem = (existingOrder?.items.length ?? 0) <= 1;
+                // server-side guard in orderService.editOrderItems. Checked
+                // against visibleItems (already net of every other staged
+                // removal), not the raw order, so staging a second/third
+                // removal correctly disables once only one item is left.
                 return (
-                  <div key={group.key} className="flex items-center justify-between gap-2 border-b border-border py-2 text-sm">
-                    <div className="min-w-0">
-                      <p className="truncate text-text-primary">
-                        {group.quantity}x {group.description}
-                      </p>
-                      {group.notes && <p className="truncate text-xs text-text-secondary">{group.notes}</p>}
-                    </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      <span className="font-medium text-text-secondary">{formatCOP(group.unitPrice * group.quantity)}</span>
-                      <button
-                        type="button"
-                        onClick={() => setItemToRemove({ itemId: lastItemId, description: group.description })}
-                        disabled={removing || isLastItem}
-                        aria-label="Eliminar producto"
-                        title={isLastItem ? 'La orden necesita al menos un producto - elimina la orden completa en su lugar' : undefined}
-                        className="cursor-pointer text-text-secondary hover:text-danger disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    </div>
-                  </div>
+                  <CommittedItemRow
+                    key={group.key}
+                    group={group}
+                    disableRemoveOne={visibleItems.length <= 1}
+                    disableRemoveAll={visibleItems.length - group.itemIds.length < 1}
+                    onStageOne={() => setPendingRemovalIds((prev) => [...prev, group.itemIds[group.itemIds.length - 1]])}
+                    onStageAll={() => setPendingRemovalIds((prev) => [...prev, ...group.itemIds])}
+                  />
                 );
               })}
 
@@ -390,9 +397,7 @@ export function OrderOverview() {
                   onRemoveAll={() => removeCartItems(group.clientIds)}
                 />
               ))}
-            </>
-          );
-        })()}
+        </>
 
         {!existingOrder && cart.length === 0 && <p className="py-6 text-center text-sm text-text-secondary">Agrega productos del menú</p>}
       </div>
@@ -508,11 +513,11 @@ export function OrderOverview() {
         {existingOrder ? (
           <button
             type="button"
-            onClick={handleAddToExistingOrder}
-            disabled={cart.length === 0 || submitting}
+            onClick={handleSendClick}
+            disabled={(cart.length === 0 && pendingRemovalIds.length === 0) || submitting}
             className="mt-1 flex cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-brand-400 py-2 text-sm font-semibold text-brand-600 transition-colors duration-fast hover:bg-brand-500/10 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <Send size={15} /> Agregar productos
+            <Send size={15} /> Agregar o eliminar productos
           </button>
         ) : (
           <button
@@ -558,9 +563,16 @@ export function OrderOverview() {
       )}
 
       <RemoveOrderItemModal
-        item={itemToRemove}
-        onClose={() => setItemToRemove(null)}
-        onConfirm={() => handleRemoveOrderItem(itemToRemove!.itemId)}
+        open={confirmRemovalOpen}
+        items={pendingRemovalGroups.map((group) => ({
+          key: group.key,
+          description: group.quantity > 1 ? `${group.quantity}x ${group.description}` : group.description,
+        }))}
+        onClose={() => setConfirmRemovalOpen(false)}
+        onConfirm={async () => {
+          await performEdit();
+          pushToast('Orden actualizada');
+        }}
       />
       </aside>
     </>
@@ -696,6 +708,85 @@ function CartRow({ group, onRemoveOne, onRemoveAll, bare }: { group: GroupedCart
           aria-label={group.quantity > 1 ? 'Quitar uno (mantén presionado para quitar todos)' : 'Quitar producto'}
           title={group.quantity > 1 ? 'Mantener para borrar todo' : undefined}
           className="cursor-pointer text-text-secondary hover:text-danger"
+        >
+          <Trash2 size={15} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * An already-submitted order item. Tap the trash icon to stage one unit for
+ * removal - purely local (see pendingRemovalIds in OrderOverview), the row
+ * just disappears from the list instantly, same as CartRow's onRemoveOne;
+ * nothing is sent to the server until the whole staged batch is confirmed.
+ * Hold it to stage the entire group at once, same long-press pattern as
+ * CartRow's onRemoveAll.
+ */
+function CommittedItemRow({
+  group,
+  disableRemoveOne,
+  disableRemoveAll,
+  onStageOne,
+  onStageAll,
+}: {
+  group: GroupedOrderItem;
+  disableRemoveOne: boolean;
+  disableRemoveAll: boolean;
+  onStageOne: () => void;
+  onStageAll: () => void;
+}) {
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressFiredRef = useRef(false);
+
+  const startPress = () => {
+    if (disableRemoveAll) return;
+    longPressFiredRef.current = false;
+    timerRef.current = setTimeout(() => {
+      longPressFiredRef.current = true;
+      onStageAll();
+    }, LONG_PRESS_MS);
+  };
+  const cancelPress = () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+  };
+  const handleClick = () => {
+    if (longPressFiredRef.current) {
+      longPressFiredRef.current = false;
+      return;
+    }
+    if (!disableRemoveOne) onStageOne();
+  };
+
+  return (
+    <div className="flex items-center justify-between gap-2 border-b border-border py-2 text-sm">
+      <div className="min-w-0">
+        <p className="truncate text-text-primary">
+          {group.quantity}x {group.description}
+        </p>
+        {group.notes && <p className="truncate text-xs text-text-secondary">{group.notes}</p>}
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <span className="font-medium text-text-secondary">{formatCOP(group.unitPrice * group.quantity)}</span>
+        <button
+          type="button"
+          onMouseDown={startPress}
+          onMouseUp={cancelPress}
+          onMouseLeave={cancelPress}
+          onTouchStart={startPress}
+          onTouchEnd={cancelPress}
+          onClick={handleClick}
+          disabled={disableRemoveOne}
+          aria-label="Eliminar producto"
+          title={
+            disableRemoveOne
+              ? 'La orden necesita al menos un producto - elimina la orden completa en su lugar'
+              : group.quantity > 1
+                ? 'Mantén presionado para quitar todos'
+                : undefined
+          }
+          className="cursor-pointer text-text-secondary hover:text-danger disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Trash2 size={15} />
         </button>

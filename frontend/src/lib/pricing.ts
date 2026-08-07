@@ -200,7 +200,7 @@ export interface GroupedOrderItem {
   unitPrice: number;
   quantity: number;
   promoGroup: number | null;
-  /** The underlying order_items rows folded into this display row, in the order they were added - each is its own DELETE /orders/:id/items/:itemId target (a row's own `quantity` may be >1, so removing one id can drop the displayed quantity by more than 1). */
+  /** The underlying order_items rows folded into this display row, in the order they were added - each is its own id to include in an editOrderItems removeItemIds batch (a row's own `quantity` may be >1, so removing one id can drop the displayed quantity by more than 1). */
   itemIds: number[];
 }
 

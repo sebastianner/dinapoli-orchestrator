@@ -4,8 +4,7 @@ import {
   listOrders,
   completeOrder,
   reprintOrderDocument,
-  addOrderItems,
-  removeOrderItem,
+  editOrderItems,
   deleteOrder,
   updateOrderTable,
   updateOrderCustomer,
@@ -53,20 +52,16 @@ router.post('/:id/complete', async (req, res, next) => {
   }
 });
 
-router.post('/:id/items', (req, res, next) => {
+// One combined endpoint for editing an order's items - add some, remove
+// some, or both at once (see orderService.editOrderItems; addItems and
+// removeItemIds are each optional, at least one must be non-empty). Only
+// ever needed for a non-completed order - see routes/orders.ts's other
+// order-level endpoints (deleteOrder etc.) for the separate, admin-gated
+// whole-order actions, which this doesn't touch.
+router.patch('/:id/items', async (req, res, next) => {
   try {
-    const order = addOrderItems(parseOrderId(req.params.id), req.body?.items);
+    const order = await editOrderItems(parseOrderId(req.params.id), req.body);
     notifyPrintQueue();
-    res.json(order);
-  } catch (err) {
-    next(err);
-  }
-});
-
-router.delete('/:id/items/:itemId', async (req, res, next) => {
-  try {
-    const itemId = parseOrderId(req.params.itemId);
-    const order = await removeOrderItem(parseOrderId(req.params.id), itemId);
     res.json(order);
   } catch (err) {
     next(err);

@@ -14,9 +14,11 @@ const POLL_INTERVAL_MS = 2000;
 // already committed them, so recovery is just: on every tick (including the very
 // first one at boot) re-scan for PENDING or PRINTING rows and (re)print them.
 // A row stuck in PRINTING (process died mid-print) is retried exactly the same
-// way a fresh PENDING row would be. Items added to an already-ACTIVE order (see
-// orderService.addOrderItems) bounce it back to PENDING, landing it back in
-// this same scan.
+// way a fresh PENDING row would be. An edit to an already-ACTIVE order (see
+// orderService.editOrderItems) usually prints its own combined ticket
+// synchronously without ever touching this queue - only when the order isn't
+// ACTIVE yet, or that synchronous print fails, does it bounce back to
+// PENDING, landing it back in this same scan.
 const getPendingOrPrinting = db.prepare<
   [],
   { id: number; status: OrderStatus }
@@ -55,10 +57,12 @@ async function processOrder(id: number): Promise<void> {
   const order = getOrderById(id);
   const newItems = order.items.filter((item) => item.printedAt == null);
   // If some items already have printed_at set, the original kitchen ticket
-  // already went out and this row is back here because addOrderItems bounced
-  // it to PENDING - print only the addition. Otherwise this is the order's
-  // first pass through the queue: print the full ticket (which is every
-  // current item, since none of them have printed yet).
+  // already went out and this row is back here because an edit
+  // (orderService.editOrderItems) bounced it to PENDING - the order wasn't
+  // ACTIVE yet when the edit landed, or its own synchronous print failed -
+  // print only the addition. Otherwise this is the order's first pass
+  // through the queue: print the full ticket (every current item, since none
+  // of them have printed yet).
   const isAddition = order.items.length > newItems.length;
   try {
     if (isAddition) {

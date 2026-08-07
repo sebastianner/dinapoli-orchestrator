@@ -312,14 +312,18 @@ CREATE TABLE IF NOT EXISTS order_promos (
   UNIQUE (order_id, sequence)
 );
 
--- printed_at is NULL until the queue worker includes this item in a kitchen
--- ticket. Items added to an order that's already ACTIVE (see
--- orderService.addOrderItems) come in with it NULL too, and flip the order's
--- status back to PENDING so the same PENDING/PRINTING queue pass that
--- printed the original ticket picks it up again - the worker tells "first
--- ticket" from "addition" apart by whether any of the order's items already
--- have printed_at set (queueService.processOrder), printing an addendum
--- (new items only) in the latter case instead of the whole order again.
+-- printed_at is NULL until it's actually gone out on a kitchen ticket. For
+-- the order's original items that's the queue worker's job (see
+-- queueService.processOrder); for items added later via an edit to an
+-- already-ACTIVE order (see orderService.editOrderItems), it's stamped
+-- directly there instead, since that edit prints its own ticket
+-- synchronously rather than waiting on the queue. Only when the order isn't
+-- ACTIVE yet (its very first ticket still in flight) or that synchronous
+-- print fails does an edit fall back to leaving new items NULL and bouncing
+-- the order back to PENDING, landing them in the same queue pass - which
+-- tells "first ticket" from "addition" apart by whether any of the order's
+-- items already have printed_at set, printing an addendum (new items only)
+-- in the latter case instead of the whole order again.
 CREATE TABLE IF NOT EXISTS order_items (
   id                INTEGER PRIMARY KEY AUTOINCREMENT,
   order_id          INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
@@ -341,14 +345,14 @@ CREATE TABLE IF NOT EXISTS order_items (
   -- distinguishable from a regular item's price. printerService.promoBasePrice
   -- used to guess (max price / first pizza) and printed the wrong figure on
   -- the kitchen ticket whenever a pricier extra item shared the order.
-  -- Always 0 for items added later via addOrderItems - a promo is fixed at
-  -- creation (see orders.promo_type).
+  -- Always 0 for items added later via an edit (orderService.editOrderItems) -
+  -- a promo is fixed at creation (see orders.promo_type).
   promo_item        INTEGER NOT NULL DEFAULT 0 CHECK (promo_item IN (0, 1)),
   -- Which of the order's (possibly several) promo instances this item
   -- belongs to, or NULL for a normally-priced item. References order_promos,
   -- not orders.promo_type directly, since an order can carry more than one
   -- promo (see order_promos above). Always NULL for items added later via
-  -- addOrderItems, same as promo_item.
+  -- an edit, same as promo_item.
   promo_group_id    INTEGER REFERENCES order_promos(id),
   printed_at        TEXT
 );

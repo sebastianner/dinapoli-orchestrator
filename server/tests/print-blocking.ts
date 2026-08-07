@@ -154,7 +154,7 @@ async function main() {
     const id = placed.order!.id;
     // Land the addition inside the print window.
     await sleep(Math.min(120, Math.max(20, DELAY / 4)));
-    const added = await client.post(`/api/orders/${id}/items`, { items: [product('desserts', 'ice_cream')] });
+    const added = await client.patch(`/api/orders/${id}/items`, { addItems: [product('desserts', 'ice_cream')] });
     check('the item is accepted mid-print', added.status === 200, JSON.stringify(added.body).slice(0, 160));
 
     const final = await waitForStatus(client, id, 'ACTIVE', 120000);

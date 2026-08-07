@@ -821,12 +821,16 @@ export async function printKitchenTicket(order: Order): Promise<void> {
 }
 
 /**
- * A short "addition" ticket for items added to an order that's already
- * ACTIVE (see orderService.addOrderItems) - lists only the newly added
- * items, since the kitchen already has the original items cooking/plated.
- * Retry safety on printer failure comes from order_items.printed_at / the
- * order bouncing back through PENDING, not from a saved copy of *this*
- * rendering - see printKitchenTicketAddendum below for what does get saved.
+ * A short "addition" ticket for new items on an order the queue worker is
+ * (re)printing - lists only the newly added items, since the kitchen already
+ * has the original items cooking/plated. Only reached via the queue now
+ * (order bounced to PENDING) rather than the common case for an edit - see
+ * orderService.editOrderItems, which prints its own combined ticket
+ * synchronously whenever the order is already ACTIVE and only falls back to
+ * this queue path otherwise. Retry safety on printer failure comes from
+ * order_items.printed_at / the order bouncing back through PENDING, not from
+ * a saved copy of *this* rendering - see printKitchenTicketAddendum below
+ * for what does get saved.
  */
 export function renderKitchenTicketAddendum(
   order: Order,
@@ -877,16 +881,74 @@ export async function printKitchenTicketAddendum(
 }
 
 /**
- * A short "cancel this item" notice for an item removed from an order that
- * had already printed (see orderService.removeOrderItem) - paper that's
- * already on the kitchen line can't be un-printed, so this tells staff to
- * stop preparing/discard it instead. Not needed (and never called) for an
- * item removed before its ticket ever went out - deleting the row is enough
- * there, since the kitchen never saw it in the first place.
+ * Which menu category an item belongs to, for grouping a ticket's item list
+ * under category headers - "Pizzas" for a pizza (not a real `categories`
+ * row, they're modeled separately from products), the resolved Spanish
+ * category name otherwise.
  */
-export function renderKitchenTicketRemoval(
+function categoryNameForItem(item: OrderItem): string {
+  if (item.pizzaRef) return "Pizzas";
+  const ref = item.menuItemRef!;
+  return getCategoryName.get(ref.category)?.name ?? ref.category;
+}
+
+/**
+ * Same idea as describeItemTicketLines, but omits the leading category name -
+ * for use under a category header that's already been printed once above
+ * several items, instead of repeating it on every line (see
+ * pushCategorizedItems below).
+ */
+function describeItemTicketLinesNoCategory(item: OrderItem, width: number): string[] {
+  if (item.pizzaRef) return describeItemTicketLines(item, width);
+  const ref = item.menuItemRef!;
+  const productName = getProductName.get(ref.category, ref.product)?.name ?? ref.product;
+  const bits = [productName];
+  if (ref.size) bits.push(`(${getProductSizeName.get(ref.product, ref.size)?.name ?? ref.size})`);
+  if (ref.drinkFlavor) bits.push(`- ${getDrinkFlavorName.get(ref.drinkFlavor)?.name ?? ref.drinkFlavor}`);
+  if (ref.pizzaFlavor) bits.push(`- sabor: ${getPizzaFlavorName.get(ref.pizzaFlavor)?.name ?? ref.pizzaFlavor}`);
+  return wordWrap(bits.join(" "), width);
+}
+
+/**
+ * Prints one ticket section: a bold category header line above that
+ * category's items, repeated per category present - instead of one flat
+ * list with the category folded into every line. `items` is grouped
+ * (groupItemsForTicket) first so repeat additions still combine into one
+ * "Nx ..." line the same as the main ticket does.
+ */
+function pushCategorizedItems(lines: string[], items: OrderItem[], width: number): void {
+  const byCategory = new Map<string, OrderItem[]>();
+  for (const item of groupItemsForTicket(items)) {
+    const category = categoryNameForItem(item);
+    const bucket = byCategory.get(category);
+    if (bucket) bucket.push(item);
+    else byCategory.set(category, [item]);
+  }
+  for (const [category, categoryItems] of byCategory) {
+    lines.push(boldText(category.toUpperCase()));
+    for (const item of categoryItems) {
+      const [firstLine, ...restLines] = describeItemTicketLinesNoCategory(item, width - 3);
+      lines.push(`${item.quantity}x ${firstLine}`);
+      for (const line of restLines) lines.push(`   ${line}`);
+      if (item.notes) {
+        for (const line of wordWrap(`nota: ${item.notes}`, width - 3)) lines.push(`   ${line}`);
+      }
+    }
+  }
+}
+
+/**
+ * One ticket for an order edit (see orderService.editOrderItems) - added
+ * items, removed items, or both at once, each its own clearly-labeled
+ * section (a mixed edit gets ONE physical slip, not two). Whichever removed
+ * items had already printed get a "NO PREPARAR" section; an item removed
+ * before its ticket ever went out isn't included here at all - deleting the
+ * row is enough there, since the kitchen never saw it in the first place.
+ */
+export function renderKitchenTicketEdit(
   order: Order,
-  removedItem: OrderItem,
+  addedItems: OrderItem[],
+  removedItems: OrderItem[],
 ): string {
   const width = TICKET_TEXT_WIDTH;
   const lines: string[] = [];
@@ -894,35 +956,41 @@ export function renderKitchenTicketRemoval(
     lines.push(...wordWrap(`${label}: ${value}`, width));
 
   lines.push(centerText("DINAPOLI PIZZA", width));
-  lines.push(centerText("ITEM ELIMINADO", width));
+  lines.push(centerText("EDICION DE COMANDA", width));
   lines.push(`Orden #${order.id}`);
   lines.push(boldText(describeOrderType(order.orderType)));
   if (order.tableNumber) lines.push(boldText(`Mesa: ${order.tableNumber}`));
   if (order.customerName) pushLabeled("Cliente", order.customerName);
-  lines.push("-".repeat(width));
-  for (const item of groupItemsForTicket([removedItem])) {
-    const [firstLine, ...restLines] = describeItemTicketLines(item, width - 3);
-    lines.push(`${item.quantity}x ${firstLine}`);
-    for (const line of restLines) lines.push(`   ${line}`);
+
+  if (addedItems.length > 0) {
+    lines.push("-".repeat(width));
+    lines.push(centerText("AGREGADOS", width));
+    pushCategorizedItems(lines, addedItems, width);
   }
-  lines.push("-".repeat(width));
-  lines.push(boldText("NO PREPARAR"));
+
+  if (removedItems.length > 0) {
+    lines.push("-".repeat(width));
+    lines.push(centerText(removedItems.length > 1 ? "ELIMINADOS - NO PREPARAR" : "ELIMINADO - NO PREPARAR", width));
+    pushCategorizedItems(lines, removedItems, width);
+  }
+
   lines.push("=".repeat(width));
   return toAsciiText(lines.join("\n"));
 }
 
-export async function printKitchenTicketRemoval(
+export async function printKitchenTicketEdit(
   order: Order,
-  removedItem: OrderItem,
+  addedItems: OrderItem[],
+  removedItems: OrderItem[],
 ): Promise<void> {
-  const text = renderKitchenTicketRemoval(order, removedItem);
+  const text = renderKitchenTicketEdit(order, addedItems, removedItems);
   await writeToDevice(buildTextPayload(text, KITCHEN_TICKET_ADDENDUM_COPIES), KITCHEN_PRINTER_QUEUE);
   console.log(
-    `[printer:thermal-80mm] printed kitchen ticket removal notice for order ${order.id} (item ${removedItem.id})`,
+    `[printer:thermal-80mm] printed kitchen ticket edit for order ${order.id} (+${addedItems.length}/-${removedItems.length})`,
   );
   // Same reasoning as printKitchenTicketAddendum's trailing save: the saved
-  // 'kitchen_ticket' snapshot must shrink to match, since a later reprint or
-  // delivery counter-printer copy sends that saved copy, not this notice.
+  // 'kitchen_ticket' snapshot must reflect the edit, since a later reprint or
+  // delivery counter-printer copy sends that saved copy, not this ticket.
   savePrintJob(order.id, "kitchen_ticket", renderKitchenTicket(order));
 }
 
@@ -1189,7 +1257,7 @@ const deletePrintJobStmt = db.prepare<[number, PrintJobKind]>(
   "DELETE FROM print_jobs WHERE order_id = ? AND kind = ?",
 );
 
-/** Clears a saved job so it stops being reprintable and hasSavedBill reports false - used to invalidate a dine-in bill preview once the order it describes has changed (see orderService.addOrderItems). */
+/** Clears a saved job so it stops being reprintable and hasSavedBill reports false - used to invalidate a dine-in bill preview once the order it describes has changed (see orderService.editOrderItems). */
 export function deletePrintJob(orderId: number, kind: PrintJobKind): void {
   deletePrintJobStmt.run(orderId, kind);
 }

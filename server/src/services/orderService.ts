@@ -11,7 +11,7 @@ import {
   updateSavedBill,
   printBillHtml,
   deletePrintJob,
-  printKitchenTicketRemoval,
+  printKitchenTicketEdit,
 } from './printerService.js';
 import { getEmployeeById } from './employeeService.js';
 import { getCustomerById } from './customerService.js';
@@ -983,33 +983,102 @@ const markCompleted = db.prepare<[number]>(
 const ADDABLE_ITEM_STATUSES = new Set<OrderStatus>(['PENDING', 'PRINTING', 'ACTIVE']);
 const addToOrderTotal = db.prepare<[number, number]>('UPDATE orders SET total = total + ? WHERE id = ?');
 const markOrderPending = db.prepare<[number]>(`UPDATE orders SET status = 'PENDING' WHERE id = ?`);
+const deleteOrderItemStmt = db.prepare<[number, number]>('DELETE FROM order_items WHERE id = ? AND order_id = ?');
+const markOrderItemPrinted = db.prepare<[number]>(
+  `UPDATE order_items SET printed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND printed_at IS NULL`
+);
+
+function validateEditOrderItemsInput(input: unknown): { addItems: OrderItemRequest[]; removeItemIds: number[] } {
+  if (!input || typeof input !== 'object') {
+    throw new ValidationError('el cuerpo de la solicitud debe ser un objeto');
+  }
+  const body = input as { addItems?: unknown; removeItemIds?: unknown };
+  const addItems = body.addItems ?? [];
+  const removeItemIds = body.removeItemIds ?? [];
+  if (!Array.isArray(addItems)) {
+    throw new ValidationError('addItems debe ser un arreglo');
+  }
+  if (!Array.isArray(removeItemIds)) {
+    throw new ValidationError('removeItemIds debe ser un arreglo');
+  }
+  if (addItems.length === 0 && removeItemIds.length === 0) {
+    throw new ValidationError('debe incluir al menos un producto en addItems o removeItemIds');
+  }
+  const uniqueRemoveIds = [...new Set(removeItemIds)];
+  if (!uniqueRemoveIds.every(isPositiveInt)) {
+    throw new ValidationError('removeItemIds debe contener solo números enteros positivos');
+  }
+  return { addItems: addItems as OrderItemRequest[], removeItemIds: uniqueRemoveIds as number[] };
+}
 
 /**
- * Adds items to an order that hasn't been completed yet. If the order is
- * already ACTIVE (its original kitchen ticket already printed), this bounces
- * it back to PENDING so the same queue pass that printed the original ticket
- * picks it up again - queueService.processOrder tells "first ticket" from
- * "addition" apart by whether any of the order's items already have
- * printed_at set, printing an addendum (new items only) in that case instead
- * of the whole order again. The caller (routes/orders.ts) nudges the queue
- * worker afterward so this doesn't wait for the next poll tick.
+ * Edits an order that hasn't been completed yet - adding items, removing
+ * items, or both at once (a customer changing their mind before the check).
+ * `addItems`/`removeItemIds` are each optional; at least one must be
+ * non-empty. Recomputes orders.total by the net of what was added and
+ * removed, and invalidates any saved bill preview, since the table no longer
+ * matches what was last shown/printed.
+ *
+ * Printed as ONE kitchen ticket covering both sides of the edit (see
+ * printerService.printKitchenTicketEdit) rather than two separate documents -
+ * an "AGREGADOS" section for genuinely new items, an "...NO PREPARAR" section
+ * for whichever removed items had already printed (nothing to un-tell the
+ * kitchen about an item it never saw, so an unprinted removal just
+ * disappears silently). Printed synchronously here, not via the async
+ * PENDING/PRINTING queue that addendums used to rely on - EXCEPT when the
+ * order's very first ticket hasn't finished printing yet (status isn't
+ * ACTIVE): printing new items ourselves in that window would race the queue
+ * worker's own still-outstanding print call to the same physical printer, so
+ * they're left unprinted and, same as before, the queue's own recovery pass
+ * picks them up once that original ticket is done (queueService.processOrder
+ * already handles "some items printed, some not" on one order - the only
+ * thing that changed is nothing but order-creation reaches it that way now).
+ * A synchronous print failure falls back to that same queue path rather than
+ * being silently lost.
  */
-export function addOrderItems(id: number, items: unknown): Order {
+export async function editOrderItems(id: number, input: unknown): Promise<Order> {
+  const { addItems, removeItemIds } = validateEditOrderItemsInput(input);
   const order = getOrderById(id);
   if (!ADDABLE_ITEM_STATUSES.has(order.status)) {
     throw new ConflictError(
-      `la orden ${id} no puede aceptar nuevos ítems desde el estado ${order.status} (debe ser PENDING, PRINTING o ACTIVE)`
+      `la orden ${id} no puede editarse desde el estado ${order.status} (debe ser PENDING, PRINTING o ACTIVE)`
     );
   }
-  if (!Array.isArray(items) || items.length === 0) {
-    throw new ValidationError('items debe ser un arreglo no vacío');
+
+  const removedItems = removeItemIds.map((itemId) => {
+    const item = order.items.find((i) => i.id === itemId);
+    if (!item) {
+      throw new NotFoundError(`el ítem ${itemId} no existe en la orden ${id}`);
+    }
+    // A promo's price is fixed for its whole group at creation time (see
+    // orders.promo_type's comment) - pulling one item out from under it would
+    // leave the promo's flat price on record for a now-incomplete combo, with
+    // no way to recompute what it should charge instead. Removing a promo
+    // item means canceling the promo entirely, which isn't this endpoint.
+    if (item.promoGroup != null) {
+      throw new ValidationError(`el ítem ${itemId} es parte de una promoción y no se puede eliminar individualmente`);
+    }
+    return item;
+  });
+  const resolvedNewItems = resolveItems(addItems);
+
+  // An order always has at least one item - removing every one of them
+  // (net of whatever's being added in the same edit) isn't "editing the
+  // order", it's canceling it, which is deleteOrder's job (and is
+  // admin-gated, unlike this endpoint). Checked on item count, not total
+  // quantity: a single row with quantity 3 is still one item.
+  if (order.items.length - removedItems.length + resolvedNewItems.length < 1) {
+    throw new ConflictError(`la orden ${id} no puede quedar sin productos - usa eliminar la orden completa en su lugar`);
   }
 
-  const resolvedItems = resolveItems(items as OrderItemRequest[]);
-  const addedTotal = resolvedItems.reduce((sum, it) => sum + it.unitPrice * it.quantity, 0);
+  const removedTotal = removedItems.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
+  const addedTotal = resolvedNewItems.reduce((sum, it) => sum + it.unitPrice * it.quantity, 0);
+  const printedRemovedItems = removedItems.filter((i) => i.printedAt != null);
+  const printNewItemsNow = order.status === 'ACTIVE' && resolvedNewItems.length > 0;
 
   db.transaction(() => {
-    for (const item of resolvedItems) {
+    for (const item of removedItems) deleteOrderItemStmt.run(item.id, id);
+    for (const item of resolvedNewItems) {
       const itemResult = insertOrderItem.run({
         orderId: id,
         itemType: item.itemType,
@@ -1031,84 +1100,36 @@ export function addOrderItems(id: number, items: unknown): Order {
         insertOrderItemFlavor.run(orderItemId, fp.flavorId, fp.portion);
       }
     }
-    addToOrderTotal.run(addedTotal, id);
-    if (order.status === 'ACTIVE') {
-      markOrderPending.run(id);
-    }
+    addToOrderTotal.run(addedTotal - removedTotal, id);
     // A saved bill (dine-in pre-payment preview, most likely) no longer
-    // matches what's on the table once more items land - clearing it reverts
-    // "Cobrar orden" back to "Ver o imprimir factura" until it's regenerated.
-    // Harmless no-op for takeaway/delivery, which never have one saved yet at
-    // this point (they only ever get billed at completion).
-    deletePrintJob(id, 'bill');
-  })();
-
-  broadcastOrderUpdate(id);
-  return getOrderById(id);
-}
-
-const deleteOrderItemStmt = db.prepare<[number, number]>('DELETE FROM order_items WHERE id = ? AND order_id = ?');
-
-/**
- * Removes a single item from an order that hasn't been completed yet (a
- * customer changing their mind before the check). Same status guard as
- * addOrderItems - deleting from a COMPLETED order would desync it from its
- * already-recorded payments. Recomputes orders.total by subtracting the
- * item's own quantity*unitPrice (mirrors addToOrderTotal's addition), and
- * invalidates any saved bill preview exactly like adding an item does, since
- * the table no longer matches what was last shown/printed.
- *
- * If the item's kitchen ticket already printed (printedAt set - the kitchen
- * has paper with it on already), a short cancellation notice prints instead
- * of silently vanishing it - see printKitchenTicketRemoval. An item that
- * hasn't printed yet just disappears; the kitchen never saw it, so there's
- * nothing to un-tell them, and the queue worker will print exactly the
- * remaining items on its next pass.
- */
-export async function removeOrderItem(id: number, itemId: number): Promise<Order> {
-  const order = getOrderById(id);
-  if (!ADDABLE_ITEM_STATUSES.has(order.status)) {
-    throw new ConflictError(
-      `la orden ${id} no puede eliminar ítems desde el estado ${order.status} (debe ser PENDING, PRINTING o ACTIVE)`
-    );
-  }
-  // An order always has at least one item - removing its last one isn't
-  // "editing the order", it's canceling it, which is deleteOrder's job (and
-  // is admin-gated, unlike this endpoint). Checked on item count, not total
-  // quantity: a single row with quantity 3 is still the order's only item.
-  if (order.items.length <= 1) {
-    throw new ConflictError(
-      `la orden ${id} solo tiene ${order.items.length} ítem - no se puede quedar sin productos; usa eliminar la orden completa en su lugar`
-    );
-  }
-  const item = order.items.find((i) => i.id === itemId);
-  if (!item) {
-    throw new NotFoundError(`el ítem ${itemId} no existe en la orden ${id}`);
-  }
-  // A promo's price is fixed for its whole group at creation time (see
-  // orders.promo_type's comment) - pulling one item out from under it would
-  // leave the promo's flat price on record for a now-incomplete combo, with
-  // no way to recompute what it should charge instead. Removing a promo
-  // item means canceling the promo entirely, which isn't this endpoint.
-  if (item.promoGroup != null) {
-    throw new ValidationError(`el ítem ${itemId} es parte de una promoción y no se puede eliminar individualmente`);
-  }
-  const wasPrinted = item.printedAt != null;
-  const removedTotal = item.unitPrice * item.quantity;
-
-  db.transaction(() => {
-    deleteOrderItemStmt.run(itemId, id);
-    addToOrderTotal.run(-removedTotal, id);
+    // matches what's on the table once the order changes - clearing it
+    // reverts "Cobrar orden" back to "Ver o imprimir factura" until it's
+    // regenerated. Harmless no-op for takeaway/delivery, which never have
+    // one saved yet at this point (they only ever get billed at completion).
     deletePrintJob(id, 'bill');
   })();
 
   broadcastOrderUpdate(id);
 
-  if (wasPrinted) {
+  if (printNewItemsNow || printedRemovedItems.length > 0) {
+    const refreshed = getOrderById(id);
+    // Exactly the rows just inserted above - on an ACTIVE order, nothing
+    // else could still be unprinted.
+    const newlyInsertedItems = printNewItemsNow ? refreshed.items.filter((i) => i.printedAt == null) : [];
     try {
-      await printKitchenTicketRemoval(getOrderById(id), item);
+      await printKitchenTicketEdit(refreshed, newlyInsertedItems, printedRemovedItems);
+      if (newlyInsertedItems.length > 0) {
+        for (const item of newlyInsertedItems) markOrderItemPrinted.run(item.id);
+      }
     } catch (err) {
-      console.error(`[kitchen] failed to print removal notice for order ${id} item ${itemId}:`, (err as Error).message);
+      console.error(`[kitchen] failed to print edit ticket for order ${id}:`, (err as Error).message);
+      // The removal notice (if any) has no automatic retry - same accepted
+      // tradeoff as before. New items, though, can't just be left
+      // unprinted with no way back to the kitchen: bounce to PENDING so
+      // queueService's own retry loop picks them up on its next tick.
+      if (newlyInsertedItems.length > 0) {
+        markOrderPending.run(id);
+      }
     }
   }
 

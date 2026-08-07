@@ -77,14 +77,15 @@ async function main() {
 
   section('B. Addendum ticket for items added mid-service');
   m = currentMarker();
-  await client.post(`/api/orders/${o1.id}/items`, { items: [product('desserts', 'ice_cream', { quantity: 2 })] });
+  await client.patch(`/api/orders/${o1.id}/items`, { addItems: [product('desserts', 'ice_cream', { quantity: 2 })] });
   await waitForStatus(client, o1.id, 'ACTIVE');
   await sleep(600);
   jobs = jobsSince(m);
   eq('adding items prints exactly one more job', jobs.length, 1);
   eq('the addendum goes to the kitchen printer', jobs[0].queue, 'kitchen_printer');
   const t2 = jobs[0].text;
-  check('it is labelled as an addition', t2.includes('ADICION A COMANDA'), t2.slice(0, 200));
+  check('it is labelled as an edit', t2.includes('EDICION DE COMANDA'), t2.slice(0, 200));
+  check('it has an AGREGADOS section', t2.includes('AGREGADOS'), t2);
   check('it lists only the new item', t2.includes('Helado') || t2.includes('Ice'), t2);
   check('it does NOT re-list the original pizza', !t2.includes('Pizza'), t2);
 
@@ -97,16 +98,16 @@ async function main() {
     // still expects to find in a reprint) so this test's own item doesn't
     // interfere with that later assertion.
     const beforeAdd = (await client.get(`/api/orders/${o1.id}`)).body;
-    await client.post(`/api/orders/${o1.id}/items`, { items: [product('appetizers', 'garlic_bread', { quantity: 1 })] });
+    await client.patch(`/api/orders/${o1.id}/items`, { addItems: [product('appetizers', 'garlic_bread', { quantity: 1 })] });
     await waitForStatus(client, o1.id, 'ACTIVE');
     await sleep(600);
     const withExtra = (await client.get(`/api/orders/${o1.id}`)).body;
     const addedItem = withExtra.items.find((i: any) => !beforeAdd.items.some((b: any) => b.id === i.id));
     check('the new item is on the order', !!addedItem, JSON.stringify(withExtra.items.map((i: any) => i.id)));
-    check('the new item already printed (addendum went out)', addedItem?.printedAt != null);
+    check('the new item already printed (edit ticket went out synchronously)', addedItem?.printedAt != null);
 
     m = currentMarker();
-    const del1 = await client.del(`/api/orders/${o1.id}/items/${addedItem.id}`);
+    const del1 = await client.patch(`/api/orders/${o1.id}/items`, { removeItemIds: [addedItem.id] });
     check('removing a printed item succeeds', del1.status === 200, JSON.stringify(del1.body).slice(0, 200));
     eq("order.total drops by exactly the removed item's price", del1.body.total, withExtra.total - addedItem.unitPrice * addedItem.quantity);
     check('the item is gone from the order', !del1.body.items.some((i: any) => i.id === addedItem.id));
@@ -116,7 +117,7 @@ async function main() {
     eq('exactly one removal notice printed', removalJobs.length, 1);
     if (removalJobs.length === 1) {
       eq('it goes to the kitchen printer', removalJobs[0].queue, 'kitchen_printer');
-      check('it is labelled as a removed item', removalJobs[0].text.includes('ITEM ELIMINADO'), removalJobs[0].text.slice(0, 200));
+      check('it is labelled as an edit', removalJobs[0].text.includes('EDICION DE COMANDA'), removalJobs[0].text.slice(0, 200));
       check('it tells the kitchen not to prepare it', removalJobs[0].text.includes('NO PREPARAR'));
     }
 
@@ -135,14 +136,14 @@ async function main() {
       product('pastas', 'alfredo', { promoGroup: 0 }),
     ], { promos: ['duo'] }));
     const promoItem = promoOrder.items.find((i: any) => i.promoGroup != null);
-    const promoGuard = await client.del(`/api/orders/${promoOrder.id}/items/${promoItem.id}`);
+    const promoGuard = await client.patch(`/api/orders/${promoOrder.id}/items`, { removeItemIds: [promoItem.id] });
     check('deleting a promo item is rejected', promoGuard.status === 400, JSON.stringify(promoGuard.body));
 
     // Guardrail: nothing can be removed from a COMPLETED order (it would
     // desync the order from its already-recorded payment).
     const settled = await client.post(`/api/orders/${promoOrder.id}/complete`, { payments: [{ method: 'cash', grossAmount: promoOrder.total }] });
     check('order settles for the completed-order guard test', settled.status === 200, JSON.stringify(settled.body).slice(0, 200));
-    const completedGuard = await client.del(`/api/orders/${promoOrder.id}/items/${settled.body.items[0].id}`);
+    const completedGuard = await client.patch(`/api/orders/${promoOrder.id}/items`, { removeItemIds: [settled.body.items[0].id] });
     check('deleting from a COMPLETED order is rejected', completedGuard.status === 409, JSON.stringify(completedGuard.body));
 
     // Guardrail: an order's last item can't be removed either - that's
@@ -150,7 +151,7 @@ async function main() {
     // the endpoint for that.
     const singleItemOrder = await place(dineIn([product('appetizers', 'garlic_bread', { quantity: 1 })]));
     eq('the fresh order has exactly one item', singleItemOrder.items.length, 1);
-    const lastItemGuard = await client.del(`/api/orders/${singleItemOrder.id}/items/${singleItemOrder.items[0].id}`);
+    const lastItemGuard = await client.patch(`/api/orders/${singleItemOrder.id}/items`, { removeItemIds: [singleItemOrder.items[0].id] });
     check('deleting an order\'s only item is rejected', lastItemGuard.status === 409, JSON.stringify(lastItemGuard.body));
     const stillThere = (await client.get(`/api/orders/${singleItemOrder.id}`)).body;
     eq('the item is still on the order after the rejected delete', stillThere.items.length, 1);
@@ -350,7 +351,7 @@ async function main() {
     await sleep(2500);
     const beforeAdd = (await client.get(`/api/orders/${openOrder.id}`)).body;
     eq('the open order has a saved preview before more items are added', beforeAdd.hasBill, true);
-    await client.post(`/api/orders/${openOrder.id}/items`, { items: [product('drinks', 'soft_drink', { drinkFlavor: 'agua' })] });
+    await client.patch(`/api/orders/${openOrder.id}/items`, { addItems: [product('drinks', 'soft_drink', { drinkFlavor: 'agua' })] });
     await waitForStatus(client, openOrder.id, 'ACTIVE');
     const afterAdd = (await client.get(`/api/orders/${openOrder.id}`)).body;
     eq('adding an item invalidates the saved preview (hasBill reverts false)', afterAdd.hasBill, false);

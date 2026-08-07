@@ -190,7 +190,7 @@ async function main() {
   const afterTwice = (await client.get(`/api/orders/${done.id}`)).body;
   eq('no duplicate payment row after a refused second completion', afterTwice.payments.length, 1);
 
-  const addAfterComplete = await client.post(`/api/orders/${done.id}/items`, { items: [product('appetizers', 'garlic_bread')] });
+  const addAfterComplete = await client.patch(`/api/orders/${done.id}/items`, { addItems: [product('appetizers', 'garlic_bread')] });
   check('adding items to a COMPLETED order is refused', addAfterComplete.status >= 400, JSON.stringify(addAfterComplete.body));
 
   section('I. Correcting an already-recorded payment split');
@@ -212,7 +212,7 @@ async function main() {
 
   section('J. Items added after the bill was already partially built');
   const grow = await newActiveOrder([pizza('small', [{ flavor: 'margherita', portion: 100 }])]); // 34000
-  await client.post(`/api/orders/${grow.id}/items`, { items: [product('drinks', 'soft_drink', { drinkFlavor: 'agua' })] }); // +5000
+  await client.patch(`/api/orders/${grow.id}/items`, { addItems: [product('drinks', 'soft_drink', { drinkFlavor: 'agua' })] }); // +5000
   await waitForStatus(client, grow.id, 'ACTIVE');
   const stale = await client.post(`/api/orders/${grow.id}/complete`, { payments: [{ method: 'cash', grossAmount: 34000 }] });
   check('paying the pre-addition total is refused', stale.status >= 400, JSON.stringify(stale.body));

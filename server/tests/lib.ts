@@ -34,6 +34,7 @@ export class Client {
   get = (p: string) => this.request('GET', p);
   post = (p: string, b?: unknown) => this.request('POST', p, b);
   put = (p: string, b?: unknown) => this.request('PUT', p, b);
+  patch = (p: string, b?: unknown) => this.request('PATCH', p, b);
   del = (p: string, b?: unknown) => this.request('DELETE', p, b);
 
   async loginAdmin(employeeId: number, password: string) {

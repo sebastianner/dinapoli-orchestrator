@@ -48,7 +48,7 @@ function TablesPage() {
       const existingOrder = activeOrders.find((o) => o.tableNumber === table.number);
       if (existingOrder) {
         openExistingOrder(existingOrder.id);
-        pushToast(`La mesa ${table.number} ya está ocupada. Puedes agregar más productos a esa orden.`, 'warning');
+        pushToast(`La mesa ${table.number} ya está ocupada. Puedes agregar o eliminar productos de esa orden.`, 'warning');
         navigate({ to: '/menu' });
         return;
       }

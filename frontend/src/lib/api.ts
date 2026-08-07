@@ -114,7 +114,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 const get = <T>(path: string) => request<T>(path);
 const post = <T>(path: string, body?: unknown) => request<T>(path, { method: 'POST', body: body !== undefined ? JSON.stringify(body) : undefined });
 const put = <T>(path: string, body?: unknown) => request<T>(path, { method: 'PUT', body: JSON.stringify(body) });
-const del = <T>(path: string) => request<T>(path, { method: 'DELETE' });
+const patch = <T>(path: string, body?: unknown) => request<T>(path, { method: 'PATCH', body: body !== undefined ? JSON.stringify(body) : undefined });
+const del = <T>(path: string, body?: unknown) => request<T>(path, { method: 'DELETE', body: body !== undefined ? JSON.stringify(body) : undefined });
 
 // ---------- Menu ----------
 
@@ -290,9 +291,14 @@ export const fetchOrdersPage = async (filter: FetchOrdersFilter, page: number, p
   return { orders, total: Number(res.headers.get('X-Total-Count') ?? orders.length) };
 };
 export const fetchOrder = (id: number) => get<Order>(`/orders/${id}`);
-export const addOrderItems = (id: number, items: unknown[]) => post<Order>(`/orders/${id}/items`, { items });
-/** Removes a single item from an order that isn't COMPLETED yet - a customer changing their mind before the check. See orderService.removeOrderItem. */
-export const removeOrderItem = (id: number, itemId: number) => del<Order>(`/orders/${id}/items/${itemId}`);
+/**
+ * Edits an order that isn't COMPLETED yet - adding items, removing items, or
+ * both at once (a customer changing their mind before the check). Both are
+ * optional; at least one must be non-empty. See orderService.editOrderItems -
+ * a mixed edit prints as one combined kitchen ticket, not two.
+ */
+export const editOrderItems = (id: number, addItems?: unknown[], removeItemIds?: number[]) =>
+  patch<Order>(`/orders/${id}/items`, { addItems, removeItemIds });
 export const completeOrder = (id: number, payments?: PaymentSplitRequest[]) => post<Order>(`/orders/${id}/complete`, { payments });
 /** Public, no auth required. Replaces a COMPLETED order's payment split wholesale - same total-coverage validation as completeOrder, just correcting the record after the fact instead of setting it for the first time. */
 export const updateOrderPayments = (id: number, payments: PaymentSplitRequest[]) => put<Order>(`/orders/${id}/payments`, { payments });

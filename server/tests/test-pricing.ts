@@ -307,17 +307,17 @@ async function main() {
   section('F. Adding items to an open order');
 
   const base = await place('order to grow', dineIn([product('appetizers', 'garlic_bread')]));
-  const add = await client.post(`/api/orders/${base.id}/items`, { items: [product('drinks', 'soft_drink', { drinkFlavor: 'agua', quantity: 2 })] });
+  const add = await client.patch(`/api/orders/${base.id}/items`, { addItems: [product('drinks', 'soft_drink', { drinkFlavor: 'agua', quantity: 2 })] });
   check('adding items returns 200', add.status === 200, JSON.stringify(add.body));
   eq('total grows by exactly the added items', add.body.total, P.garlic_bread + P.soft_drink * 2);
   assertOrderInvariants('after item addition', add.body);
 
-  const addBad = await client.post(`/api/orders/${base.id}/items`, { items: [product('appetizers', 'no_existe')] });
+  const addBad = await client.patch(`/api/orders/${base.id}/items`, { addItems: [product('appetizers', 'no_existe')] });
   check('adding an unknown item is rejected', addBad.status >= 400, JSON.stringify(addBad.body));
   const afterBad = (await client.get(`/api/orders/${base.id}`)).body;
   eq('a rejected addition leaves the total untouched', afterBad.total, P.garlic_bread + P.soft_drink * 2);
 
-  const addEmpty = await client.post(`/api/orders/${base.id}/items`, { items: [] });
+  const addEmpty = await client.patch(`/api/orders/${base.id}/items`, { addItems: [] });
   check('adding an empty array is rejected', addEmpty.status >= 400, JSON.stringify(addEmpty.body));
 
   // -------------------------------------------------------------------------
