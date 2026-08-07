@@ -512,7 +512,7 @@ export function OrderOverview() {
             disabled={cart.length === 0 || submitting}
             className="mt-1 flex cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-brand-400 py-2 text-sm font-semibold text-brand-600 transition-colors duration-fast hover:bg-brand-500/10 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <Send size={15} /> Agregar o eliminar productos
+            <Send size={15} /> Agregar productos
           </button>
         ) : (
           <button
